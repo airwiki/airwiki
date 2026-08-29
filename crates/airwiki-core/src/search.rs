@@ -141,15 +141,19 @@ impl HybridSearchEngine {
     /// filtered to collections explicitly opted into cloud disclosure.
     pub async fn search_local(&self, request: SearchRequest) -> Result<SearchResponse> {
         request.validate()?;
-        let database = self.database.clone();
-        let collections = run_search_blocking("local search scope worker task failed", move || {
-            Ok(database
-                .list_collections()?
-                .into_iter()
-                .map(|collection| collection.id)
-                .collect::<Vec<_>>())
-        })
-        .await?;
+        let collections = if let Some(collections) = request.local_collection_scope() {
+            collections.to_vec()
+        } else {
+            let database = self.database.clone();
+            run_search_blocking("local search scope worker task failed", move || {
+                Ok(database
+                    .list_collections()?
+                    .into_iter()
+                    .map(|collection| collection.id)
+                    .collect::<Vec<_>>())
+            })
+            .await?
+        };
         self.search_collections(request, &collections).await
     }
 
@@ -216,13 +220,10 @@ impl HybridSearchEngine {
         if collections.is_empty() {
             bail!("no requested collection is publicly accessible");
         }
-        let local_request = SearchRequest {
-            protocol_version: airwiki_types::SEARCH_PROTOCOL.to_owned(),
-            request_id: request.request_id,
-            query: request.query,
-            purpose: SearchPurpose::LocalAssistant,
-            top_k: request.top_k,
-        };
+        let mut local_request =
+            SearchRequest::new(request.query, SearchPurpose::LocalAssistant, request.top_k);
+        local_request.protocol_version = airwiki_types::SEARCH_PROTOCOL.to_owned();
+        local_request.request_id = request.request_id;
         let mut response = self.search_collections(local_request, &collections).await?;
         let database = self.database.clone();
         let hits = std::mem::take(&mut response.hits);

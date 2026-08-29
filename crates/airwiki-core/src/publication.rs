@@ -64,7 +64,10 @@ impl OkfPublicationMaterializer {
             .database
             .concept(concept_id)?
             .ok_or_else(|| anyhow!("concept {concept_id} does not exist"))?;
-        if current.status != DocumentStatus::NeedsReview {
+        if !matches!(
+            current.status,
+            DocumentStatus::NeedsReview | DocumentStatus::Excluded
+        ) {
             bail!("concept is not awaiting human review");
         }
         let source = self
@@ -262,7 +265,41 @@ impl OkfPublicationMaterializer {
         // inspector reports the DB/bundle disagreement.
         OkfPublisher::new(&collection.wiki_folder)
             .discard_failed_publication(claim.concept_id, &remaining)?;
-        self.database.finish_publication_cancellation(claim, reason)
+        self.database
+            .finish_publication_cancellation(claim, reason)?;
+        self.restore_draft_after_cancellation(claim)
+    }
+
+    fn restore_draft_after_cancellation(&self, claim: &PublicationClaim) -> Result<()> {
+        let source_matches = source_claim_matches_disk(claim).unwrap_or(false);
+        if !source_matches {
+            self.database.mark_source_failed(
+                claim.source_document_id,
+                "source changed while the reviewed OKF revision was being materialized",
+            )?;
+            return Ok(());
+        }
+        let concept = self
+            .database
+            .concept(claim.concept_id)?
+            .context("cancelled publication concept disappeared")?;
+        let source = self
+            .database
+            .source_document(claim.source_document_id)?
+            .context("cancelled publication source disappeared")?;
+        let collection = self
+            .database
+            .collection(claim.collection_id)?
+            .context("cancelled publication collection disappeared")?;
+        if let Err(error) = OkfPublisher::new(collection.wiki_folder).write_draft(&concept, &source)
+        {
+            self.database.mark_source_failed(
+                claim.source_document_id,
+                format!("could not restore the OKF draft: {error:#}"),
+            )?;
+            return Err(error);
+        }
+        Ok(())
     }
 }
 
@@ -567,7 +604,16 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .status,
-            DocumentStatus::NeedsReview
+            DocumentStatus::Failed
+        );
+        assert_eq!(
+            fixture
+                .database
+                .source_document(claim.source_document_id)
+                .unwrap()
+                .unwrap()
+                .status,
+            DocumentStatus::Failed
         );
         assert!(
             fixture

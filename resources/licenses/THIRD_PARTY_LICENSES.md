@@ -73,7 +73,7 @@ Third-party packages: **702**. Unique legal texts: **389**.
 | cfb | 0.7.3 | MIT | [upstream](https://github.com/mdsteele/rust-cfb) | [ebaac853b53f](#sha256-ebaac853b53fec0ed475796f533ce676912a4df9ad9d8a621fa76d5060591e10) |
 | cfg-if | 1.0.4 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-lang/cfg-if) | [378f5840b258](#sha256-378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | cfg_aliases | 0.2.1 | MIT | [upstream](https://github.com/katharostech/cfg_aliases) | [31b94860253d](#sha256-31b94860253d8ec7b4529f51901044d3b459d6292d996504a36b1bae3a36a812) |
-| chacha20 | 0.10.1 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/stream-ciphers) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [b8c6939380a4](#sha256-b8c6939380a400f53e11923d50fcc4dd2fa1ba8339fd9d04cda38a0251b6c9b0) |
+| chacha20 | 0.10.2 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/stream-ciphers) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [b8c6939380a4](#sha256-b8c6939380a400f53e11923d50fcc4dd2fa1ba8339fd9d04cda38a0251b6c9b0) |
 | chacha20 | 0.9.1 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/stream-ciphers) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [b6f6f01b03ee](#sha256-b6f6f01b03ee7e93c0ae96d62ed39527e98a120fb951afc9de456a741ef3f204) |
 | chacha20poly1305 | 0.10.1 | Apache-2.0 OR MIT | [upstream](https://github.com/RustCrypto/AEADs/tree/master/chacha20poly1305) | [3c0dfa33fd2e](#sha256-3c0dfa33fd2e6976038555b52095699452653b1fcabe113074f14e0848a6b11e), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | chrono | 0.4.45 | MIT OR Apache-2.0 | [upstream](https://github.com/chronotope/chrono) | [2200505ceae3](#sha256-2200505ceae34bd9ff69176a068316956062b8827fe6b5bdb2746362ef638122) |
@@ -19089,7 +19089,7 @@ Used by:
 - `block-buffer 0.12.1 / LICENSE-APACHE`
 - `block-padding 0.4.2 / LICENSE-APACHE`
 - `cbc 0.2.1 / LICENSE-APACHE`
-- `chacha20 0.10.1 / LICENSE-APACHE`
+- `chacha20 0.10.2 / LICENSE-APACHE`
 - `chacha20 0.9.1 / LICENSE-APACHE`
 - `chacha20poly1305 0.10.1 / LICENSE-APACHE`
 - `cipher 0.4.4 / LICENSE-APACHE`
@@ -21273,7 +21273,7 @@ DEALINGS IN THE SOFTWARE.
 
 Used by:
 
-- `chacha20 0.10.1 / LICENSE-MIT`
+- `chacha20 0.10.2 / LICENSE-MIT`
 - `zeroize_derive 1.5.0 / LICENSE-MIT`
 
 ```text

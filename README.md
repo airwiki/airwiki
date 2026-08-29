@@ -41,11 +41,20 @@ A Wiki is an OKF v0.2 bundle: human-readable Markdown and YAML that is not locke
 
 ### Let AI assist, not decide
 
-Local models can extract, enrich, index, and propose knowledge. AirWiki keeps every folder-derived proposal tied to its source revision and requires a person to compare the evidence before publication.
+Local models can extract, enrich, index, and propose knowledge. AirWiki writes
+every folder-derived proposal immediately as a local OKF `draft`, tied to its
+source revision. You can browse it first and compare its evidence when useful;
+only an explicit approval changes it to searchable, shareable `stable`
+knowledge.
 
 ### Share only what you choose
 
-Local use, paired-device access, external AI access, and experimental public discovery are separate permissions. Connecting a client or another device never silently publishes a Wiki or grants access to it.
+Network sharing and AI connections are separate concepts. **Share** controls only
+paired-device and Internet exposure. **AI Apps** controls which local ChatGPT,
+Claude, Codex, Gemini, or generic MCP connection may search a Wiki. Confirming a
+new AI connection gives that application read access to compatible Wikis by
+default, but never enables LAN sharing or Internet publication; access remains
+revocable per application and Wiki.
 
 ### Give your agents simple, open memory without vendor lock-in
 
@@ -54,10 +63,26 @@ Codex, ChatGPT, Claude Code, Gemini CLI, and generic MCP clients use the same Ai
 ## How it works
 
 1. **Create a Wiki.** Start from a folder, import an OKF v0.2 folder or ZIP, create private personal memory, or explicitly initialize portable project memory in `.airwiki`.
-2. **Build trusted knowledge.** AirWiki indexes locally. For source folders, local AI prepares proposals and shows the exact evidence behind them.
-3. **Search and share deliberately.** The Library groups matches from your device, paired devices, and—only when selected for that search—public Wikis. Enable access independently for each Wiki and destination.
+2. **Build trusted knowledge progressively.** AirWiki prepares each source as an
+   unverified OKF `draft` and shows it inside the Wiki immediately. Review at
+   your own pace: approve a draft to make it stable, leave it for later, or
+   exclude it without deleting its local content or evidence. For a Wiki made
+   from a folder, **Update from folder** checks the complete source again and
+   reanalyzes current drafts without changing reviewed or excluded content.
+3. **Confirm and share deliberately.** Open a Wiki to see one compact bar with
+   reviewed, draft and excluded counts; separate Local, LAN and Internet
+   exposure; and the AI applications that can actually access it. The
+   adjacent Share action groups only the independent LAN and Internet controls.
+   Selecting the AI-app area opens a separate permission panel: ordinary Wikis
+   offer no access or search access, while memory Wikis also offer read/edit
+   roles. The
+   Library groups matches from your device, paired devices, and—only when
+   selected for that search—public Wikis.
 
 Folder Wikis can watch for new files or update manually. Imported OKF Wikis have no source watcher. Personal and project memory can be edited only by applications you explicitly authorize. A missing, invalid, conflicted, or identity-changed project bundle is withheld from agents and every network until its files are valid again.
+When a project-memory attachment is healthy, its local `.airwiki` link and
+non-destructive Detach action stay in Wiki Details. The main Wiki view surfaces
+that attachment only when it is unavailable and requires attention.
 
 ## How distributed search works
 
@@ -109,12 +134,20 @@ for the complete journey and privacy boundaries.
 
 - Create continuously updated or manual Wikis from Markdown and text-based PDF folders.
 - Import hierarchical OKF v0.2 folders and ZIP bundles while preserving unknown types and fields.
-- Browse published concepts as a file-like tree or an on-demand relationship graph.
-- Review local-AI proposals against revision-bound source evidence before publishing.
+- Browse local draft, excluded and reviewed concepts in one file-like view;
+  filter by review state or open the stable relationship graph.
+- Review local-AI drafts against revision-bound source evidence when useful,
+  then approve and continue through the remaining drafts.
 - Search with local lexical and vector retrieval, including provenance and assurance state.
 - Use one Library for the local inventory and grouped local, nearby and explicitly
   opted-in public search results; Settings keeps General, Connections and AI
   apps in focused sections with accessible status.
+- Scan and filter **Your Wikis** by attention, private or network-shared access; each
+  self-contained shelf row groups the Wiki's identity, detected/searchable/review
+  counts, Local/LAN/Internet exposure and next action for quick scanning.
+- Open a Wiki and keep searchable state, Local/LAN/Internet exposure, AI-app
+  access and a direct Share action in one compact sticky bar; one page scroll
+  replaces nested content scrollbars without a duplicate status panel.
 - Pair devices on a private LAN and grant access per Wiki.
 - Open an authorized LAN or public result in the same read-only, file-oriented
   Wiki workspace used for local knowledge.
@@ -129,10 +162,17 @@ for the complete journey and privacy boundaries.
 
 ## Privacy by default
 
-- New Wikis are local-only.
+- New Wikis are private from LAN and Internet by default. After native
+  confirmation they give read access to already connected AI applications;
+  each application can be revoked per Wiki.
 - Original folder contents remain on the source device and are never deleted by AirWiki.
-- Publication, peer sharing, public discovery, and external AI access require independent human decisions.
-- Changed source knowledge is withdrawn until its new revision is reviewed.
+- Network publication/sharing and AI connection require separate human
+  decisions. Connecting an AI application grants default read access to
+  compatible local Wikis but never changes LAN or Internet exposure. App-scoped
+  MCP search stays on this device; LAN search remains a native Library action.
+- Changed source knowledge is withdrawn from search and every external channel
+  until its new revision is reviewed; its replacement remains visible locally
+  as an OKF `draft`.
 - The local model cannot publish, grant access, or decide whether content may leave the device.
 - Search results use bounded summaries. Opening an authorized LAN or public
   result loads the complete published OKF Wiki automatically: its hierarchy,
@@ -183,13 +223,16 @@ Before the public release, feedback is especially valuable around first-run clar
 
 ## Architecture at a glance
 
-AirWiki is a Rust workspace with a Tauri v2 desktop shell and Svelte UI. SQLite owns operational state and local paths; published OKF files are the source of truth for each visible Wiki. Domain rules stay outside the UI and transport layers.
+AirWiki is a Rust workspace with a Tauri v2 desktop shell and Svelte UI. SQLite owns operational state and local paths; managed OKF `draft` and `stable` files are the source of truth for each locally visible Wiki. Only stable concepts enter search or external disclosure. Domain rules stay outside the UI and transport layers.
 
 ```mermaid
 flowchart LR
-    folder["Folder Wiki"] --> folder_pipeline["Ingest + local AI proposals"]
-    folder_pipeline --> review["Human evidence review"]
-    review --> bundle[("Portable OKF v0.2<br/>visible Wiki")]
+    folder["Folder Wiki"] --> folder_pipeline["Ingest + local AI"]
+    folder_pipeline --> draft["Local OKF draft<br/>browsable immediately"]
+    draft --> review["Human evidence review"]
+    review --> stable["Stable + searchable"]
+    draft --> bundle[("Portable OKF v0.2<br/>visible Wiki")]
+    stable --> bundle
 
     imported["Imported OKF bundle"] --> import_pipeline["Validate + build local index"]
     import_pipeline --> bundle

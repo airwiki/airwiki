@@ -407,6 +407,8 @@ integration-summary-awaiting-approval = Complete approval in the chat app, then 
 integration-summary-configured = AirWiki is connected to this chat app.
 integration-summary-update-available = The managed local bridge can be updated.
 integration-summary-conflict = An existing setting must be reviewed before AirWiki can connect.
+integration-summary-conflict-existing-configuration = Another local connection already uses the name AirWiki in { $client }. Remove or rename it there, then refresh.
+integration-summary-conflict-managed-bridge-integrity = AirWiki could not verify the local connection installed in { $client }. Restart AirWiki and refresh. If it persists, remove the AirWiki connection from { $client } and reconnect it.
 integration-summary-unsupported = This installed version is not compatible with the guided connection.
 integration-summary-error = This integration could not be checked. Open technical details for diagnostics.
 
@@ -653,10 +655,13 @@ review-issue-processing-failed = Local processing did not finish. Keep AirWiki o
 review-approve = Approve and publish
 review-okf-read-only = This wiki cannot publish new changes in its current OKF format. Recreate it from its source folder to publish as OKF v0.2; you can still reject this proposal.
 review-reject = Reject draft
-review-reanalyze = Analyze again
-review-reanalyze-help = Creates a new draft with the active model. It never publishes the document.
-review-analyzing = Analyzing with the local model; the previous draft is preserved until completion.
-review-model-required = Activate and verify a local model to analyze again.
+review-later = Review later
+review-exclude = Exclude from this Wiki
+review-approve-next = Approve and continue
+review-open-draft = Review draft
+review-review-excluded = Review excluded draft
+review-draft-body = This draft is already part of your local Wiki, but it is not searchable or shared. Compare it with the source evidence when you are ready.
+review-excluded-body = You excluded this draft from the Wiki. It remains local and can still be reviewed and approved later.
 review-select-document = Select a document.
 review-document-selector = Document to review
 review-evidence-title = Extracted evidence
@@ -719,10 +724,34 @@ settings-login-status = Start at sign-in: { $status }
 settings-refresh-status = Refresh status
 settings-advanced-diagnostics = Advanced diagnostics
 settings-local-ai = Local AI
+settings-local-ai-title = AirWiki local AI
+settings-local-ai-body = It runs on this device to prepare knowledge and improve search. Your documents are not sent to an AI service.
+settings-local-ai-drafts-title = Prepares drafts
+settings-local-ai-drafts-body = Organizes folder changes for you to review before publishing.
+settings-local-ai-search-title = Checks results
+settings-local-ai-search-body = Helps determine which passages best answer a search.
+settings-local-ai-control-title = Only proposes
+settings-local-ai-control-body = It does not publish, share, or change your source documents.
 settings-model-profile = Profile: { $profile }
 settings-model-active = Active: { $model }
 settings-model-none = none
 settings-manage-models = Manage models from Home
+settings-model-selector = Model profile
+settings-model-selector-help = Choose the balance between resource use and quality; AirWiki selects a model compatible with this device.
+settings-model-profile-automatic = Automatic (recommended)
+settings-model-profile-efficient = Lower resource use
+settings-model-profile-quality = Higher quality
+settings-model-selected = Selected model
+settings-model-profile-explanation = The selection applies to knowledge preparation and search-result checks.
+settings-local-model-active = In use
+settings-local-model-installed = Downloaded
+settings-local-model-restart-needed = Restart required
+settings-local-model-download-needed = Download required
+settings-model-download-size = Download: { $size }
+settings-model-space-needed = Space required: { $size }
+settings-model-compatible-fallback = This device will use a smaller compatible alternative.
+settings-model-insufficient-space = There is not enough free space to prepare this model.
+settings-device-preferences-body = Adjust how AirWiki behaves on this device.
 action-enable = Enable
 action-disable = Disable
 action-remove = Remove
@@ -816,6 +845,7 @@ desktop-review-select-title = Select a proposal
 desktop-review-select-body = Evidence appears before any publishing action.
 desktop-preferences = Device preferences
 desktop-lan = Local network
+desktop-lan-access = Nearby-device access
 desktop-close = When closing
 desktop-disabled = Disabled
 desktop-enabled = Enabled
@@ -963,13 +993,14 @@ native-confirm-guided-repair = Apply exactly the reviewed repair proposal to loc
 native-confirm-external-policy = Enable one or more sharing, public-network, or external-AI permissions for this folder?
 native-confirm-collection-grant = Grant the verified device access to this folder?
 native-confirm-delete-wiki = Withdraw every access and delete this wiki from AirWiki? This action cannot be undone.
-native-confirm-initialize-project-memory = Create a portable .airwiki folder in this project? Its manifest and OKF documentation will be visible as normal project files. AirWiki will not run Git.
-native-confirm-attach-project-memory = Allow this application to read and write the portable project memory on this device? This approval applies only to this local folder.
+native-confirm-initialize-project-memory = Create a portable .airwiki folder in this project? Its files will be visible in the project and active AI applications will receive read access. AirWiki will not run Git or share it over the network.
+native-confirm-attach-project-memory = Allow this application to read and write the portable project memory on this device? Active AI applications will also receive read access. This approval applies only to this local folder.
 native-confirm-detach-project-memory = Detach this project memory from AirWiki? Access, projections, and local state will be removed, but the .airwiki files will remain unchanged.
 desktop-project-memory-label = Project memory
 desktop-project-memory-create-title = Create project memory
 desktop-project-memory-source-body = Keep portable documentation beside the project so agents on approved clones can use it.
 desktop-project-memory-create-body = AirWiki creates portable documentation files inside .airwiki. Git shows them like normal project files; AirWiki never changes version control.
+desktop-new-wiki-ai-default = Active AI applications will receive read access. This does not share the wiki over LAN or the Internet, and you can revoke it later.
 desktop-project-memory-create-preview = Portable project documentation and agent memory
 desktop-project-memory-create-action = Create .airwiki
 desktop-project-memory-create-error = The project memory could not be created.
@@ -980,12 +1011,15 @@ desktop-project-memory-attach-request = { $application } wants to use project me
 desktop-project-memory-request-folder = Local folder: { $folder }
 desktop-project-memory-request-error = The project memory request could not be completed.
 desktop-project-memory-detach = Detach
-desktop-project-memory-detach-body = AirWiki removes local access and projections but leaves every .airwiki file unchanged.
+desktop-project-memory-detach-body = Disconnects this memory from AirWiki on this device and revokes its access. The .airwiki files stay in the project.
 desktop-project-memory-detach-error = The project memory could not be detached.
-desktop-project-memory-health-active = Active and synchronized
-desktop-project-memory-health-invalid = Invalid bundle; access is blocked until the files are valid
-desktop-project-memory-health-missing = The .airwiki bundle is missing; access is blocked
-desktop-project-memory-health-identityConflict = Portable identity changed; detach and approve it again
+desktop-project-memory-health-active = Linked and available
+desktop-project-memory-health-invalid = The .airwiki files are invalid; access is blocked until they are corrected
+desktop-project-memory-health-missing = The .airwiki folder is missing; access is blocked
+desktop-project-memory-health-identityConflict = The project identity changed; detach it and link it again
+desktop-project-memory-details-title = Portable project memory
+desktop-project-memory-details-body = This Wiki is stored in the project's .airwiki folder so its knowledge can travel with the project. AirWiki does not manage Git.
+desktop-project-memory-connection = Link on this device
 desktop-wiki-origin-project-memory = Project memory · portable files
 desktop-wiki-origin-personal-memory = Personal memory · private vault
 action-approve = Approve
@@ -993,10 +1027,11 @@ status-blocked = Blocked
 native-confirm-install-update = Install the downloaded, signature-verified AirWiki update and restart the app?
 native-confirm-execute-computation = Run this attested computation? AirWiki will use only the parameters already supplied, inside a sandbox with no network or external filesystem access.
 native-confirm-save-computation-result = Save this accepted result as a new concept? AirWiki will copy the receipt into the selected AI memory and mark it as produced and confirmed by the AirWiki WASM process, not reviewed by a person.
-native-confirm-application-grant = Change this application's access to the memory wiki? Read allows queries; edit also allows creating and deprecating concepts. This does not grant sharing permissions.
+native-confirm-application-grant = Change this application's permission for the wiki? Search allows querying published content; on a memory wiki, read and edit also control its memory tools. This does not share the wiki over the network.
+native-confirm-connect-wiki-ai-apps = Create this wiki? If its format permits external access, active AI applications receive read access by default. You can revoke it per application.
 native-confirm-verify-managed-concept = Confirm that you personally reviewed this exact concept revision against its sources? AirWiki will add a human verification event to the managed OKF bundle.
-native-confirm-connect-integration = Connect this client and install assisted memory? AirWiki will modify only the listed global files. Capture starts only after a wiki is created or selected, and this does not enable sharing or publication.
-native-confirm-connect-integration-built-in = Connect this client? Assisted-memory instructions are built into its local MCP connection, so AirWiki will not modify global instruction files. Capture starts only after a wiki is created or selected, and this does not enable sharing or publication.
+native-confirm-connect-integration = Connect this client and install assisted memory? AirWiki will modify only the listed global files and give it read access to compatible wikis. This does not share or publish wikis over the network.
+native-confirm-connect-integration-built-in = Connect this client? Its instructions are built into the local MCP connection and it will receive read access to compatible wikis. AirWiki will not modify global files or share wikis over the network.
 native-confirm-install-workflow-guide = Install or update assisted memory in the listed global files? AirWiki will not replace files you modified.
 native-confirm-remove-workflow-guide = Remove the managed skill, AirWiki.md, and its import line? AirWiki will preserve any file you modified.
 
@@ -1004,10 +1039,57 @@ native-confirm-remove-workflow-guide = Remove the managed skill, AirWiki.md, and
 desktop-nav-home = Home
 desktop-nav-wikis = Wikis
 desktop-library-title = Library
-desktop-library-kicker = Local knowledge index
-desktop-library-search-kicker = Search across sources
-desktop-library-body = A working catalog of the knowledge stored on this device.
+desktop-wiki-list-title = Your Wikis
+desktop-library-search-title = Search results
+desktop-library-kicker = Wikis on this device
+desktop-library-search-kicker = Search
+desktop-library-body = Open a Wiki to see what it contains, who can access it, and what to do next.
 desktop-library-search-body = Results grouped by Wiki from this device, authorized nearby devices, and—when you choose it—the public network.
+desktop-library-scope-label = Wiki location
+desktop-library-scope-device = On this device
+desktop-library-scope-public = Public
+desktop-public-library-kicker = Public network
+desktop-public-library-title = Explore public Wikis
+desktop-public-library-body = Browse signed public profiles without running a search. Content is requested only after you open a Wiki.
+desktop-public-library-network-label = Public network catalog
+desktop-public-library-count =
+    { $count ->
+        [one] 1 public Wiki
+       *[other] { $count } public Wikis
+    }
+desktop-public-library-refresh = Refresh
+desktop-public-library-loading-action = Refreshing…
+desktop-public-library-loading-title = Checking the public catalog
+desktop-public-library-loading-body = Loading published profiles from configured indexes. No content is requested from owners yet.
+desktop-public-library-not-configured-title = No public index is configured
+desktop-public-library-not-configured-body = Add a public community index in Connections to explore published Wikis. Your local Wikis are unaffected.
+desktop-public-library-upgrade-required-title = The public catalog needs an update
+desktop-public-library-upgrade-required-body = The configured public indexes do not support catalog browsing yet. Try again after the service is updated; local Wikis and public search remain available.
+desktop-public-library-unavailable-title = The public catalog is unavailable
+desktop-public-library-unavailable-body = The configured public indexes did not respond. Check your connection and try again. Your local Wikis are unaffected.
+desktop-public-library-retry = Try again
+desktop-public-library-settings = Review connections
+desktop-public-library-partial = Some indexes did not respond. This list may be incomplete.
+desktop-public-library-empty-title = No public Wikis found
+desktop-public-library-empty-body = The configured indexes are not announcing any current profiles right now.
+desktop-public-wiki-list-title = Available public Wikis
+desktop-public-wiki-no-description = No public description
+desktop-public-wiki-concept-count =
+    { $count ->
+        [one] 1 concept
+       *[other] { $count } concepts
+    }
+desktop-library-controls = Wiki list controls
+desktop-library-filter-label = Show
+desktop-library-filter-all = All
+desktop-library-filter-attention = Needs attention
+desktop-library-filter-private = Only you
+desktop-library-filter-shared = Shared
+desktop-library-check-status = Check status
+desktop-library-checking = Checking…
+desktop-library-filter-empty-title = No Wikis in this view
+desktop-library-filter-empty-body = Try another category or show all Wikis again.
+desktop-library-filter-clear = Show all
 desktop-library-wiki-count =
     { $count ->
         [one] 1 Wiki on this device
@@ -1074,7 +1156,7 @@ desktop-page-home-body = What needs your attention and quick access to your wiki
 desktop-page-wikis-title = Wikis
 desktop-page-wikis-body = Your folders transformed into portable, verifiable knowledge.
 desktop-page-shared-title = Shared
-desktop-page-shared-body = Decide which wikis your devices, AI apps, or the public network can access.
+desktop-page-shared-body = Decide which wikis nearby devices or the public network can access. AI applications are managed separately.
 desktop-search-scope-label = Search scope
 desktop-search-private-scope-local = This device
 desktop-search-private-scope-nearby =
@@ -1093,7 +1175,7 @@ desktop-status-offline = Offline
 desktop-status-unavailable = Unavailable
 desktop-status-knowledge = Local knowledge
 desktop-status-knowledge-ready = Ready to search
-desktop-status-knowledge-preparing = Preparing your wikis
+desktop-status-knowledge-preparing = Preparing local AI
 desktop-status-knowledge-needs-setup = Set up local search
 desktop-status-connections = Connections
 desktop-status-nearby-and-public = Nearby and public
@@ -1118,15 +1200,42 @@ desktop-wiki-no-specific-access = No verified device has access to this wiki yet
 desktop-manage-access = Manage access
 desktop-public-empty-title = No public wikis loaded
 desktop-wiki-column-name = Name
-desktop-wiki-column-content = Content
-desktop-wiki-column-access = Access
-desktop-wiki-column-status = Status
-desktop-wiki-content-count = { $published } published · { $pending } pending
+desktop-wiki-column-content = Knowledge
+desktop-wiki-column-access = Who can access
+desktop-wiki-column-status = Next step
+desktop-wiki-content-count = { $published } searchable · { $pending } pending
+desktop-wiki-review-progress = { $reviewed } of { $total } reviewed · { $pending } drafts · { $excluded } excluded
+desktop-wiki-content-filter-label = Filter Wiki content by review status
+desktop-wiki-content-filter-all = All
+desktop-wiki-content-filter-draft = Drafts
+desktop-wiki-content-filter-reviewed = Reviewed
+desktop-wiki-content-filter-excluded = Excluded
+desktop-wiki-content-filter-all-empty-title = No resources yet
+desktop-wiki-content-filter-all-empty-body = AirWiki will show every generated draft here as soon as it is prepared.
+desktop-wiki-content-filter-draft-empty-title = No drafts to review
+desktop-wiki-content-filter-draft-empty-body = New and changed resources will appear here before they become searchable.
+desktop-wiki-content-filter-reviewed-empty-title = No reviewed resources yet
+desktop-wiki-content-filter-reviewed-empty-body = Approve a draft when its proposed knowledge matches the source evidence.
+desktop-wiki-content-filter-excluded-empty-title = No excluded resources
+desktop-wiki-content-filter-excluded-empty-body = Drafts you set aside will remain available here for later review.
+desktop-review-state-draft = Draft
+desktop-review-state-reviewed = Reviewed
+desktop-review-state-excluded = Excluded
+desktop-review-state-deprecated = Deprecated
+desktop-wiki-detected-count =
+    { $count ->
+        [one] 1 detected item
+       *[other] { $count } detected items
+    }
+desktop-wiki-metric-detected = Detected
+desktop-wiki-metric-searchable = Searchable
+desktop-wiki-metric-review = To review
 desktop-wiki-source-count =
     { $count ->
-        [one] 1 source document
-       *[other] { $count } source documents
+        [one] 1 detected item
+       *[other] { $count } detected items
     }
+desktop-wiki-no-external-access = No external access
 desktop-wiki-row-checking = Checking the source for changes
 desktop-wiki-row-project-blocked = Access remains blocked until the project memory is healthy
 desktop-wiki-row-failed-count =
@@ -1139,11 +1248,157 @@ desktop-wiki-row-review-count =
         [one] 1 proposal is waiting
        *[other] { $count } proposals are waiting
     }
+desktop-wiki-row-excluded-count =
+    { $count ->
+        [one] 1 draft is excluded but remains available locally
+       *[other] { $count } drafts are excluded but remain available locally
+    }
 desktop-wiki-pending-status = Needs review
-desktop-wiki-empty-title = No wikis yet
-desktop-wiki-empty-body = Add a folder, import portable knowledge, or create project memory to get started.
-desktop-wiki-empty-action = Create your first Wiki
+desktop-wiki-excluded-status = Drafts excluded
+desktop-wiki-updating-status = Updating
+desktop-wiki-ready-status = Ready to use
+desktop-wiki-row-ready = Reviewed knowledge is searchable and up to date
+desktop-wiki-indexing-check-status = Check indexing
+desktop-wiki-row-indexing-check = Content was detected, but nothing is searchable yet. Open this Wiki to see why.
+desktop-wiki-empty-status = Waiting for content
+desktop-wiki-row-empty = Add content to make this Wiki searchable.
+desktop-wiki-empty-title = Create your first Wiki
+desktop-wiki-empty-body = Choose a folder with documents. AirWiki prepares them on this device and shows you what is searchable.
+desktop-wiki-empty-action = Choose how to create it
 desktop-wiki-private = Only you
+desktop-journey-label = Wiki status
+desktop-journey-compact-label = Status of { $wiki } while browsing its content
+desktop-compact-exposure-label = Exposure
+desktop-compact-exposure-local = Local
+desktop-compact-exposure-lan = LAN
+desktop-compact-exposure-internet = Internet
+desktop-compact-exposure-active = Active
+desktop-compact-exposure-off = Off
+desktop-compact-exposure-unavailable = Unavailable
+desktop-compact-exposure-lan-enabled = Enabled
+desktop-compact-exposure-lan-count =
+    { $count ->
+        [one] 1 device
+       *[other] { $count } devices
+    }
+desktop-compact-exposure-public = Public
+desktop-compact-exposure-enabled-offline = Enabled · offline
+desktop-compact-exposure-expired = Announcement expired
+desktop-compact-ai-access-count =
+    { $count ->
+        [one] Access in 1 app
+       *[other] Access in { $count } apps
+    }
+desktop-compact-ai-no-wiki-access = No access to this Wiki
+desktop-compact-ai-attention = Check connections
+desktop-compact-ai-connecting = Checking connections
+desktop-compact-ai-none = No apps connected
+desktop-compact-ai-available = Ready to connect
+desktop-compact-ai-blocked = Access blocked
+desktop-compact-ai-manage = Manage AI apps
+desktop-compact-ai-client-access = Access allowed
+desktop-compact-ai-client-blocked = Connected · no access
+desktop-journey-title = Is this Wiki ready?
+desktop-journey-body = Check what is searchable, who can access it, and whether ChatGPT can use this Wiki.
+desktop-journey-step = Step { $step }
+desktop-journey-knowledge-label = Knowledge
+desktop-journey-visibility-label = Visibility
+desktop-journey-searchable = Searchable
+desktop-journey-not-ready = Not ready yet
+desktop-journey-verified = Verified
+desktop-journey-not-connected = Not connected
+desktop-journey-not-public = Not public
+desktop-journey-public-on-internet = Public on the internet
+desktop-journey-public-enabled = Public access enabled
+desktop-journey-detected = Detected
+desktop-journey-searchable-count = Searchable
+desktop-journey-to-review = To review
+desktop-journey-knowledge-checking = Checking your documents
+desktop-journey-knowledge-checking-body = AirWiki is detecting changes and preparing local results. Incomplete work never replaces reviewed knowledge.
+desktop-journey-knowledge-reanalyzing = Analyzing current drafts again
+desktop-journey-knowledge-project-blocked = Project memory is unavailable
+desktop-journey-knowledge-project-blocked-body = AirWiki removed this Wiki from search until its files are valid again.
+desktop-journey-knowledge-restricted = This version has restricted local use
+desktop-journey-knowledge-restricted-body = You can browse compatible content, but AirWiki stopped updates and external access to protect it.
+desktop-journey-knowledge-errors =
+    { $count ->
+        [one] 1 file could not be included
+       *[other] { $count } files could not be included
+    }
+desktop-journey-knowledge-errors-body = Review the affected files and their recovery steps. AirWiki keeps previously safe content available.
+desktop-journey-knowledge-maintenance = Published knowledge needs a check
+desktop-journey-knowledge-maintenance-body = Compare the folder with the Wiki again before relying on recent changes.
+desktop-journey-knowledge-review =
+    { $count ->
+        [one] Review 1 change to make it searchable
+       *[other] Review { $count } changes to make them searchable
+    }
+desktop-journey-knowledge-review-body = { $published } reviewed concepts are already available. New changes will not be used until you check their evidence.
+desktop-journey-knowledge-excluded = Drafts are saved for later review
+desktop-journey-knowledge-ready =
+    { $count ->
+        [one] 1 concept is ready to search
+       *[other] { $count } concepts are ready to search
+    }
+desktop-journey-knowledge-ready-body = AirWiki created them locally from { $documents } detected items and included only reviewed knowledge.
+desktop-journey-knowledge-empty = There is no searchable knowledge yet
+desktop-journey-knowledge-empty-body = Check the source to detect documents and prepare proposals for review.
+desktop-journey-check-again = Check again
+desktop-journey-visibility-private = Only you have access
+desktop-journey-visibility-private-body = The Wiki stays on this device. No AI app, nearby device, or public network can query it.
+desktop-journey-visibility-limited = Limited access; not published
+desktop-journey-visibility-limited-body = It does not appear on the internet. Only explicitly enabled destinations can request reviewed knowledge.
+desktop-journey-visibility-public = This Wiki is published on the internet
+desktop-journey-visibility-public-body = Anyone may discover approved knowledge. ChatGPT and nearby devices still have separate permissions.
+desktop-journey-visibility-public-offline = Public access is on, but this Wiki is offline
+desktop-journey-visibility-public-offline-body = No public index is advertising it right now. It may become discoverable when the public connection returns.
+desktop-journey-visibility-public-expired = Public access is on, but its announcement expired
+desktop-journey-visibility-public-expired-body = The Wiki is not being advertised now. Renew the public connection or turn off Public network to keep it private.
+desktop-journey-nearby-count =
+    { $count ->
+        [one] 1 nearby device has access
+       *[other] { $count } nearby devices have access
+    }
+desktop-journey-nearby-none = No nearby device has access
+desktop-journey-nearby-enabled-none = Nearby devices: enabled, with no grants
+desktop-journey-ai-allowed = AI applications have search access
+desktop-journey-ai-blocked = AI applications have no access
+desktop-journey-internet-public = Available on the public network
+desktop-journey-internet-offline = Public access on; no index available
+desktop-journey-internet-expired = Public access on; announcement expired
+desktop-journey-internet-private = Not published on the internet
+desktop-journey-review-access = Review who can access
+desktop-journey-chat-checking = Checking ChatGPT
+desktop-journey-chat-checking-body = AirWiki is refreshing the local connection and workflow-guide status.
+desktop-journey-chat-not-installed = ChatGPT isn't detected yet
+desktop-journey-chat-not-installed-body = Install a compatible ChatGPT Desktop or Work version, then check again from AI apps.
+desktop-journey-chat-connect = ChatGPT is ready to connect
+desktop-journey-chat-connect-body = One native confirmation installs the local connection and AirWiki guide. This does not give it access to any Wiki by itself.
+desktop-journey-chat-awaiting = Finish approval in ChatGPT
+desktop-journey-chat-awaiting-body = Complete approval in ChatGPT, then check the connection again.
+desktop-journey-chat-update = The ChatGPT connection needs an update
+desktop-journey-chat-update-body = Update the managed local bridge and open a new conversation to load the current version.
+desktop-journey-chat-attention = The ChatGPT connection needs attention
+desktop-journey-chat-attention-body = There is a conflict or incompatible version. Review AI apps; AirWiki will not overwrite another configuration.
+desktop-journey-chat-finish-setup = The connection is installed; the guide is not ready
+desktop-journey-chat-finish-setup-body = Finish installing the guide and open a new conversation before testing this Wiki.
+desktop-journey-chat-no-access = ChatGPT is connected, but this Wiki has not granted access
+desktop-journey-chat-no-access-body = Enable AI applications for this Wiki if you want ChatGPT to request reviewed snippets. This will not make it public.
+desktop-journey-chat-test = Connected and authorized; ready to test
+desktop-journey-chat-test-body = Open a new conversation, ask ChatGPT to search AirWiki for knowledge from “{ $wiki },” then return to check activity.
+desktop-journey-chat-verified = ChatGPT is connected and verified
+desktop-journey-chat-verified-body = AirWiki received recent ChatGPT activity and this Wiki has access enabled. Only approved snippets are sent when ChatGPT requests them.
+desktop-journey-chat-local-ready = Local connection: installed
+desktop-journey-chat-local-pending = Local connection: pending
+desktop-journey-chat-wiki-allowed = Access to this Wiki: allowed
+desktop-journey-chat-wiki-blocked = Access to this Wiki: blocked
+desktop-journey-chat-recent-ready = Recent test: detected
+desktop-journey-chat-recent-pending = Recent test: pending
+desktop-journey-chat-checklist = ChatGPT checks
+desktop-journey-connect-chatgpt = Connect ChatGPT
+desktop-journey-check-connection = Check connection
+desktop-journey-allow-this-wiki = Allow this Wiki
+desktop-journey-open-chat-settings = Open ChatGPT setup
 desktop-wiki-unknown = Unavailable wiki
 desktop-home-attention = Needs attention
 desktop-home-attention-body = Actions AirWiki cannot complete safely without you.
@@ -1178,7 +1433,7 @@ desktop-attention-reviews-title = { $count ->
 }
 desktop-attention-reviews-body = Local AI prepared changes based on the source. They will not be published until you review the evidence and decide.
 desktop-attention-reviews-action = Review proposals
-desktop-wiki-detail-body = { $published } published pages
+desktop-wiki-detail-body = { $published } searchable concepts
 desktop-share-action = Share
 desktop-connections = Connections
 desktop-wiki-sections = Wiki sections
@@ -1287,10 +1542,13 @@ desktop-application-quota = { $count } owned wikis · { $size } managed
 desktop-application-no-access = No access
 desktop-application-reader = Can read
 desktop-application-editor = Can edit
+desktop-application-search = Can search
 desktop-application-grant-failed = Access could not be changed. The application or wiki may have changed.
 action-reject = Reject
-desktop-share-drawer-body = Content remains private except through the channels you enable here.
+desktop-share-drawer-body = Share this wiki with nearby devices or publish it on the Internet. AI applications are managed separately.
 desktop-share-apply-note = Channel changes apply after their confirmation. Public description and languages are saved separately.
+desktop-share-network-access = Network access
+desktop-share-network-access-body = Choose how devices and people can reach this Wiki. Nearby and public access are authorized independently.
 desktop-share-nearby = Nearby devices
 desktop-share-nearby-body = Only verified devices with explicit permission for this wiki.
 desktop-share-device-access = Private devices with access to this Wiki
@@ -1298,6 +1556,21 @@ desktop-share-no-verified-devices = No verified devices yet
 desktop-share-no-verified-devices-body = Connect and verify a device before granting access to this Wiki.
 desktop-share-ai-apps = AI applications
 desktop-share-ai-apps-body = Read-only search access for locally connected AI apps. This does not grant memory editing.
+desktop-share-application-access-body = For this memory Wiki, choose which authorized applications can read or edit it. These roles are independent from read-only search access above.
+desktop-share-application-access-empty-body = Connect an AI application before granting it access to this memory Wiki.
+desktop-share-application-role = Access
+desktop-share-application-role-for = Access for { $application }
+desktop-application-owner = Owner
+desktop-ai-apps-drawer-body = Connect this wiki directly to ChatGPT, Claude Code, and other installed AI tools. This does not share it over LAN or publish it on the Internet.
+desktop-ai-apps-access-title = Permissions by application
+desktop-ai-apps-search-access-body = New applications receive read access by default. You can revoke or restore access individually.
+desktop-ai-apps-memory-access-body = New applications receive read access by default. Edit also allows creating and updating memory concepts.
+desktop-ai-apps-manage-connections = Manage applications
+desktop-ai-apps-connected = Connected application
+desktop-ai-apps-permission = Permission
+desktop-ai-apps-permission-for = Permission for { $application }
+desktop-ai-apps-empty = No AI applications are connected
+desktop-ai-apps-empty-body = Connect an application to give it read access to this wiki.
 desktop-share-public = Public network
 desktop-share-public-body = Publish the reviewed Wiki without exposing the source folder.
 desktop-share-public-identity-note = Public readers see a separate signed publisher identity. AirWiki does not reveal this device name or operating system.
@@ -1311,14 +1584,17 @@ desktop-wiki-public-profile-save = Save public profile
 desktop-preferences-unsaved = Changes not saved
 desktop-preferences-saved = Preferences saved
 desktop-wiki-relink = Relink folder
-desktop-wiki-details-body = Source health and published content for this wiki.
+desktop-wiki-update-folder = Update from folder
+desktop-wiki-update-folder-help = Checks the source folder and analyzes current drafts again. Reviewed content and excluded documents stay unchanged.
+desktop-wiki-update-running = Updating…
+desktop-wiki-details-body = Review this Wiki's content, source, and local configuration.
 desktop-delete-wiki = Delete wiki
 desktop-delete-folder-wiki-body = AirWiki will delete its index and managed bundle. The original folder and documents will remain untouched.
 desktop-delete-managed-wiki-body = AirWiki will delete the managed bundle and all its access. This wiki has no external original folder.
 desktop-wiki-source-health = Source status
 desktop-wiki-health-ready = Up to date
 desktop-wiki-documents = Source documents
-desktop-wiki-published = Published pages
+desktop-wiki-published = Searchable concepts
 desktop-wiki-pending = Pending review
 desktop-wiki-failed = Failed files
 desktop-wiki-source-issues = Source folder
@@ -1347,6 +1623,9 @@ action-close = Close
 action-save = Save
 desktop-model-ready = Local AI is ready on this device.
 desktop-model-needs-setup = Set up local AI to analyze changes without sending content off this device.
+desktop-model-ready-short = Ready
+desktop-model-needs-setup-short = Setup needed
+desktop-model-restart-needed-short = Restart required
 models-install = Install local AI
 models-license-open = View license
 review-edit-title = Proposed title

@@ -28,7 +28,9 @@ if (parameters.get('maintenance') === '1') {
 if (destination === 'review') {
   snapshot.wikis[0].needsReviewCount = 1;
   const review = {
-    conceptId: 'synthetic-review', wikiId: snapshot.wikis[0].id, sourceRevision: 4, sourceName: 'operating-guide.md', wikiName: 'Atlas',
+    conceptId: 'synthetic-review', wikiId: snapshot.wikis[0].id, sourceRevision: 4,
+    sourceName: 'actividades_matematicas_sobre_fracciones_repartos_y_situaciones_problema_que_se_pueden_resolver_de_forma_individual_o_grupal.pdf',
+    wikiName: 'Atlas', excluded: false,
     draft: {
       type: 'Procedure' as const, title: 'Safe maintenance window',
       description: 'A verified sequence for routine local maintenance.', language: 'en',
@@ -51,7 +53,7 @@ if (destination === 'search') {
   snapshot.model = {
     stateSequence: 3, profile: 'balanced', recommendedModelId: 'synthetic-local-model',
     displayName: 'Local knowledge model', recommendationReason: 'Balanced for this device',
-    active: true, installed: true, degraded: false, issues: [], pendingModelId: null,
+    active: true, activeModelId: 'synthetic-local-model', installed: true, degraded: false, issues: [], pendingModelId: null,
     downloadBytes: 0, requiredFreeBytes: 0, fitsAvailableDisk: true, licenseAccepted: true,
     license: 'Apache-2.0', licenseUrl: null, revision: 'synthetic'
   };
@@ -95,7 +97,7 @@ if (destination === 'shared') {
   snapshot.model = {
     stateSequence: 3, profile: 'balanced', recommendedModelId: 'synthetic-local-model',
     displayName: 'Local knowledge model', recommendationReason: 'Balanced for this device',
-    active: true, installed: true, degraded: false, issues: [], pendingModelId: null,
+    active: true, activeModelId: 'synthetic-local-model', installed: true, degraded: false, issues: [], pendingModelId: null,
     downloadBytes: 0, requiredFreeBytes: 0, fitsAvailableDisk: true, licenseAccepted: true,
     license: 'Apache-2.0', licenseUrl: null, revision: 'synthetic'
   };
@@ -104,7 +106,7 @@ if (destination === 'shared') {
     trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: [sharedWikiId]
   }];
 }
-if (destination === 'library' || destination === 'connections') {
+if (destination === 'library' || destination === 'connections' || destination === 'share' || destination === 'ai-apps') {
   snapshot.peers = [{
     peerId: '12D3KooSyntheticMacNode', deviceName: 'Atlas Mac', platform: 'macOs',
     address: '/ip4/192.0.2.2/tcp/4242', trust: 'trusted', activity: 'connected',
@@ -140,9 +142,26 @@ if (destination === 'library' || destination === 'connections') {
     }]
   };
   snapshot.applicationAccess = [{
-    appId: 'codex', displayName: 'Codex', producer: 'codex/1.2', active: true,
-    ownedWikiCount: 1, managedBytes: 32768, grants: []
+    appId: 'codex', clientName: 'codex', displayName: 'Codex', producer: 'codex/1.2', active: true,
+    ownedWikiCount: 1, managedBytes: 32768, grants: destination === 'share' || destination === 'ai-apps'
+      ? [{ wikiId: snapshot.wikis[0].id, role: 'owner' }]
+      : []
   }];
+}
+if (destination === 'share' || destination === 'ai-apps') {
+  const wiki = snapshot.wikis[0];
+  wiki.origin = 'aiMemory';
+  wiki.memoryKind = 'personal';
+  wiki.indexingMode = 'notApplicable';
+  wiki.localOnly = false;
+  wiki.allowExternalAi = true;
+  snapshot.applicationAccess.push({
+    appId: 'claude-code', clientName: 'claude-code', displayName: 'Claude Code', producer: 'claude-code/2.1', active: true,
+    ownedWikiCount: 0, managedBytes: 0, grants: []
+  }, {
+    appId: 'gemini-cli', clientName: 'gemini-cli', displayName: 'Gemini CLI', producer: 'gemini-cli/0.12', active: true,
+    ownedWikiCount: 0, managedBytes: 0, grants: [{ wikiId: wiki.id, role: 'reader' }]
+  });
 }
 if (destination === 'graph') {
   const wiki = snapshot.wikis[0];
@@ -167,7 +186,7 @@ if (destination === 'system') {
   snapshot.model = {
     stateSequence: 3, profile: 'balanced', recommendedModelId: 'synthetic-local-model',
     displayName: 'Local knowledge model', recommendationReason: 'Balanced for this device',
-    active: true, installed: true, degraded: false, issues: [], pendingModelId: null,
+    active: true, activeModelId: 'synthetic-local-model', installed: true, degraded: false, issues: [], pendingModelId: null,
     downloadBytes: 0, requiredFreeBytes: 0, fitsAvailableDisk: true, licenseAccepted: true,
     license: 'Apache-2.0', licenseUrl: null, revision: 'synthetic'
   };
@@ -178,7 +197,7 @@ window.location.hash = destination === 'review'
   : destination === 'shared' || destination === 'search' ? 'library'
   : destination === 'connections' ? 'settings/connections'
   : destination === 'system' ? 'settings/general'
-  : destination === 'library' ? 'library' : destination;
+  : destination === 'library' || destination === 'share' || destination === 'ai-apps' ? 'library' : destination;
 
 let eventSink: ((event: UiEventEnvelope) => void) | null = null;
 const bridge: DevelopmentBridge = {
@@ -190,6 +209,9 @@ const bridge: DevelopmentBridge = {
     const requestId = typeof arguments_?.requestId === 'string' ? arguments_.requestId : null;
     if (destination === 'search' && _command === 'search' && requestId && snapshot.search) {
       snapshot.search = { ...snapshot.search, requestId };
+    }
+    if (destination === 'review' && _command === 'load_review_evidence' && requestId && snapshot.reviewEvidence) {
+      snapshot.reviewEvidence = { ...snapshot.reviewEvidence, requestId };
     }
     if (destination === 'shared' && _command === 'search' && requestId) {
       snapshot.search = {

@@ -153,7 +153,9 @@ progress, the revision stays unsearchable. Startup may resume only that durable
 approved intent.
 
 1. Reopen with the same source, application data, and wiki directory available.
-2. Wait for `Published` or a diagnosed return to `NeedsReview`.
+2. Wait for `Published` or a diagnosed return to `NeedsReview` with its local
+   OKF draft restored. If the source changed while closed, the revision becomes
+   `Failed` and waits for a fresh scan instead of restoring stale draft bytes.
 3. Approve again only after reviewing a returned draft.
 4. If `Publishing` persists after restart, exit, preserve application data and
    sanitized logs, and escalate. Never edit concepts, `index.md`, `log.md`, or
@@ -169,8 +171,9 @@ On confirmation, AirWiki:
 
 1. rejects a stale bundle fingerprint;
 2. creates and verifies a local snapshot;
-3. withdraws affected published concepts from LAN and MCP and returns them to
-   review before changing their pages;
+3. withdraws affected published concepts from LAN and MCP, returns them to
+   review, and replaces the inconsistent stable page with a coherent local OKF
+   draft;
 4. removes an orphan only when SQLite confirms it is not a published concept;
 5. validates the result and writes a content-free audit event.
 

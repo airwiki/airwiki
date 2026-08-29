@@ -667,7 +667,9 @@ fn sanitized_run(run: &ComputationRunRecord, receipt: Option<Value>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use airwiki_core::{IndexingMode, NewCollection, OkfImportValidator, WikiOrigin};
+    use airwiki_core::{
+        IndexingMode, InitialApplicationAccess, NewCollection, OkfImportValidator, WikiOrigin,
+    };
     use airwiki_types::CollectionPolicy;
 
     fn coordinator_fixture() -> anyhow::Result<(
@@ -713,6 +715,7 @@ attester:
             },
             origin: WikiOrigin::Folder,
             indexing_mode: IndexingMode::Manual,
+            initial_application_access: InitialApplicationAccess::None,
         })?;
         let imported = OkfImportValidator::validate_directory(&wiki_root)?;
         database.replace_okf_concept_projection(wiki_id, &imported.concepts)?;

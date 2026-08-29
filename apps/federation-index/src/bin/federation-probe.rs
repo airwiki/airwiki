@@ -36,17 +36,25 @@ async fn main() -> ExitCode {
         SearchPurpose::LocalAssistant,
         1,
     );
-    match PublicReader::new().search(&[endpoint], request).await {
+    let reader = PublicReader::new();
+    if let Err(error) = reader
+        .explore_catalog(std::slice::from_ref(&endpoint), 1)
+        .await
+    {
+        eprintln!("public catalog browse probe failed: {error}");
+        return ExitCode::FAILURE;
+    }
+    match reader.search(&[endpoint], request).await {
         Ok(response) if response.hits.is_empty() && !response.partial => {
-            println!("public catalog probe: PASS");
+            println!("public federation probe: PASS");
             ExitCode::SUCCESS
         }
         Ok(_) => {
-            eprintln!("public catalog probe returned an unexpected response");
+            eprintln!("public federation search probe returned an unexpected response");
             ExitCode::FAILURE
         }
         Err(error) => {
-            eprintln!("public catalog probe failed: {error}");
+            eprintln!("public federation search probe failed: {error}");
             ExitCode::FAILURE
         }
     }

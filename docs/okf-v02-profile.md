@@ -55,9 +55,21 @@ Only lifecycle `stable` may cross LAN, public federation or MCP search. `draft`,
 ## AirWiki-produced concepts
 
 The generated root index contains only `okf_version: "0.2"` in frontmatter.
-Concepts contain `generated.by`, `generated.at`, `status: stable`, structured
-`sources` when available and `verified` when a human or deterministic process
-actually confirmed them. Folder-produced concepts may carry
+Lifecycle belongs to each concept document, not to the bundle as a whole. The
+bundle is only the distribution unit; Wiki-level counts such as reviewed,
+draft and excluded are derived from its concepts and SQLite operational state.
+
+Folder ingestion writes a concept page with `status: draft` as soon as the
+current source revision has been extracted, enriched and indexed. That page
+contains `generated.by`, `generated.at` and structured `sources`, but no
+`verified` event. Explicit human approval atomically replaces the same concept
+with `status: stable` and a human verification. The generated root index lists
+only stable concepts, so draft pages remain browsable locally without becoming
+searchable or externally discoverable.
+
+AirWiki's `excluded` value is operational SQLite state, not an OKF lifecycle
+extension. An excluded item remains an unverified OKF `draft` on disk and may be
+reviewed later. Folder-produced concepts may carry
 `airwiki.profile_version: 2` for AirWiki identity, review, language and
 fingerprint reconciliation.
 

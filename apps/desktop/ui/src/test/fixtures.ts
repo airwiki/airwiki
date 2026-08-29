@@ -16,7 +16,7 @@ export function readySnapshot(): AppSnapshot {
     },
     wikis: [{
       id: '10000000-0000-4000-8000-000000000001', name: 'Atlas', documentCount: 3,
-      needsReviewCount: 0, publishedCount: 2, failedCount: 0, localOnly: true,
+      needsReviewCount: 0, excludedCount: 0, publishedCount: 2, failedCount: 0, localOnly: true,
       peerShareable: false, allowExternalAi: false, internetPublic: false,
       publicDescription: '', publicLanguages: '', publicAnnouncement: { status: 'offline' },
       maintenanceRequired: false, origin: 'folder', indexingMode: 'continuous', okfVersion: '0.2',
@@ -26,7 +26,7 @@ export function readySnapshot(): AppSnapshot {
       trustSummary: 'humanReviewed', restrictions: []
     }],
     wikiScans: [], reviews: [], reanalyzingReviewIds: [], sourceIssues: [], peers: [],
-    model: null, modelInstall: null, search: null, publicBrowse: null, nearbyBrowse: null, reviewEvidence: null,
+    model: null, modelInstall: null, search: null, publicCatalog: null, publicBrowse: null, nearbyBrowse: null, reviewEvidence: null,
     knowledge: null, knowledgePage: null,
     preferences: { completedOnboardingVersion: 1, locale: 'es', theme: 'system', lanPreference: 'disabled', closeBehavior: 'ask', automaticUpdateChecks: false },
     autostart: 'disabled',

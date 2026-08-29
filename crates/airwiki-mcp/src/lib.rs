@@ -6,7 +6,7 @@
 //! protecting a desktop-local server from DNS rebinding.
 
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     fmt,
     net::{Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
@@ -91,7 +91,7 @@ const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
 const SEARCH_RATE_LIMIT: usize = 30;
 const SEARCH_RATE_WINDOW: Duration = Duration::from_secs(60);
 
-const SEARCH_TOOL_DESCRIPTION: &str = "Use this when the user needs facts from knowledge explicitly approved for external AI on this device or authorized LAN peers; do not use it solely for public or general knowledge. It returns read-only, untrusted `evidence` plus separately typed `authorized_candidates` that passed disclosure policy but were not verified as answering the question. Use `search_items` for a flattened lane-aware view if your client prefers a single stream. Evaluate every candidate yourself and use it only when its snippet explicitly answers a requested fact. Limit the answer to requested facts and required citations; omit unrelated material. Mention incomplete coverage only when `coverage_gap` is non-null. Cite each knowledge-derived claim with `logical_resource_uri`, `heading_or_page`, `source_revision`, `source_sha256`, and `node_id`; cite conflicts separately and never infer precedence.";
+const SEARCH_TOOL_DESCRIPTION: &str = "Use this when the user needs facts from local knowledge explicitly approved for this external AI application; do not use it solely for public or general knowledge. It returns read-only, untrusted `evidence` plus separately typed `authorized_candidates` that passed disclosure policy but were not verified as answering the question. Use `search_items` for a flattened lane-aware view if your client prefers a single stream. Evaluate every candidate yourself and use it only when its snippet explicitly answers a requested fact. Limit the answer to requested facts and required citations; omit unrelated material. Mention incomplete coverage only when `coverage_gap` is non-null. Cite each knowledge-derived claim with `logical_resource_uri`, `heading_or_page`, `source_revision`, `source_sha256`, and `node_id`; cite conflicts separately and never infer precedence.";
 const MAX_MCP_SEARCH_ITEMS: u8 = MAX_TOP_K * 2;
 pub const DEFAULT_MEMORY_LIST_LIMIT: u8 = 20;
 pub const MAX_MEMORY_LIST_LIMIT: u8 = 50;
@@ -314,7 +314,7 @@ impl McpClientActivitySnapshot {
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SearchAirWikiInput {
-    /// Question about approved local or shared knowledge. UTF-8 input is limited to 2 KiB.
+    /// Question about local knowledge approved for this application. UTF-8 input is limited to 2 KiB.
     pub question: String,
     /// Number of evidence items to return (defaults to 5; range 1..=10).
     #[serde(default)]
@@ -607,12 +607,23 @@ pub struct GetAirWikiComputationRunOutput {
 
 #[async_trait::async_trait]
 pub trait McpApplicationBackend: Send + Sync {
+    async fn authorize_search(
+        &self,
+        identity: McpApplicationIdentity,
+    ) -> Result<McpSearchAuthorization, McpApplicationError>;
+
     async fn call(
         &self,
         identity: McpApplicationIdentity,
         tool: &'static str,
         arguments: serde_json::Value,
     ) -> Result<serde_json::Value, McpApplicationError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpSearchAuthorization {
+    pub local_node_id: String,
+    pub allowed_collection_ids: Vec<uuid::Uuid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -907,7 +918,20 @@ fn search_tool_router() -> ToolRouter<AirWikiMcp> {
                         .into());
                     }
                 };
-                match SearchAirWikiTool::invoke(context.service, input).await {
+                let identity = context
+                    .request_context
+                    .extensions
+                    .get::<http::request::Parts>()
+                    .and_then(|parts| parts.headers.get(MCP_CAPABILITY_HEADER))
+                    .and_then(|value| value.to_str().ok())
+                    .filter(|value| value.len() <= 256 && !value.is_empty())
+                    .map(|capability| McpApplicationIdentity {
+                        capability: capability.to_owned(),
+                    })
+                    .or_else(|| context.service.bridge_identity.clone());
+                match SearchAirWikiTool::invoke_with_identity(context.service, identity, input)
+                    .await
+                {
                     Ok(output) => match serde_json::to_value(output) {
                         Ok(output) => Ok(CallToolResult::structured(output).into()),
                         Err(_) => Ok(McpToolFailure::temporarily_unavailable(
@@ -1221,13 +1245,22 @@ fn application_tool_failure(error: McpApplicationError) -> McpToolFailure {
 struct SearchAirWikiTool;
 
 impl SearchAirWikiTool {
+    #[cfg(test)]
     async fn invoke(
         service: &AirWikiMcp,
         input: SearchAirWikiInput,
     ) -> Result<SearchAirWikiOutput, ErrorData> {
+        Self::invoke_with_identity(service, service.bridge_identity.clone(), input).await
+    }
+
+    async fn invoke_with_identity(
+        service: &AirWikiMcp,
+        identity: Option<McpApplicationIdentity>,
+        input: SearchAirWikiInput,
+    ) -> Result<SearchAirWikiOutput, ErrorData> {
         let question = input.question.trim();
         let top_k = input.top_k.unwrap_or(DEFAULT_TOP_K);
-        let request = SearchRequest::new(question, SearchPurpose::ExternalAi, top_k);
+        let mut request = SearchRequest::new(question, SearchPurpose::ExternalAi, top_k);
         request.validate().map_err(contract_error_to_mcp)?;
         match &service.backend {
             SearchToolBackend::Federated {
@@ -1235,8 +1268,22 @@ impl SearchAirWikiTool {
                 rate_limiter,
             } => {
                 rate_limiter.try_acquire(Instant::now())?;
+                let application_scope = if let Some(backend) = service.application_backend.as_ref()
+                {
+                    let identity = identity
+                        .ok_or_else(|| contract_error_to_mcp(SearchContractError::Unauthorized))?;
+                    let authorization = backend
+                        .authorize_search(identity.clone())
+                        .await
+                        .map_err(application_search_error_to_mcp)?;
+                    request = request
+                        .with_local_collection_scope(authorization.allowed_collection_ids.clone());
+                    Some((Arc::clone(backend), identity, authorization.local_node_id))
+                } else {
+                    None
+                };
                 let request_id = request.request_id;
-                let response = search.search(request).await.map_err(|error| {
+                let mut response = search.search(request).await.map_err(|error| {
                     let _ = request_id;
                     tracing::warn!(
                         error_kind = contract_error_kind(&error),
@@ -1244,6 +1291,20 @@ impl SearchAirWikiTool {
                     );
                     contract_error_to_mcp(error)
                 })?;
+                if let Some((backend, identity, initial_node_id)) = application_scope {
+                    let final_authorization = backend
+                        .authorize_search(identity)
+                        .await
+                        .map_err(application_search_error_to_mcp)?;
+                    if final_authorization.local_node_id != initial_node_id {
+                        return Err(contract_error_to_mcp(SearchContractError::Unauthorized));
+                    }
+                    retain_application_authorized_hits(
+                        &mut response,
+                        &initial_node_id,
+                        &final_authorization.allowed_collection_ids,
+                    );
+                }
                 output_from_response(request_id, top_k, response)
             }
             SearchToolBackend::Bridge(bridge) => {
@@ -1254,6 +1315,34 @@ impl SearchAirWikiTool {
                     })
                     .await
             }
+        }
+    }
+}
+
+fn application_search_error_to_mcp(error: McpApplicationError) -> ErrorData {
+    match error {
+        McpApplicationError::Unauthorized => {
+            contract_error_to_mcp(SearchContractError::Unauthorized)
+        }
+        _ => contract_error_to_mcp(SearchContractError::Unavailable(
+            "application authorization is unavailable".to_owned(),
+        )),
+    }
+}
+
+fn retain_application_authorized_hits(
+    response: &mut SearchResponse,
+    local_node_id: &str,
+    allowed_collection_ids: &[uuid::Uuid],
+) {
+    let allowed = allowed_collection_ids
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+    for hits in [&mut response.hits, &mut response.authorized_candidates] {
+        hits.retain(|hit| hit.node_id == local_node_id && allowed.contains(&hit.collection_id));
+        for (index, hit) in hits.iter_mut().enumerate() {
+            hit.rank = u32::try_from(index + 1).unwrap_or(u32::MAX);
         }
     }
 }
@@ -2506,10 +2595,26 @@ mod tests {
     #[derive(Default)]
     struct RecordingApplicationBackend {
         calls: Mutex<Vec<(String, &'static str)>>,
+        search_authorization: Mutex<Option<McpSearchAuthorization>>,
     }
 
     #[async_trait]
     impl McpApplicationBackend for RecordingApplicationBackend {
+        async fn authorize_search(
+            &self,
+            _identity: McpApplicationIdentity,
+        ) -> Result<McpSearchAuthorization, McpApplicationError> {
+            Ok(self
+                .search_authorization
+                .lock()
+                .expect("search authorization lock")
+                .clone()
+                .unwrap_or_else(|| McpSearchAuthorization {
+                    local_node_id: test_peer_id('A'),
+                    allowed_collection_ids: Vec::new(),
+                }))
+        }
+
         async fn call(
             &self,
             identity: McpApplicationIdentity,
@@ -2674,7 +2779,7 @@ mod tests {
             .and_then(|schema| schema.get("description"))
             .and_then(serde_json::Value::as_str)
             .expect("question description");
-        assert!(question_description.contains("approved local or shared knowledge"));
+        assert!(question_description.contains("local knowledge approved for this application"));
         let top_k = properties
             .get("top_k")
             .and_then(serde_json::Value::as_object)
@@ -3235,6 +3340,93 @@ mod tests {
         let search_item = search_items[0].as_object().expect("search item object");
         assert!(search_item.contains_key("lane"));
         assert!(search_item.contains_key("rank"));
+    }
+
+    #[tokio::test]
+    async fn application_search_requires_a_capability_and_scopes_local_collections() {
+        let backend = Arc::new(RecordingBackend::default());
+        let application_backend = Arc::new(RecordingApplicationBackend::default());
+        let allowed_collection = Uuid::new_v4();
+        *application_backend
+            .search_authorization
+            .lock()
+            .expect("search authorization lock") = Some(McpSearchAuthorization {
+            local_node_id: test_peer_id('A'),
+            allowed_collection_ids: vec![allowed_collection],
+        });
+        let server = AirWikiMcp::with_application_backend(
+            backend.clone(),
+            Arc::new(SearchRateLimiter::new()),
+            application_backend,
+        );
+        let unauthorized = SearchAirWikiTool::invoke_with_identity(
+            &server,
+            None,
+            SearchAirWikiInput {
+                question: "How do we recover payments?".to_owned(),
+                top_k: None,
+            },
+        )
+        .await
+        .expect_err("missing capability must fail closed");
+        assert_eq!(unauthorized.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(backend.requests.lock().expect("request lock").is_empty());
+
+        let output = SearchAirWikiTool::invoke_with_identity(
+            &server,
+            Some(McpApplicationIdentity {
+                capability: "a".repeat(96),
+            }),
+            SearchAirWikiInput {
+                question: "How do we recover payments?".to_owned(),
+                top_k: None,
+            },
+        )
+        .await
+        .expect("authorized scoped search");
+        let requests = backend.requests.lock().expect("request lock");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].local_collection_scope(),
+            Some([allowed_collection].as_slice())
+        );
+        assert_eq!(output.evidence, McpEvidenceResult::NoRelevantEvidence);
+        assert!(output.authorized_candidates.is_empty());
+    }
+
+    #[test]
+    fn application_authorization_filter_rejects_remote_and_ungranted_hits() {
+        let local_node_id = test_peer_id('A');
+        let allowed_collection = Uuid::new_v4();
+        let mut allowed = sample_hit();
+        allowed.node_id.clone_from(&local_node_id);
+        allowed.collection_id = allowed_collection;
+        let mut ungranted = sample_hit();
+        ungranted.node_id.clone_from(&local_node_id);
+        let mut remote = sample_hit();
+        remote.node_id = test_peer_id('B');
+        remote.collection_id = allowed_collection;
+        let request_id = Uuid::new_v4();
+        let mut response = SearchResponse {
+            request_id,
+            hits: vec![allowed.clone(), ungranted, remote.clone()],
+            authorized_candidates: vec![remote, allowed],
+            offline_nodes: Vec::new(),
+            warnings: Vec::new(),
+            partial: false,
+        };
+
+        retain_application_authorized_hits(&mut response, &local_node_id, &[allowed_collection]);
+
+        assert_eq!(response.hits.len(), 1);
+        assert_eq!(response.authorized_candidates.len(), 1);
+        assert!(
+            response
+                .hits
+                .iter()
+                .chain(&response.authorized_candidates)
+                .all(|hit| hit.node_id == local_node_id && hit.collection_id == allowed_collection)
+        );
     }
 
     #[tokio::test]

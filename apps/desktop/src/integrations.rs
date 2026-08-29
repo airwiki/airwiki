@@ -133,10 +133,17 @@ pub(crate) enum IntegrationStatus {
     Error,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IntegrationIssue {
+    ExistingConfiguration,
+    ManagedBridgeIntegrity,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IntegrationView {
     pub client: ChatClientKind,
     pub status: IntegrationStatus,
+    pub issue: Option<IntegrationIssue>,
     pub detected_version: Option<String>,
     pub detail: String,
     pub planned_path: Option<PathBuf>,
@@ -531,6 +538,17 @@ impl ChatIntegrationManager {
 
     async fn connect(&self, client: ChatClientKind) -> Result<()> {
         let provision = self.ensure_application_capability(client).await?;
+        if provision == CapabilityProvision::Created
+            && let Err(error) = self
+                .database
+                .connect_application_to_default_wikis(application_id(client))
+        {
+            let rollback = self.revoke_application_capability(client).await;
+            return Err(with_rollback_context(
+                error.context("no se pudo conceder acceso de lectura a las wikis locales"),
+                rollback,
+            ));
+        }
         let workflow_change = if let Some(workflow_client) = client.workflow_client() {
             match self.workflow_guides.install(workflow_client).await {
                 Ok(change) => change,
@@ -913,13 +931,12 @@ impl ChatIntegrationManager {
             ));
         }
         let configured = self.codex_configuration(&codex).await?;
-        let (status, detail) = self
+        let classification = self
             .classify_configuration_securely(configured.as_ref(), ChatClientKind::ChatGptDesktop)
             .await?;
-        Ok(view(
+        Ok(classified_view(
             ChatClientKind::ChatGptDesktop,
-            status,
-            detail,
+            classification,
             detected_version,
             Some(self.managed_bridge_path()),
         ))
@@ -1116,13 +1133,12 @@ impl ChatIntegrationManager {
             ));
         }
         let configured = self.claude_code_configuration(&claude).await?;
-        let (status, detail) = self
+        let classification = self
             .classify_configuration_securely(configured.as_ref(), ChatClientKind::ClaudeCode)
             .await?;
-        Ok(view(
+        Ok(classified_view(
             ChatClientKind::ClaudeCode,
-            status,
-            detail,
+            classification,
             detected_version,
             Some(self.managed_bridge_path()),
         ))
@@ -1327,13 +1343,12 @@ impl ChatIntegrationManager {
             ));
         }
         let configured = self.gemini_configuration(&self.environment.home).await?;
-        let (status, detail) = self
+        let classification = self
             .classify_configuration_securely(configured.as_ref(), ChatClientKind::GeminiCli)
             .await?;
-        Ok(view(
+        Ok(classified_view(
             ChatClientKind::GeminiCli,
-            status,
-            detail,
+            classification,
             self.program_version(&gemini).await,
             Some(self.managed_bridge_path()),
         ))
@@ -1736,17 +1751,18 @@ impl ChatIntegrationManager {
         &self,
         configuration: Option<&ManagedConfiguration>,
         client: ChatClientKind,
-    ) -> Result<(IntegrationStatus, &'static str)> {
+    ) -> Result<ConfigurationClassification> {
         if let Some(configuration) = configuration
             && configuration.is_managed(&self.managed_bridge_root(), client)
             && !self
                 .configuration_is_securely_managed(configuration, client)
                 .await?
         {
-            return Ok((
-                IntegrationStatus::Conflict,
-                "La ruta administrada no superó la validación de integridad; no se modificará.",
-            ));
+            return Ok(ConfigurationClassification {
+                status: IntegrationStatus::Conflict,
+                detail: "La ruta administrada no superó la validación de integridad; no se modificará.",
+                issue: Some(IntegrationIssue::ManagedBridgeIntegrity),
+            });
         }
         Ok(classify_configuration(
             configuration,
@@ -1783,12 +1799,6 @@ impl ChatIntegrationManager {
         {
             return Ok(false);
         }
-        if paths_equal(&configuration.command, &self.managed_bridge_path()) {
-            let Some(bundled) = self.bundled_bridge() else {
-                return Ok(false);
-            };
-            return files_equal_bounded(&bundled, &canonical_command).await;
-        }
         match managed_bridge_location(&configuration.command, &root) {
             Some(ManagedBridgeLocation::Legacy) => Ok(true),
             Some(ManagedBridgeLocation::ContentAddressed(expected_digest)) => {
@@ -1814,6 +1824,7 @@ fn view(
     IntegrationView {
         client,
         status,
+        issue: None,
         detected_version,
         detail: detail.into(),
         planned_path,
@@ -1825,6 +1836,23 @@ fn view(
             WorkflowGuideView::built_in()
         },
     }
+}
+
+fn classified_view(
+    client: ChatClientKind,
+    classification: ConfigurationClassification,
+    detected_version: Option<String>,
+    planned_path: Option<PathBuf>,
+) -> IntegrationView {
+    let mut result = view(
+        client,
+        classification.status,
+        classification.detail,
+        detected_version,
+        planned_path,
+    );
+    result.issue = classification.issue;
+    result
 }
 
 fn with_rollback_context(operation: anyhow::Error, rollback: Result<()>) -> anyhow::Error {
@@ -2097,29 +2125,44 @@ fn managed_bridge_location(command: &Path, managed_root: &Path) -> Option<Manage
     Some(ManagedBridgeLocation::ContentAddressed(digest.to_owned()))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConfigurationClassification {
+    status: IntegrationStatus,
+    detail: &'static str,
+    issue: Option<IntegrationIssue>,
+}
+
 fn classify_configuration(
     configured: Option<&ManagedConfiguration>,
     expected_bridge: &Path,
     managed_root: &Path,
     client: ChatClientKind,
-) -> (IntegrationStatus, &'static str) {
+) -> ConfigurationClassification {
     match configured {
-        None => (
-            IntegrationStatus::Available,
-            "Cliente detectado; listo para conectar con confirmación.",
-        ),
-        Some(configuration) if configuration.is_exact(expected_bridge, client) => (
-            IntegrationStatus::Configured,
-            "Configuración administrada instalada.",
-        ),
-        Some(configuration) if configuration.is_managed(managed_root, client) => (
-            IntegrationStatus::UpdateAvailable,
-            "La configuración usa una versión anterior del puente.",
-        ),
-        Some(_) => (
-            IntegrationStatus::Conflict,
-            "Ya existe una entrada airwiki distinta; no se modificará automáticamente.",
-        ),
+        None => ConfigurationClassification {
+            status: IntegrationStatus::Available,
+            detail: "Cliente detectado; listo para conectar con confirmación.",
+            issue: None,
+        },
+        Some(configuration) if configuration.is_exact(expected_bridge, client) => {
+            ConfigurationClassification {
+                status: IntegrationStatus::Configured,
+                detail: "Configuración administrada instalada.",
+                issue: None,
+            }
+        }
+        Some(configuration) if configuration.is_managed(managed_root, client) => {
+            ConfigurationClassification {
+                status: IntegrationStatus::UpdateAvailable,
+                detail: "La configuración usa una versión anterior del puente.",
+                issue: None,
+            }
+        }
+        Some(_) => ConfigurationClassification {
+            status: IntegrationStatus::Conflict,
+            detail: "Ya existe una entrada airwiki distinta; no se modificará automáticamente.",
+            issue: Some(IntegrationIssue::ExistingConfiguration),
+        },
     }
 }
 
@@ -2324,12 +2367,6 @@ async fn set_executable_permissions(path: &Path) -> Result<()> {
 #[cfg(not(unix))]
 async fn set_executable_permissions(_path: &Path) -> Result<()> {
     Ok(())
-}
-
-async fn files_equal_bounded(left: &Path, right: &Path) -> Result<bool> {
-    let (left_bytes, right_bytes) =
-        tokio::try_join!(read_file_bounded(left), read_file_bounded(right))?;
-    Ok(left_bytes == right_bytes)
 }
 
 fn digest_file_bounded(path: &Path) -> Result<String> {
@@ -2737,6 +2774,26 @@ mod tests {
             .transpose()
             .unwrap();
         manager
+    }
+
+    fn add_local_only_collection(
+        manager: &ChatIntegrationManager,
+        temp: &TempDir,
+        name: &str,
+    ) -> airwiki_core::CollectionRecord {
+        let source = temp.path().join(format!("{name}-source"));
+        let wiki = temp.path().join(format!("{name}-wiki"));
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&wiki).unwrap();
+        manager
+            .database
+            .create_collection(
+                name,
+                source,
+                wiki,
+                airwiki_types::CollectionPolicy::local_only(),
+            )
+            .unwrap()
     }
 
     #[cfg(feature = "e2e")]
@@ -3298,10 +3355,27 @@ mod tests {
         });
         let mut manager = test_manager(&temp, executable);
         manager.runner = runner.clone();
+        let collection = add_local_only_collection(&manager, &temp, "generic-success");
 
         manager.connect(ChatClientKind::GenericMcp).await.unwrap();
 
         assert!(manager.generic_capability_is_active().await.unwrap());
+        assert_eq!(
+            manager
+                .database
+                .application_search_collection_ids(application_id(ChatClientKind::GenericMcp))
+                .unwrap(),
+            [collection.id]
+        );
+        assert!(
+            manager
+                .database
+                .collection(collection.id)
+                .unwrap()
+                .unwrap()
+                .policy
+                .allow_external_ai
+        );
         assert_eq!(
             manager.inspect_generic_mcp().await.unwrap().status,
             IntegrationStatus::Configured
@@ -3343,10 +3417,21 @@ mod tests {
         std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
         std::fs::write(&bundled, b"trusted bridge").unwrap();
         let manager = test_manager(&temp, executable);
+        let collection = add_local_only_collection(&manager, &temp, "generic-failure");
 
         assert!(manager.connect(ChatClientKind::GenericMcp).await.is_err());
         assert!(!manager.generic_capability_is_active().await.unwrap());
         assert!(!manager.capability_path(ChatClientKind::GenericMcp).exists());
+        let collection = manager.database.collection(collection.id).unwrap().unwrap();
+        assert!(collection.policy.local_only);
+        assert!(!collection.policy.allow_external_ai);
+        assert!(
+            manager
+                .database
+                .list_application_wiki_grants()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -3488,6 +3573,68 @@ mod tests {
         );
     }
 
+    #[test]
+    fn external_configuration_reports_its_specific_conflict_issue() {
+        let temp = TempDir::new().expect("temporary directory");
+        let managed_root = temp.path().join("managed");
+        let configuration = ManagedConfiguration::new(
+            temp.path().join("external/airwiki-mcp-bridge"),
+            ChatClientKind::ChatGptDesktop,
+        );
+
+        let classification = classify_configuration(
+            Some(&configuration),
+            &managed_root.join("current/airwiki-mcp-bridge"),
+            &managed_root,
+            ChatClientKind::ChatGptDesktop,
+        );
+
+        assert_eq!(classification.status, IntegrationStatus::Conflict);
+        assert_eq!(
+            classification.issue,
+            Some(IntegrationIssue::ExistingConfiguration)
+        );
+    }
+
+    #[tokio::test]
+    async fn bundled_bridge_rebuild_after_start_does_not_create_a_false_conflict() {
+        let temp = TempDir::new().expect("temporary directory");
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").expect("desktop fixture");
+        let bundled = temp
+            .path()
+            .join("integrations/bridge")
+            .join(bridge_filename());
+        std::fs::create_dir_all(bundled.parent().expect("bundle parent"))
+            .expect("bundle directory");
+        std::fs::write(&bundled, b"bridge before rebuild").expect("initial bridge fixture");
+        let manager = test_manager(&temp, executable);
+        let installed = manager.managed_bridge_path();
+        std::fs::create_dir_all(installed.parent().expect("managed bridge parent"))
+            .expect("managed bridge directory");
+        std::fs::copy(&bundled, &installed).expect("installed bridge fixture");
+        set_executable_permissions(&installed)
+            .await
+            .expect("executable bridge fixture");
+        let configuration = ManagedConfiguration::new(installed, ChatClientKind::ChatGptDesktop);
+
+        std::fs::write(&bundled, b"bridge rebuilt after app startup")
+            .expect("rebuilt bridge fixture");
+
+        assert!(
+            manager
+                .configuration_is_securely_managed(&configuration, ChatClientKind::ChatGptDesktop,)
+                .await
+                .expect("validate installed bridge")
+        );
+        let classification = manager
+            .classify_configuration_securely(Some(&configuration), ChatClientKind::ChatGptDesktop)
+            .await
+            .expect("classify installed bridge");
+        assert_eq!(classification.status, IntegrationStatus::Configured);
+        assert_eq!(classification.issue, None);
+    }
+
     #[tokio::test]
     async fn prior_content_addressed_bridge_is_reported_as_an_update() {
         let temp = TempDir::new().expect("temporary directory");
@@ -3516,12 +3663,13 @@ mod tests {
             .expect("executable bridge fixture");
         let configuration = ManagedConfiguration::new(previous, ChatClientKind::ChatGptDesktop);
 
-        let (status, _) = manager
+        let classification = manager
             .classify_configuration_securely(Some(&configuration), ChatClientKind::ChatGptDesktop)
             .await
             .expect("classify previous bridge");
 
-        assert_eq!(status, IntegrationStatus::UpdateAvailable);
+        assert_eq!(classification.status, IntegrationStatus::UpdateAvailable);
+        assert_eq!(classification.issue, None);
     }
 
     #[tokio::test]

@@ -81,13 +81,13 @@ pub use storage::{
     ApplicationWikiRole, AuditEvent, BootstrapFederationIndexEntry, CollectionMaintenanceCounts,
     CollectionMaintenanceRecord, CollectionMaintenanceResult, CollectionMaintenanceStatus,
     CollectionRecord, CollectionStats, ComputationRunRecord, ComputationRunState, ConceptRecord,
-    Database, FederationIndexRecord, GrantRecord, IndexingMode, JobRecord,
-    ManagedBundleMutationRecord, ManagedBundleMutationState, MemoryScope, MemorySearchRecord,
-    NewCollection, NewManagedCollection, NewProjectMemoryAttachment, OkfConceptProjectionRecord,
-    PeerRecord, ProjectMemoryAttachmentRecord, ProjectMemoryAttachmentState,
-    ProjectMemoryRequestKind, ProjectMemoryRequestRecord, ProjectMemoryRequestState,
-    ReviewEvidenceChunkRecord, ReviewEvidencePageRecord, ReviewReanalysisClaim, ReviewVersionToken,
-    SourceDocumentRecord, StoredChunk, WikiOrigin,
+    Database, FederationIndexRecord, GrantRecord, IndexingMode, InitialApplicationAccess,
+    JobRecord, ManagedBundleMutationRecord, ManagedBundleMutationState, MemoryScope,
+    MemorySearchRecord, NewCollection, NewManagedCollection, NewProjectMemoryAttachment,
+    OkfConceptProjectionRecord, PeerRecord, ProjectMemoryAttachmentRecord,
+    ProjectMemoryAttachmentState, ProjectMemoryRequestKind, ProjectMemoryRequestRecord,
+    ProjectMemoryRequestState, ReviewEvidenceChunkRecord, ReviewEvidencePageRecord,
+    ReviewReanalysisClaim, ReviewVersionToken, SourceDocumentRecord, StoredChunk, WikiOrigin,
 };
 
 /// Embedding dimensionality required by multilingual-e5-small.

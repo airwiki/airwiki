@@ -1167,6 +1167,11 @@ mod tests {
         let second_reader = application(&database);
         let service = ProjectMemoryService::new(database.clone());
         let approved = initialize_and_approve(&service, owner, &root);
+        for app_id in [first_reader, second_reader] {
+            database
+                .set_application_wiki_role(app_id, approved.collection.id, None)
+                .unwrap();
+        }
         let revoked_request = match service.open(first_reader, &root).unwrap() {
             ProjectMemoryOpenResult::AwaitingConfirmation { request_id } => request_id,
             other => panic!("unexpected result: {other:?}"),

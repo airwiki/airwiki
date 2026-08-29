@@ -1,8 +1,8 @@
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use airwiki_types::{
-    PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2, PublicCatalogQuery,
-    SignedPublicCollectionManifest, SignedPublicCollectionTombstone,
+    PUBLIC_CATALOG_BROWSE_PROTOCOL, PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2,
+    PublicCatalogQuery, SignedPublicCollectionManifest, SignedPublicCollectionTombstone,
 };
 use async_trait::async_trait;
 use libp2p::request_response::{self, ProtocolSupport, ResponseChannel};
@@ -55,7 +55,7 @@ impl ProtocolPayload for CatalogWireRequest {
             Self::Query(query) => {
                 ensure_catalog_protocol(protocol)?;
                 query.protocol_version = protocol.to_owned();
-                Ok(())
+                validate_catalog_query_protocol(query, protocol)
             }
             Self::Register(signed) => {
                 validate_catalog_protocol(&signed.manifest.protocol_version, protocol)
@@ -110,7 +110,7 @@ impl ProtocolPayload for CatalogWireRequest {
 
     fn validate_protocol(&self, protocol: &str) -> std::io::Result<()> {
         match self {
-            Self::Query(query) => validate_catalog_protocol(&query.protocol_version, protocol),
+            Self::Query(query) => validate_catalog_query_protocol(query, protocol),
             Self::Register(signed) => {
                 validate_catalog_protocol(&signed.manifest.protocol_version, protocol)
             }
@@ -152,9 +152,10 @@ impl ProtocolPayload for CatalogWireResponse {
         ensure_catalog_protocol(protocol)?;
         if let Self::Results(manifests) = self
             && manifests.iter().any(|signed| {
-                signed.manifest.protocol_version != protocol
-                    && !(protocol == PUBLIC_CATALOG_PROTOCOL_V2
-                        && signed.manifest.protocol_version == PUBLIC_CATALOG_PROTOCOL)
+                !catalog_response_manifest_protocol_is_allowed(
+                    protocol,
+                    &signed.manifest.protocol_version,
+                )
             })
         {
             return Err(protocol_mismatch());
@@ -166,11 +167,36 @@ impl ProtocolPayload for CatalogWireResponse {
 fn ensure_catalog_protocol(protocol: &str) -> std::io::Result<()> {
     if matches!(
         protocol,
-        PUBLIC_CATALOG_PROTOCOL | PUBLIC_CATALOG_PROTOCOL_V2
+        PUBLIC_CATALOG_BROWSE_PROTOCOL | PUBLIC_CATALOG_PROTOCOL | PUBLIC_CATALOG_PROTOCOL_V2
     ) {
         Ok(())
     } else {
         Err(protocol_mismatch())
+    }
+}
+
+fn validate_catalog_query_protocol(
+    query: &PublicCatalogQuery,
+    negotiated: &str,
+) -> std::io::Result<()> {
+    validate_catalog_protocol(&query.protocol_version, negotiated)?;
+    if query.is_browse() == (negotiated == PUBLIC_CATALOG_BROWSE_PROTOCOL) {
+        Ok(())
+    } else {
+        Err(protocol_mismatch())
+    }
+}
+
+fn catalog_response_manifest_protocol_is_allowed(negotiated: &str, declared: &str) -> bool {
+    match negotiated {
+        PUBLIC_CATALOG_BROWSE_PROTOCOL | PUBLIC_CATALOG_PROTOCOL_V2 => {
+            matches!(
+                declared,
+                PUBLIC_CATALOG_PROTOCOL | PUBLIC_CATALOG_PROTOCOL_V2
+            )
+        }
+        PUBLIC_CATALOG_PROTOCOL => declared == PUBLIC_CATALOG_PROTOCOL,
+        _ => false,
     }
 }
 
@@ -376,6 +402,8 @@ pub async fn run_public_catalog_server(
             "no public catalog listen address".to_owned(),
         ));
     }
+    let browse = StreamProtocol::try_from_owned(PUBLIC_CATALOG_BROWSE_PROTOCOL.to_owned())
+        .map_err(|error| NetworkError::Transport(error.to_string()))?;
     let current = StreamProtocol::try_from_owned(PUBLIC_CATALOG_PROTOCOL_V2.to_owned())
         .map_err(|error| NetworkError::Transport(error.to_string()))?;
     let legacy = StreamProtocol::try_from_owned(PUBLIC_CATALOG_PROTOCOL.to_owned())
@@ -384,6 +412,7 @@ pub async fn run_public_catalog_server(
     let catalog = request_response::Behaviour::with_codec(
         codec,
         [
+            (browse, ProtocolSupport::Full),
             (current, ProtocolSupport::Full),
             (legacy, ProtocolSupport::Full),
         ],
@@ -647,6 +676,67 @@ async fn handle_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(serde::Serialize)]
+    enum LegacyCatalogWireRequest {
+        Query(LegacyCatalogQuery),
+    }
+
+    #[derive(serde::Serialize)]
+    struct LegacyCatalogQuery {
+        protocol_version: String,
+        request_id: uuid::Uuid,
+        query: String,
+        languages: Vec<String>,
+        limit: u8,
+    }
+
+    #[test]
+    fn legacy_catalog_query_defaults_to_search_even_when_text_is_star() {
+        let legacy = LegacyCatalogWireRequest::Query(LegacyCatalogQuery {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            request_id: uuid::Uuid::new_v4(),
+            query: airwiki_types::PUBLIC_CATALOG_BROWSE_QUERY.to_owned(),
+            languages: Vec::new(),
+            limit: 10,
+        });
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&legacy, &mut bytes).unwrap();
+
+        let decoded: CatalogWireRequest = ciborium::from_reader(bytes.as_slice()).unwrap();
+        let CatalogWireRequest::Query(query) = decoded else {
+            panic!("legacy catalog query decoded into another wire operation");
+        };
+
+        assert_eq!(
+            (query.operation, query.is_browse()),
+            (airwiki_types::PublicCatalogOperation::Search, false)
+        );
+    }
+
+    #[test]
+    fn browse_operation_requires_the_dedicated_catalog_protocol() {
+        let browse = CatalogWireRequest::Query(PublicCatalogQuery {
+            protocol_version: PUBLIC_CATALOG_BROWSE_PROTOCOL.to_owned(),
+            request_id: uuid::Uuid::new_v4(),
+            operation: airwiki_types::PublicCatalogOperation::Browse,
+            query: airwiki_types::PUBLIC_CATALOG_BROWSE_QUERY.to_owned(),
+            languages: Vec::new(),
+            limit: 10,
+        });
+
+        assert!(
+            browse
+                .validate_protocol(PUBLIC_CATALOG_BROWSE_PROTOCOL)
+                .is_ok()
+        );
+        assert!(
+            browse
+                .validate_protocol(PUBLIC_CATALOG_PROTOCOL_V2)
+                .is_err()
+        );
+        assert!(browse.validate_protocol(PUBLIC_CATALOG_PROTOCOL).is_err());
+    }
 
     #[test]
     fn relay_lifecycle_snapshot_is_bounded_saturating_and_reset() {

@@ -17,6 +17,8 @@ import type {
 
 export type * from './generated/ui-contract';
 
+export type ModelProfile = 'automatic' | 'efficient' | 'quality';
+
 export interface DevelopmentBridge {
   connect(onEvent: (event: UiEventEnvelope) => void): Promise<AppSnapshot>;
   invoke(command: string, arguments_: Record<string, unknown> | undefined): Promise<unknown>;
@@ -47,6 +49,10 @@ export async function installModels(): Promise<void> {
 
 export async function cancelModelInstall(): Promise<void> {
   return invoke('cancel_model_install');
+}
+
+export async function setModelProfile(profile: ModelProfile): Promise<void> {
+  return invoke('set_model_profile', { profile });
 }
 
 export async function pickWikiFolder(): Promise<FolderSelection | null> {
@@ -119,6 +125,12 @@ export async function addFederationIndex(peerId: string, address: string): Promi
 
 export async function removeFederationIndex(peerId: string): Promise<void> {
   return invoke('remove_federation_index', { peerId });
+}
+
+export async function explorePublicWikis(limit = 24): Promise<string> {
+  const requestId = crypto.randomUUID();
+  await invoke('explore_public_wikis', { requestId, limit });
+  return requestId;
 }
 
 type SharedWikiBrowseOptions = {
@@ -253,12 +265,8 @@ export async function approveReview(conceptId: string, sourceRevision: number, d
   return invoke('approve_review', { conceptId, sourceRevision, draft });
 }
 
-export async function rejectReview(conceptId: string): Promise<void> {
-  return invoke('reject_review', { conceptId });
-}
-
-export async function reanalyzeReview(conceptId: string): Promise<void> {
-  return invoke('reanalyze_review', { conceptId });
+export async function rejectReview(conceptId: string, sourceRevision: number): Promise<void> {
+  return invoke('reject_review', { conceptId, sourceRevision });
 }
 
 export async function loadWikiBundle(wikiId: string): Promise<string> {

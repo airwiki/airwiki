@@ -171,7 +171,8 @@ and required models remain ready.
 - A changed source withdraws the published revision before processing the new
   content.
 - Extraction, enrichment, indexing, and bounded retries may be automatic;
-  publication always returns to explicit human review.
+  each result is materialized as a local unverified OKF draft. Publication
+  always requires explicit human approval.
 - A durable publication intent interrupted after approval may resume at startup,
   but remains unsearchable until SQLite and the complete OKF bundle agree.
 - Wiki health may regenerate unambiguous derived artifacts. Content, history,
@@ -190,25 +191,62 @@ See [recovery](recovery.md) for failure paths.
    review the validation summary before AirWiki copies the bundle. Imported
    Wikis have no source watcher and remain managed from their OKF content.
 4. Keep external chat disabled during the first local test.
-5. Wait for automatic ingestion and review every proposal.
-6. Publish only recognized synthetic content.
+5. Wait for automatic ingestion, then open the Wiki and confirm that every
+   resource is already visible under **Drafts** without being searchable.
+6. Review a useful subset progressively. Approve only recognized synthetic
+   content, leave another draft for later and exclude one without deleting it.
 7. Enable peer sharing and grant only the synthetic Atlas Wiki when the
    two-node test requests it.
+
+Open the Wiki before and after review. Its compact status bar must show reviewed,
+draft and excluded counts. **All**, **Drafts**, **Reviewed** and **Excluded**
+must keep every local resource explorable without implying that a draft is
+searchable. The
+exposure route states separately whether the Wiki is available locally, over
+the LAN or on the Internet, and the AI-app area identifies the actual clients
+with access. **Share** groups the independent LAN and Internet controls without
+adding a second status panel. The separate **AI Apps** panel exposes an
+AI-memory Wiki's fixed application owner and editable reader/editor grants. An enabled channel
+without an actual grant is not presented as shared access, and public permission
+with an offline or expired announcement is not presented as confirmed Internet
+availability.
+
+The Library landing view is deliberately operational rather than decorative.
+Use **All**, **Needs attention**, **Only you**, and **Shared** to narrow the Wiki
+list without changing knowledge search. Each Wiki is one keyboard-operable shelf
+row: its name and origin lead into separate detected, searchable and review
+counts, a Local/LAN/Internet exposure route, and the next required action. The
+row remains understandable without relying on a separate table header.
+
+Inside a Wiki, use the page scrollbar for its status bar and local content.
+The page list and selected document do not create separate vertical scroll
+areas. The compact bar stays beside the review-state filters, view switch and
+**Details**, so searchable state, exposure and AI access remain in context.
 
 Use the [two-node runbook](two-node-runbook.md) for acceptance. A visible screen
 is not evidence by itself; verify the stated effect.
 
 ## Connect a local chat client
 
-After preflight is ready, open **Settings → AI apps** and refresh detection. AirWiki
-can register ChatGPT Desktop/Work, Codex, Claude Code and Gemini CLI through
+After preflight is ready, open **Settings → AI apps**. AirWiki refreshes client
+detection when it starts and whenever its window returns to the foreground;
+**Refresh** requests an immediate additional check. AirWiki can register ChatGPT
+Desktop/Work, Codex, Claude Code and Gemini CLI through
 supported CLIs, and can open Claude Desktop's MCPB installer. For clients with
 documented user skills, one confirmation installs the local MCP connection and
 the global AirWiki workflow guide; the prompt lists every global file first.
 Open a new conversation after installing or updating the guide.
 
+The Wiki status bar uses the client artwork to identify each detected or
+explicitly granted AI application. A configured client and access to the
+current Wiki remain independent states: recent activity confirms that a client
+reached AirWiki, while Wiki access confirms only that this Wiki is eligible.
+The UI does not claim that recent activity read a particular Wiki.
+
 **Allow in external chats** is independent from **Share with authorized peers**.
-Connecting a client never enables a Wiki, sharing or publication. See
+After its native confirmation, connecting a client grants that application
+reader access to compatible Wikis. It never enables LAN sharing or public
+publication. See
 [local chat integrations](chat-integrations.md).
 
 The Settings button uses three labelled status rings for local knowledge,

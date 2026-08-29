@@ -6,6 +6,8 @@ Thank you for helping make local, human-reviewed knowledge easier to use. Contri
 
 Read [AGENTS.md](AGENTS.md), the [architecture](docs/architecture.md), the [architecture decisions](docs/adr/README.md), and the [threat model](docs/threat-model.md). If your change touches `apps/**`, you must also read [apps/AGENTS.md](apps/AGENTS.md); if it touches `packaging/**`, you must read [packaging/AGENTS.md](packaging/AGENTS.md). The closest `AGENTS.md` supplements the root instructions and prevails on conflicts within its subtree. Inspect the current branch and working tree before making changes. Preserve unrelated edits and do not introduce an abstraction, protocol, dependency, or persistent field for a hypothetical future need.
 
+For desktop interface work, follow the [AirWiki desktop design guidelines](docs/ui-design-guidelines.md). They translate Apple Human Interface Guidelines into semantic, accessible rules for AirWiki's cross-platform Tauri/WebView shell without copying Apple branding or materials.
+
 Use [PLANS.md](PLANS.md) for substantial work only when durable coordination is useful. Expensive-to-reverse decisions belong in an ADR, while user-visible changes belong in [CHANGELOG.md](CHANGELOG.md).
 
 Never include real documents, personal information, credentials, model or runtime files, databases, logs, certificates, or generated local state. Tests and examples use synthetic fixtures.

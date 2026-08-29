@@ -13,19 +13,17 @@ export type SystemStatusItem = {
 type Translate = (id: string, args?: MessageArgs) => string;
 
 export function systemStatuses(snapshot: AppSnapshot, t: Translate): SystemStatusItem[] {
-  const indexingWorking = snapshot.wikiScans.length > 0 || (snapshot.wikiHealth?.updatingCount ?? 0) > 0;
-  const indexingFailed = snapshot.wikiHealth?.status === 'failed' || (snapshot.wikiHealth?.errorCount ?? 0) > 0;
+  const selectedModelReady = localAiModelReady(snapshot);
+  const selectedModelPending = localAiModelRestartPending(snapshot);
   const knowledge = snapshot.modelInstall
     ? status('general', 'desktop-status-knowledge', 'desktop-status-knowledge-preparing', 'working', t)
-    : indexingFailed
-      ? status('general', 'desktop-status-knowledge', 'status-failed', 'failed', t)
-      : !snapshot.model?.active
+    : selectedModelPending
+      ? status('general', 'desktop-status-knowledge', 'desktop-model-restart-needed-short', 'warning', t)
+      : !selectedModelReady
         ? status('general', 'desktop-status-knowledge', 'desktop-status-knowledge-needs-setup', 'off', t)
-        : snapshot.model.issues.length > 0
+        : (snapshot.model?.issues.length ?? 0) > 0
           ? status('general', 'desktop-status-knowledge', 'status-needs-attention', 'warning', t)
-          : indexingWorking
-            ? status('general', 'desktop-status-knowledge', 'desktop-status-knowledge-preparing', 'working', t)
-            : status('general', 'desktop-status-knowledge', 'desktop-status-knowledge-ready', 'ready', t);
+          : status('general', 'desktop-status-knowledge', 'desktop-status-knowledge-ready', 'ready', t);
 
   const lanWorking = snapshot.lanRuntime?.listener === 'starting' || snapshot.lanRuntime?.discovery === 'starting';
   const lanFailed = snapshot.lanRuntime?.listener === 'failed' || snapshot.lanRuntime?.discovery === 'failed';
@@ -89,4 +87,22 @@ function status(
 
 export function pendingApprovalCount(snapshot: AppSnapshot): number {
   return snapshot.projectMemoryRequests.length + snapshot.pendingComputations.length;
+}
+
+export function localAiModelReady(snapshot: AppSnapshot): boolean {
+  const model = snapshot.model;
+  return model !== null
+    && model.active
+    && model.recommendedModelId !== null
+    && model.recommendedModelId === model.activeModelId
+    && model.installed
+    && model.licenseAccepted;
+}
+
+export function localAiModelRestartPending(snapshot: AppSnapshot): boolean {
+  const model = snapshot.model;
+  return !localAiModelReady(snapshot)
+    && model !== null
+    && model.recommendedModelId !== null
+    && model.recommendedModelId === model.pendingModelId;
 }

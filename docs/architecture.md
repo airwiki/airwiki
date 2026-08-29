@@ -77,8 +77,9 @@ every read or mutation.
 ## Sources of truth
 
 SQLite is the source of operational state, local paths, jobs, trust, grants and
-audit events. Published OKF files are the source of truth for the visible wiki
-representation. Reconciliation reports disagreement rather than silently
+audit events. Managed OKF draft and stable files are the source of truth for the
+locally visible wiki representation; only coherent stable files enter search or
+external disclosure. Reconciliation reports disagreement rather than silently
 selecting one side. Original documents are never changed or replicated.
 
 Imported Wikis and personal AI-memory Wikis have no source folder. Their managed
@@ -98,15 +99,29 @@ Project attachments are withdrawn from their searchable projection before each
 validation, and all attachments reconcile before MCP or network services start.
 
 ```text
-detected -> extracted -> enriched -> needs review -> published
-                                      ^ human approval
+detected -> extracted -> enriched -> needs_review / OKF draft -> publishing -> published / OKF stable
+                                      |                         ^ explicit human approval
+                                      +-> excluded / OKF draft -+
 ```
 
 A modified source withdraws its published revision before preparing a new one.
-The review screen loads bounded pages of extracted chunks through the desktop
-worker. An opaque version binds the visible draft, source revision and complete
-chunk set; storage revalidates it in the publication transaction. Stale responses
-are discarded and publication remains unavailable until current evidence loads.
+The draft is immediately browsable in the local Wiki but absent from search,
+the stable index and every disclosure projection. Exclusion is reversible
+operational state and leaves the OKF lifecycle as `draft`. The review screen
+loads bounded pages of extracted chunks through the desktop worker. An opaque
+version binds the visible draft, source revision and complete chunk set; storage
+revalidates it in the publication transaction. Stale responses are discarded
+and publication remains unavailable until current evidence loads.
+
+Manual source updates are Wiki-scoped and exist only for ordinary folder
+Wikis. One request first reconciles the complete folder, then reruns local
+enrichment for the drafts that were pending when the request began. Newly
+detected or changed files follow the normal ingestion path once, while stable
+reviewed concepts and explicitly excluded drafts are not regenerated. Each
+previous draft remains intact until its replacement and embeddings commit
+atomically; a failed reanalysis therefore leaves the reviewable proposal in
+place.
+
 Automation may retry, inspect and rebuild unambiguous derived artifacts, but it
 may not publish, grant access or enable external chat. Guided repair withdraws
 affected concepts before changing ambiguous state, preserves a verified
@@ -198,10 +213,20 @@ This section defines the underlying trust boundaries.
   only from the already validated signed manifest; no LAN identity, device
   label or local path is accepted into that presentation. See
   [ADR 0008](adr/0008-public-federation.md).
-- Local MCP requires `allow_external_ai`; it does not imply peer sharing.
-- Application memory uses a separate random capability and per-Wiki
-  owner/reader/editor grant. It never implies LAN, public or other-application
-  access. Grants and computation execution require native confirmation.
+- Local MCP search requires an active random application capability, a per-Wiki
+  application grant and the internal `allow_external_ai` collection gate. The
+  gate is maintained with the application grants and never implies peer or
+  public sharing. Application-scoped requests are local-only because remote
+  peers cannot authenticate that local application's grant. Local collection
+  scope is applied before ranking and truncation, then capability and grants
+  are revalidated immediately before evidence leaves the gateway.
+- Confirming a new application connection grants that application reader access
+  to compatible Wikis by default. Creating a compatible Wiki likewise grants
+  reader access to active applications after native confirmation. Folder and
+  imported Wikis accept only reader grants; application memory uses the same
+  capability with owner/reader/editor roles. None of these grants imply LAN,
+  public or other-application access. Role changes and computation execution
+  require native confirmation.
   Personal memory stays in AirWiki's private vault. Project memory is an
   explicitly initialized `.airwiki` OKF bundle; the first application access in
   each canonical clone also requires native confirmation. Missing, invalid or

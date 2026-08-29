@@ -3,12 +3,14 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use airwiki_types::{
-    PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2, PUBLIC_BROWSE_PROTOCOL_V3,
-    PUBLIC_BROWSE_PROTOCOL_V4, PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2,
+    MAX_PUBLIC_CANDIDATES, PUBLIC_BROWSE_PROTOCOL, PUBLIC_BROWSE_PROTOCOL_V2,
+    PUBLIC_BROWSE_PROTOCOL_V3, PUBLIC_BROWSE_PROTOCOL_V4, PUBLIC_CATALOG_BROWSE_PROTOCOL,
+    PUBLIC_CATALOG_BROWSE_QUERY, PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2,
     PUBLIC_SEARCH_PROTOCOL, PUBLIC_SEARCH_PROTOCOL_V2, PublicBrowsePage, PublicBrowseRequest,
-    PublicCatalogQuery, PublicCollectionSummary, PublicCollectionTarget, PublicSearchRequest,
-    PublishedWikiPageRequest, SearchCollectionPresentation, SearchContractError, SearchHit,
-    SearchRequest, SearchResponse, SignedPublicCollectionManifest, SignedPublicCollectionTombstone,
+    PublicCatalogOperation, PublicCatalogQuery, PublicCollectionSummary, PublicCollectionTarget,
+    PublicSearchRequest, PublishedWikiPageRequest, SearchCollectionPresentation,
+    SearchContractError, SearchHit, SearchRequest, SearchResponse, SignedPublicCollectionManifest,
+    SignedPublicCollectionTombstone,
 };
 use libp2p::identity::Keypair;
 use libp2p::request_response::{self, OutboundRequestId, ProtocolSupport};
@@ -90,6 +92,37 @@ pub struct PublicSearchResult {
     pub route_kind: PublicRouteKind,
 }
 
+/// Signed public collection profiles returned by an explicit catalog browse.
+///
+/// Catalog browsing does not contact collection owners or fetch Wiki content.
+#[derive(Debug, Clone)]
+pub struct PublicCatalogResult {
+    pub collections: Vec<PublicCollectionSummary>,
+    pub partial: bool,
+}
+
+/// Sanitized reason why an explicit public-catalog browse could not complete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum PublicCatalogError {
+    #[error("no public federation index is configured")]
+    NotConfigured,
+    #[error("the configured public federation indexes need an update")]
+    UpgradeRequired,
+    #[error("the public federation indexes are unavailable")]
+    Unavailable,
+}
+
+impl PublicCatalogError {
+    /// Fixed diagnostic class safe for structured logs and UI mapping.
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::NotConfigured => "public_catalog_not_configured",
+            Self::UpgradeRequired => "public_catalog_upgrade_required",
+            Self::Unavailable => "public_catalog_unavailable",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct OwnerDeadlines {
     connect: Instant,
@@ -168,6 +201,65 @@ impl PublicReader {
         }
     }
 
+    pub async fn explore_catalog(
+        &self,
+        indexes: &[PublicIndexEndpoint],
+        limit: u8,
+    ) -> Result<PublicCatalogResult, PublicCatalogError> {
+        let mut catalog_query = PublicCatalogQuery {
+            protocol_version: PUBLIC_CATALOG_BROWSE_PROTOCOL.to_owned(),
+            request_id: uuid::Uuid::new_v4(),
+            operation: PublicCatalogOperation::Browse,
+            query: PUBLIC_CATALOG_BROWSE_QUERY.to_owned(),
+            languages: Vec::new(),
+            limit,
+        };
+        catalog_query
+            .validate()
+            .map_err(|_| PublicCatalogError::Unavailable)?;
+        // Publisher blocks are reader-local, so fetch the bounded candidate window before filtering.
+        catalog_query.limit = MAX_PUBLIC_CANDIDATES;
+        let _permit = self
+            .searches
+            .acquire()
+            .await
+            .map_err(|_| PublicCatalogError::Unavailable)?;
+        if bounded_indexes(indexes).next().is_none() {
+            return Err(PublicCatalogError::NotConfigured);
+        }
+
+        let started = Instant::now();
+        let deadline = public_index_deadline(started);
+        let mut swarm = reader_swarm(self.identity.clone(), CatalogProtocolMode::BrowseOnly)
+            .map_err(|_| PublicCatalogError::Unavailable)?;
+        let (manifests, catalog_state) =
+            query_catalog_manifests(&mut swarm, indexes, &catalog_query, deadline).await;
+        let partial = catalog_query_is_partial(catalog_state)?;
+        let mut candidates = {
+            let blocked = self.blocked_publishers.read().await;
+            select_candidates(manifests)
+                .into_iter()
+                .filter(|candidate| !blocked.contains(&candidate.manifest.publisher_id))
+                .collect::<Vec<_>>()
+        };
+        candidates.truncate(usize::from(limit));
+        {
+            let mut cache = self.manifests.write().await;
+            for candidate in &candidates {
+                cache_manifest_if_newer(&mut cache, candidate);
+            }
+            cache.retain(|_, manifest| manifest.manifest.expires_at > chrono::Utc::now());
+        }
+
+        Ok(PublicCatalogResult {
+            collections: candidates
+                .into_iter()
+                .map(|candidate| candidate.manifest.summary())
+                .collect(),
+            partial,
+        })
+    }
+
     pub async fn search(
         &self,
         indexes: &[PublicIndexEndpoint],
@@ -221,6 +313,7 @@ impl PublicReader {
         let catalog_query = PublicCatalogQuery {
             protocol_version: PUBLIC_CATALOG_PROTOCOL_V2.to_owned(),
             request_id: request.request_id,
+            operation: PublicCatalogOperation::Search,
             query: request.query.clone(),
             languages: Vec::new(),
             limit: airwiki_types::MAX_PUBLIC_CANDIDATES,
@@ -248,7 +341,8 @@ impl PublicReader {
                 catalog_state = legacy_state;
             }
         }
-        let catalog_partial = catalog_query_is_partial(catalog_state)?;
+        let catalog_partial = catalog_query_is_partial(catalog_state)
+            .map_err(|error| SearchContractError::Unavailable(error.to_string()))?;
         let candidates = {
             let blocked = self.blocked_publishers.read().await;
             select_candidates(manifests)
@@ -265,13 +359,7 @@ impl PublicReader {
         {
             let mut cache = self.manifests.write().await;
             for candidate in &candidates {
-                cache.insert(
-                    (
-                        candidate.manifest.publisher_id.clone(),
-                        candidate.manifest.collection_id,
-                    ),
-                    candidate.clone(),
-                );
+                cache_manifest_if_newer(&mut cache, candidate);
             }
             cache.retain(|_, manifest| manifest.manifest.expires_at > chrono::Utc::now());
         }
@@ -918,6 +1006,7 @@ struct ReaderBehaviour {
 
 #[derive(Debug, Clone, Copy)]
 enum CatalogProtocolMode {
+    BrowseOnly,
     CurrentFirst,
     LegacyOnly,
 }
@@ -928,6 +1017,12 @@ fn reader_swarm(
 ) -> Result<Swarm<ReaderBehaviour>, NetworkError> {
     let local_peer = identity.public().to_peer_id();
     let catalog = match catalog_mode {
+        CatalogProtocolMode::BrowseOnly => legacy_outbound_behaviour(
+            PUBLIC_CATALOG_BROWSE_PROTOCOL,
+            128 * 1024,
+            512 * 1024,
+            INDEX_DEADLINE,
+        )?,
         CatalogProtocolMode::CurrentFirst => versioned_outbound_behaviour(
             &[PUBLIC_CATALOG_PROTOCOL_V2, PUBLIC_CATALOG_PROTOCOL],
             128 * 1024,
@@ -1093,9 +1188,11 @@ fn collect_catalog_event(
             }
         }
         SwarmEvent::Behaviour(ReaderBehaviourEvent::Catalog(
-            request_response::Event::OutboundFailure { request_id, .. },
+            request_response::Event::OutboundFailure {
+                request_id, error, ..
+            },
         )) if pending.remove(&request_id) => {
-            state.failed = state.failed.saturating_add(1);
+            record_catalog_failure(state, &error);
         }
         _ => {}
     }
@@ -1138,6 +1235,7 @@ async fn query_catalog_manifests(
 struct CatalogQueryState {
     successful: usize,
     failed: usize,
+    unsupported: usize,
     invalid_manifest: bool,
 }
 
@@ -1145,13 +1243,29 @@ fn bounded_indexes(indexes: &[PublicIndexEndpoint]) -> impl Iterator<Item = &Pub
     indexes.iter().take(MAX_INDEXES)
 }
 
-fn catalog_query_is_partial(state: CatalogQueryState) -> Result<bool, SearchContractError> {
-    if state.successful == 0 {
-        return Err(SearchContractError::Unavailable(
-            "public federation indexes are offline".to_owned(),
-        ));
+fn record_catalog_failure(
+    state: &mut CatalogQueryState,
+    error: &request_response::OutboundFailure,
+) {
+    if matches!(
+        error,
+        request_response::OutboundFailure::UnsupportedProtocols
+    ) {
+        state.unsupported = state.unsupported.saturating_add(1);
+    } else {
+        state.failed = state.failed.saturating_add(1);
     }
-    Ok(state.failed > 0 || state.invalid_manifest)
+}
+
+fn catalog_query_is_partial(state: CatalogQueryState) -> Result<bool, PublicCatalogError> {
+    if state.successful == 0 {
+        return Err(if state.unsupported > 0 {
+            PublicCatalogError::UpgradeRequired
+        } else {
+            PublicCatalogError::Unavailable
+        });
+    }
+    Ok(state.failed > 0 || state.unsupported > 0 || state.invalid_manifest)
 }
 
 fn public_search_response(
@@ -1409,6 +1523,27 @@ fn select_candidates(
     candidates
 }
 
+fn cache_manifest_if_newer(
+    cache: &mut HashMap<(String, uuid::Uuid), SignedPublicCollectionManifest>,
+    candidate: &SignedPublicCollectionManifest,
+) {
+    let key = (
+        candidate.manifest.publisher_id.clone(),
+        candidate.manifest.collection_id,
+    );
+    match cache.entry(key) {
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            entry.insert(candidate.clone());
+        }
+        std::collections::hash_map::Entry::Occupied(mut entry)
+            if candidate.manifest.sequence > entry.get().manifest.sequence =>
+        {
+            entry.insert(candidate.clone());
+        }
+        std::collections::hash_map::Entry::Occupied(_) => {}
+    }
+}
+
 fn group_candidates_by_peer(
     candidates: Vec<SignedPublicCollectionManifest>,
 ) -> Vec<(PeerId, Vec<SignedPublicCollectionManifest>)> {
@@ -1645,7 +1780,7 @@ mod tests {
     }
 
     #[test]
-    fn catalog_query_classifies_complete_partial_and_offline_states() {
+    fn catalog_query_classifies_complete_partial_offline_and_upgrade_states() {
         assert!(
             !catalog_query_is_partial(CatalogQueryState {
                 successful: 3,
@@ -1661,7 +1796,35 @@ mod tests {
             })
             .unwrap()
         );
-        assert!(catalog_query_is_partial(CatalogQueryState::default()).is_err());
+        assert_eq!(
+            catalog_query_is_partial(CatalogQueryState::default()),
+            Err(PublicCatalogError::Unavailable)
+        );
+        assert_eq!(
+            catalog_query_is_partial(CatalogQueryState {
+                unsupported: 2,
+                ..CatalogQueryState::default()
+            }),
+            Err(PublicCatalogError::UpgradeRequired)
+        );
+    }
+
+    #[test]
+    fn unsupported_catalog_protocol_has_a_distinct_failure_class() {
+        let mut state = CatalogQueryState::default();
+
+        record_catalog_failure(
+            &mut state,
+            &request_response::OutboundFailure::UnsupportedProtocols,
+        );
+
+        assert_eq!(
+            state,
+            CatalogQueryState {
+                unsupported: 1,
+                ..CatalogQueryState::default()
+            }
+        );
     }
 
     #[test]
@@ -1728,6 +1891,25 @@ mod tests {
         assert_eq!(
             select_candidates(manifests).len(),
             usize::from(airwiki_types::MAX_PUBLIC_CANDIDATES)
+        );
+    }
+
+    #[test]
+    fn manifest_cache_keeps_the_highest_sequence_when_responses_finish_out_of_order() {
+        let collection_id = uuid::Uuid::new_v4();
+        let older = manifest("publisher".to_owned(), collection_id);
+        let mut newer = older.clone();
+        newer.manifest.sequence = 2;
+        let mut cache = HashMap::new();
+
+        cache_manifest_if_newer(&mut cache, &newer);
+        cache_manifest_if_newer(&mut cache, &older);
+
+        assert_eq!(
+            cache
+                .get(&("publisher".to_owned(), collection_id))
+                .map(|signed| signed.manifest.sequence),
+            Some(2)
         );
     }
 

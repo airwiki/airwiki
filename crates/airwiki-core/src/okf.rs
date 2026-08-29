@@ -23,6 +23,7 @@ pub struct OkfConcept {
     pub tags: Vec<String>,
     pub generated: OkfActorEvent,
     pub sources: Vec<OkfSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verified: Vec<OkfActorEvent>,
     pub status: OkfLifecycleStatus,
     pub airwiki: AirWikiProfile,
@@ -85,10 +86,39 @@ pub enum OkfValidationError {
 }
 
 impl OkfConcept {
+    pub fn draft_from_records(concept: &ConceptRecord, source: &SourceDocumentRecord) -> Self {
+        Self::from_records_with_lifecycle(
+            concept,
+            source,
+            concept.updated_at,
+            OkfLifecycleStatus::Draft,
+            Vec::new(),
+        )
+    }
+
     pub fn from_records(
         concept: &ConceptRecord,
         source: &SourceDocumentRecord,
         reviewed_at: DateTime<Utc>,
+    ) -> Self {
+        Self::from_records_with_lifecycle(
+            concept,
+            source,
+            reviewed_at,
+            OkfLifecycleStatus::Stable,
+            vec![OkfActorEvent {
+                by: "human:airwiki-user".to_owned(),
+                at: reviewed_at,
+            }],
+        )
+    }
+
+    fn from_records_with_lifecycle(
+        concept: &ConceptRecord,
+        source: &SourceDocumentRecord,
+        generated_at: DateTime<Utc>,
+        status: OkfLifecycleStatus,
+        verified: Vec<OkfActorEvent>,
     ) -> Self {
         Self {
             concept_type: concept.draft.concept_type.clone(),
@@ -96,12 +126,9 @@ impl OkfConcept {
             description: concept.draft.description.clone(),
             resource: concept.logical_resource_uri.clone(),
             tags: concept.draft.tags.clone(),
-            // Human approval creates the visible OKF revision. `updated_at` is
-            // operational state and changes again when two-phase publication
-            // commits, so it is not a stable "last meaningful change" value.
             generated: OkfActorEvent {
                 by: format!("airwiki/{}", concept.generator_model),
-                at: reviewed_at,
+                at: generated_at,
             },
             sources: vec![OkfSource {
                 id: format!("source-{}", source.id),
@@ -109,11 +136,8 @@ impl OkfConcept {
                 title: "AirWiki source document".to_owned(),
                 last_modified: source.updated_at.date_naive(),
             }],
-            verified: vec![OkfActorEvent {
-                by: "human:airwiki-user".to_owned(),
-                at: reviewed_at,
-            }],
-            status: OkfLifecycleStatus::Stable,
+            verified,
+            status,
             airwiki: AirWikiProfile {
                 profile_version: 2,
                 id: concept.id,
@@ -146,7 +170,7 @@ impl OkfConcept {
         if self.tags.len() > 10 {
             return Err(OkfValidationError::TooManyTags);
         }
-        if self.generated.by.trim().is_empty() || self.verified.is_empty() {
+        if self.generated.by.trim().is_empty() {
             return Err(OkfValidationError::MissingReview);
         }
         if self.sources.is_empty()
@@ -158,10 +182,11 @@ impl OkfConcept {
         {
             return Err(OkfValidationError::InvalidResource);
         }
-        if !self
-            .verified
-            .iter()
-            .any(|verification| verification.by.starts_with("human:"))
+        if self.status == OkfLifecycleStatus::Stable
+            && !self
+                .verified
+                .iter()
+                .any(|verification| verification.by.starts_with("human:"))
         {
             return Err(OkfValidationError::MissingReview);
         }
@@ -245,6 +270,29 @@ impl OkfPublisher {
         let rendered = profile.render(&concept.draft)?;
         OkfConcept::parse(&rendered)?;
         Ok(rendered)
+    }
+
+    pub fn write_draft(
+        &self,
+        concept: &ConceptRecord,
+        source: &SourceDocumentRecord,
+    ) -> Result<PathBuf> {
+        if !matches!(
+            concept.status,
+            DocumentStatus::NeedsReview | DocumentStatus::Excluded
+        ) || concept.status != source.status
+        {
+            bail!("only a coherent local review state can be materialized as an OKF draft");
+        }
+        let rendered = OkfConcept::draft_from_records(concept, source).render(&concept.draft)?;
+        let parsed = OkfConcept::parse(&rendered)?;
+        if parsed.status != OkfLifecycleStatus::Draft || !parsed.verified.is_empty() {
+            bail!("local review materialization did not produce an unverified OKF draft");
+        }
+        self.paths.ensure()?;
+        let path = self.concept_path(concept.id);
+        atomic_write(&path, rendered.as_bytes())?;
+        Ok(path)
     }
 
     pub fn publish(
@@ -753,6 +801,25 @@ mod tests {
         assert!(rendered.contains("last_modified: 202"));
         assert!(!rendered.contains(&source.updated_at.to_rfc3339()));
         assert!(!rendered.contains("private.md"));
+    }
+
+    #[test]
+    fn publisher_materializes_an_unverified_draft_without_publishing_it() {
+        let (temp, mut concept, mut source) = records();
+        concept.status = DocumentStatus::NeedsReview;
+        concept.reviewed_at = None;
+        source.status = DocumentStatus::NeedsReview;
+        let publisher = OkfPublisher::new(temp.path());
+
+        let path = publisher.write_draft(&concept, &source).unwrap();
+        let content = std::fs::read_to_string(path).unwrap();
+        let parsed = OkfConcept::parse(&content).unwrap();
+
+        assert_eq!(parsed.status, OkfLifecycleStatus::Draft);
+        assert!(parsed.verified.is_empty());
+        assert!(!content.contains("verified:"));
+        assert!(!temp.path().join("index.md").exists());
+        assert!(!temp.path().join("log.md").exists());
     }
 
     #[test]

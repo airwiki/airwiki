@@ -184,6 +184,98 @@ impl PublicSourceBackend for DelayedPublicSourceBackend {
 }
 
 #[tokio::test]
+async fn public_catalog_backfills_after_filtering_a_blocked_publisher() {
+    let index_port = available_port();
+    let index_identity = identity();
+    let blocked_identity = identity();
+    let visible_identity = identity();
+    let visible_collection_id = Uuid::new_v4();
+    let index_address: Multiaddr = format!("/ip4/127.0.0.1/tcp/{index_port}").parse().unwrap();
+    let catalog_cancellation = CancellationToken::new();
+    let catalog_task = tokio::spawn(run_public_catalog_server(
+        index_identity.clone(),
+        airwiki_network::PublicCatalogServerConfig::new(vec![index_address.clone()]),
+        Arc::new(CatalogBackend::new(Arc::new(
+            CatalogStore::in_memory().unwrap(),
+        ))),
+        catalog_cancellation.clone(),
+    ));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let endpoint = PublicIndexEndpoint {
+        peer_id: index_identity.peer_id(),
+        address: index_address,
+    };
+    let now = Utc::now();
+    let blocked_manifest = sign_manifest(
+        blocked_identity.keypair(),
+        PublicCollectionManifest {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            publisher_id: blocked_identity.peer_id().to_string(),
+            collection_id: Uuid::new_v4(),
+            sequence: 1,
+            publication_fingerprint: "a".repeat(64),
+            name: "Blocked public Wiki".to_owned(),
+            description: "Synthetic blocked profile".to_owned(),
+            languages: vec!["en".to_owned()],
+            concept_count: 1,
+            okf_compatibility: None,
+            routing_terms: vec!["blocked".to_owned()],
+            routes: vec!["/ip4/127.0.0.1/tcp/41001".to_owned()],
+            updated_at: now,
+            expires_at: now + ChronoDuration::minutes(20),
+        },
+    )
+    .unwrap();
+    let visible_manifest = sign_manifest(
+        visible_identity.keypair(),
+        PublicCollectionManifest {
+            protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+            publisher_id: visible_identity.peer_id().to_string(),
+            collection_id: visible_collection_id,
+            sequence: 1,
+            publication_fingerprint: "b".repeat(64),
+            name: "Visible public Wiki".to_owned(),
+            description: "Synthetic visible profile".to_owned(),
+            languages: vec!["en".to_owned()],
+            concept_count: 1,
+            okf_compatibility: None,
+            routing_terms: vec!["visible".to_owned()],
+            routes: vec!["/ip4/127.0.0.1/tcp/41002".to_owned()],
+            updated_at: now,
+            expires_at: now + ChronoDuration::minutes(15),
+        },
+    )
+    .unwrap();
+    let reader = PublicReader::new();
+    reader
+        .register_manifest(std::slice::from_ref(&endpoint), visible_manifest)
+        .await
+        .unwrap();
+    reader
+        .register_manifest(std::slice::from_ref(&endpoint), blocked_manifest)
+        .await
+        .unwrap();
+    reader
+        .set_publisher_blocked(blocked_identity.peer_id().to_string(), true)
+        .await;
+
+    let catalog = reader
+        .explore_catalog(std::slice::from_ref(&endpoint), 1)
+        .await
+        .unwrap();
+    assert_eq!(catalog.collections.len(), 1);
+    assert_eq!(catalog.collections[0].collection_id, visible_collection_id);
+
+    catalog_cancellation.cancel();
+    tokio::time::timeout(Duration::from_secs(2), catalog_task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
 async fn public_search_round_trip_needs_no_lan_pairing_or_grant() {
     let index_port = available_port();
     let source_port = available_port();
@@ -244,6 +336,14 @@ async fn public_search_round_trip_needs_no_lan_pairing_or_grant() {
         .register_manifest(std::slice::from_ref(&endpoint), manifest.clone())
         .await
         .unwrap();
+    let catalog = reader
+        .explore_catalog(std::slice::from_ref(&endpoint), 24)
+        .await
+        .unwrap();
+    assert!(!catalog.partial);
+    assert_eq!(catalog.collections.len(), 1);
+    assert_eq!(catalog.collections[0].collection_id, collection_id);
+    assert_eq!(catalog.collections[0].name, "Atlas public runbooks");
     let response = reader
         .search(
             &[endpoint],

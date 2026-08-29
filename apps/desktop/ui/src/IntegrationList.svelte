@@ -44,7 +44,19 @@
     return t(`workflow-guide-status-${status}`);
   }
 
-  function connectionSummary(status: IntegrationSummary['status']): string {
+  function connectionSummary(integration: IntegrationSummary): string {
+    if (integration.status === 'conflict') {
+      if (integration.issue === 'existingConfiguration') {
+        return t('integration-summary-conflict-existing-configuration', {
+          client: clientName(integration.client)
+        });
+      }
+      if (integration.issue === 'managedBridgeIntegrity') {
+        return t('integration-summary-conflict-managed-bridge-integrity', {
+          client: clientName(integration.client)
+        });
+      }
+    }
     const labels: Record<IntegrationSummary['status'], string> = {
       notInstalled: 'integration-summary-not-installed',
       available: 'integration-summary-available',
@@ -55,7 +67,7 @@
       unsupported: 'integration-summary-unsupported',
       error: 'integration-summary-error'
     };
-    return t(labels[status]);
+    return t(labels[integration.status]);
   }
 
   function connectionTone(status: IntegrationSummary['status']): 'ready' | 'working' | 'off' | 'attention' {
@@ -125,7 +137,7 @@
             <strong>{clientName(integration.client)}</strong>
             {#if integration.activityRecent}<small class="recent-activity"><span aria-hidden="true"></span>{t('integrations-recent-activity')}</small>{/if}
           </div>
-          <p>{connectionSummary(integration.status)}</p>
+          <p>{connectionSummary(integration)}</p>
           {#if integration.detectedVersion}<small class="integration-version">{t('integrations-version', { version: integration.detectedVersion })}</small>{/if}
         </div>
       </div>

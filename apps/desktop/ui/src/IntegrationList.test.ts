@@ -34,6 +34,8 @@ const labels: Record<string, string> = {
   'integration-summary-configured': 'AirWiki is connected to this chat app.',
   'integration-summary-update-available': 'The local bridge can be updated.',
   'integration-summary-conflict': 'Review the existing setting.',
+  'integration-summary-conflict-existing-configuration': 'Another local connection already uses AirWiki.',
+  'integration-summary-conflict-managed-bridge-integrity': 'Restart AirWiki and refresh.',
   'integration-summary-unsupported': 'This version is not compatible.',
   'integration-summary-error': 'This integration could not be checked.',
   'integrations-checking': 'Checking chat integrations…',
@@ -162,6 +164,7 @@ describe('IntegrationList', () => {
       integrations: [integration({
         client: 'chatGptDesktop',
         status: 'conflict',
+        issue: 'existingConfiguration',
         workflowGuide: {
           kind: 'nativeSkill', status: 'available', version: '1', restartRequired: true
         }
@@ -173,10 +176,27 @@ describe('IntegrationList', () => {
     });
 
     expect(screen.getByText('Conflict')).toBeInTheDocument();
+    expect(screen.getByText('Another local connection already uses AirWiki.')).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'Install memory' }));
     expect(onaction).toHaveBeenCalledWith({
       kind: 'installWorkflowGuide', client: 'chatGptDesktop'
     });
+  });
+
+  it('explains how to recover an installed bridge integrity conflict', () => {
+    render(IntegrationList, {
+      integrations: [integration({
+        client: 'chatGptDesktop',
+        status: 'conflict',
+        issue: 'managedBridgeIntegrity'
+      })],
+      busy: false,
+      t: translate,
+      onaction: vi.fn(),
+      oncopy: vi.fn()
+    });
+
+    expect(screen.getByText('Restart AirWiki and refresh.')).toBeInTheDocument();
   });
 
   it('keeps generic MCP instructions built in and copyable without a secret', async () => {

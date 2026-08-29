@@ -101,6 +101,8 @@ enum NativeConfirmation {
     InitializeProjectMemory,
     AttachProjectMemory,
     DetachProjectMemory,
+    ApplicationPublicSearch,
+    LegacyLanAiGrants,
 }
 
 impl NativeConfirmation {
@@ -127,6 +129,8 @@ impl NativeConfirmation {
             Self::InitializeProjectMemory => "native-confirm-initialize-project-memory",
             Self::AttachProjectMemory => "native-confirm-attach-project-memory",
             Self::DetachProjectMemory => "native-confirm-detach-project-memory",
+            Self::ApplicationPublicSearch => "native-confirm-application-public-search",
+            Self::LegacyLanAiGrants => "native-confirm-legacy-lan-ai-grants",
         }
     }
 }
@@ -275,6 +279,7 @@ struct RequestTracker {
     connectivity: Option<Uuid>,
     integrations: Option<Uuid>,
     completed_integration: Option<Uuid>,
+    completed_integration_succeeded: Option<bool>,
     updater: Option<Uuid>,
 }
 
@@ -320,6 +325,7 @@ struct AppSnapshot {
     integrations: Option<IntegrationsSummary>,
     integration_request_id: Option<String>,
     integration_completed_request_id: Option<String>,
+    integration_completed_request_succeeded: Option<bool>,
     application_access: Vec<ApplicationAccessSummary>,
     project_memory_requests: Vec<ProjectMemoryRequestSummary>,
     pending_computations: Vec<PendingComputationSummary>,
@@ -870,6 +876,9 @@ struct PeerSummary {
     activity: PeerActivity,
     sas_words: Option<Vec<String>>,
     granted_wiki_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    legacy_ai_grant_wiki_ids: Option<Vec<String>>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, TS)]
@@ -1580,6 +1589,12 @@ enum UpdaterIssueDto {
 #[serde(rename_all = "camelCase")]
 struct IntegrationSummary {
     client: IntegrationClientDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    app_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    public_search_enabled: Option<bool>,
     status: IntegrationStatusDto,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -1855,6 +1870,8 @@ impl From<integrations::ChatIntegrationsSnapshot> for IntegrationsSummary {
                     };
                     IntegrationSummary {
                         client: integration.client.into(),
+                        app_id: integration.app_id.map(|app_id| app_id.to_string()),
+                        public_search_enabled: Some(integration.public_search_enabled),
                         status,
                         issue: integration.issue.map(|issue| match issue {
                             integrations::IntegrationIssue::ExistingConfiguration => {
@@ -2828,16 +2845,39 @@ async fn set_wiki_grant(
     .await
 }
 
+#[tauri::command]
+async fn confirm_legacy_lan_ai_grants(
+    app: AppHandle,
+    runtime: tauri::State<'_, AppRuntime>,
+) -> Result<(), UiError> {
+    require_native_confirmation(&app, NativeConfirmation::LegacyLanAiGrants, None).await?;
+    send_command(&runtime, WorkerCommand::ConfirmLegacyLanAiGrants).await
+}
+
 #[derive(Debug, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 enum IntegrationActionInput {
     Refresh,
-    Connect { client: IntegrationClientDto },
-    Disconnect { client: IntegrationClientDto },
+    Connect {
+        client: IntegrationClientDto,
+    },
+    Disconnect {
+        client: IntegrationClientDto,
+    },
     ConfirmClaudeInstalled,
     OpenClaudeSettings,
-    InstallWorkflowGuide { client: IntegrationClientDto },
-    RemoveWorkflowGuide { client: IntegrationClientDto },
+    InstallWorkflowGuide {
+        client: IntegrationClientDto,
+    },
+    RemoveWorkflowGuide {
+        client: IntegrationClientDto,
+    },
+    SetPublicSearch {
+        #[serde(rename = "appId")]
+        #[ts(rename = "appId")]
+        app_id: String,
+        enabled: bool,
+    },
 }
 
 #[tauri::command]
@@ -2880,10 +2920,15 @@ async fn manage_integration(
             )
             .await?;
         }
+        IntegrationActionInput::SetPublicSearch { enabled: true, .. } => {
+            require_native_confirmation(&app, NativeConfirmation::ApplicationPublicSearch, None)
+                .await?;
+        }
         IntegrationActionInput::Refresh
         | IntegrationActionInput::Disconnect { .. }
         | IntegrationActionInput::ConfirmClaudeInstalled
-        | IntegrationActionInput::OpenClaudeSettings => {}
+        | IntegrationActionInput::OpenClaudeSettings
+        | IntegrationActionInput::SetPublicSearch { enabled: false, .. } => {}
     }
     let request_id = parse_uuid(&request_id)?;
     reserve_integration_request(&runtime.requests, request_id)?;
@@ -2910,6 +2955,12 @@ async fn manage_integration(
         }
         IntegrationActionInput::RemoveWorkflowGuide { client } => {
             integrations::IntegrationAction::RemoveWorkflowGuide(client.into())
+        }
+        IntegrationActionInput::SetPublicSearch { app_id, enabled } => {
+            integrations::IntegrationAction::SetPublicSearch {
+                app_id: parse_uuid(&app_id)?,
+                enabled,
+            }
         }
     };
     if let Err(error) = send_command(
@@ -4069,6 +4120,7 @@ impl AppSnapshot {
             integrations: None,
             integration_request_id: None,
             integration_completed_request_id: None,
+            integration_completed_request_succeeded: None,
             application_access: Vec::new(),
             project_memory_requests: Vec::new(),
             pending_computations: Vec::new(),
@@ -4994,6 +5046,7 @@ fn sync_integration_request_state(snapshot: &mut AppSnapshot, requests: &Mutex<R
         snapshot.integration_completed_request_id = requests
             .completed_integration
             .map(|request_id| request_id.to_string());
+        snapshot.integration_completed_request_succeeded = requests.completed_integration_succeeded;
     }
 }
 
@@ -5340,10 +5393,11 @@ fn request_is_current(event: &WorkerEvent, requests: &Mutex<RequestTracker>) -> 
         WorkerEvent::FirewallOperationUpdated { request_id, .. } => {
             requests.connectivity == Some(*request_id)
         }
-        WorkerEvent::ChatIntegrationsUpdated { request_id, .. } => {
+        WorkerEvent::ChatIntegrationsUpdated { request_id, result } => {
             if requests.integrations == Some(*request_id) {
                 requests.integrations = None;
                 requests.completed_integration = Some(*request_id);
+                requests.completed_integration_succeeded = Some(result.is_ok());
                 true
             } else {
                 false
@@ -6235,6 +6289,12 @@ impl From<worker::SourceIssueView> for SourceIssueSummary {
 
 impl From<worker::PeerView> for PeerSummary {
     fn from(value: worker::PeerView) -> Self {
+        let mut legacy_ai_grant_wiki_ids = value
+            .legacy_ai_granted_collections
+            .into_iter()
+            .map(|collection_id| collection_id.to_string())
+            .collect::<Vec<_>>();
+        legacy_ai_grant_wiki_ids.sort();
         let mut granted_wiki_ids = value
             .granted_collections
             .into_iter()
@@ -6263,6 +6323,8 @@ impl From<worker::PeerView> for PeerSummary {
             },
             sas_words: value.sas_words.map(Vec::from),
             granted_wiki_ids,
+            legacy_ai_grant_wiki_ids: (!legacy_ai_grant_wiki_ids.is_empty())
+                .then_some(legacy_ai_grant_wiki_ids),
         }
     }
 }
@@ -6786,6 +6848,7 @@ fn main() -> Result<()> {
             revoke_peer,
             allow_peer_pairing_again,
             set_wiki_grant,
+            confirm_legacy_lan_ai_grants,
             manage_integration,
             refresh_application_access,
             set_application_wiki_role,
@@ -7107,6 +7170,8 @@ mod tests {
             NativeConfirmation::ConnectIntegrationWithBuiltInGuide,
             NativeConfirmation::InstallWorkflowGuide,
             NativeConfirmation::RemoveWorkflowGuide,
+            NativeConfirmation::ApplicationPublicSearch,
+            NativeConfirmation::LegacyLanAiGrants,
         ];
         for locale in [UiLocale::EnUs, UiLocale::Es] {
             let localization = Localization::new(locale)?;
@@ -7868,6 +7933,7 @@ mod tests {
         let requests = Mutex::new(RequestTracker {
             integrations: Some(active_request),
             completed_integration: Some(completed_request),
+            completed_integration_succeeded: Some(false),
             ..RequestTracker::default()
         });
         let mut snapshot = AppSnapshot::starting();
@@ -7881,6 +7947,10 @@ mod tests {
         assert_eq!(
             snapshot.integration_completed_request_id.as_deref(),
             Some(completed_request.to_string().as_str())
+        );
+        assert_eq!(
+            snapshot.integration_completed_request_succeeded,
+            Some(false)
         );
     }
 
@@ -7966,6 +8036,10 @@ mod tests {
         assert_eq!(
             snapshot.integration_completed_request_id.as_deref(),
             Some(expected_request_id.as_str())
+        );
+        assert_eq!(
+            snapshot.integration_completed_request_succeeded,
+            Some(false)
         );
     }
 
@@ -8245,6 +8319,8 @@ mod tests {
             integrations: vec![
                 integrations::IntegrationView {
                     client: integrations::ChatClientKind::ClaudeDesktop,
+                    app_id: None,
+                    public_search_enabled: false,
                     status: integrations::IntegrationStatus::Error,
                     issue: Some(integrations::IntegrationIssue::ManagedBridgeIntegrity),
                     detected_version: Some("synthetic".to_owned()),
@@ -8256,6 +8332,8 @@ mod tests {
                 },
                 integrations::IntegrationView {
                     client: integrations::ChatClientKind::GenericMcp,
+                    app_id: None,
+                    public_search_enabled: false,
                     status: integrations::IntegrationStatus::Configured,
                     issue: None,
                     detected_version: None,
@@ -8411,6 +8489,7 @@ mod tests {
             activity: worker::PeerActivityState::Connected,
             sas_words: None,
             granted_collections: Default::default(),
+            legacy_ai_granted_collections: Default::default(),
         });
         let serialized = serde_json::to_value(summary)?;
 

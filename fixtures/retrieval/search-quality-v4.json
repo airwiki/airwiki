@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "collections": [
     {
       "id": "origin_shared",
@@ -23,7 +23,7 @@
       "granted_to_origin": true
     },
     {
-      "id": "peer_no_external_chat",
+      "id": "peer_local_ai_disabled",
       "node": "peer",
       "peer_shareable": true,
       "allow_external_ai": false,
@@ -123,12 +123,12 @@
       ]
     },
     {
-      "id": "atlas_no_external_chat",
+      "id": "atlas_receiver_ai_shared",
       "domain": "atlas_acceptance",
-      "collection_id": "peer_no_external_chat",
+      "collection_id": "peer_local_ai_disabled",
       "publication_state": "published",
       "title": "Proyecto Atlas — ensayo interno",
-      "description": "Dato compartible con peers pero no con chats externos.",
+      "description": "Dato compartido con el receptor aunque las apps locales del publisher estén desactivadas.",
       "language": "es",
       "tags": ["atlas", "interno"],
       "chunks": [
@@ -311,10 +311,10 @@
     {
       "id": "library_internal_schedule",
       "domain": "library_privacy",
-      "collection_id": "peer_no_external_chat",
+      "collection_id": "peer_local_ai_disabled",
       "publication_state": "published",
       "title": "Biblioteca Delta — agenda interna",
-      "description": "Agenda compartible con un peer pero no con chats externos.",
+      "description": "Agenda compartida con el receptor aunque las apps locales del publisher estén desactivadas.",
       "language": "es",
       "tags": ["biblioteca", "interno"],
       "chunks": [
@@ -462,17 +462,17 @@
       "forbidden_fact_ids": []
     },
     {
-      "id": "regression_atlas_external_ai_policy",
+      "id": "regression_atlas_receiver_ai_grant",
       "domain": "atlas_acceptance",
       "split": "regression",
-      "tags": ["privacy", "absence", "federated"],
+      "tags": ["privacy", "federated"],
       "scope": "trusted_peer_external_ai",
       "question": "¿Cuándo será el ensayo interno restringido de Atlas?",
       "semantic_keys": ["atlas", "internal", "rehearsal", "date"],
       "relevant_fact_ids": ["atlas_internal_rehearsal"],
-      "expected_groups": [],
+      "expected_groups": [["atlas_internal_rehearsal"]],
       "allowed_support_fact_ids": [],
-      "forbidden_fact_ids": ["atlas_internal_rehearsal"]
+      "forbidden_fact_ids": []
     },
     {
       "id": "regression_atlas_unrelated_injection",
@@ -609,17 +609,17 @@
       "forbidden_fact_ids": []
     },
     {
-      "id": "holdout_library_external_policy",
+      "id": "holdout_library_receiver_ai_grant",
       "domain": "library_privacy",
       "split": "holdout",
-      "tags": ["privacy", "absence", "federated"],
+      "tags": ["privacy", "federated"],
       "scope": "trusted_peer_external_ai",
       "question": "¿Cuándo es la revisión interna de la Biblioteca Delta?",
       "semantic_keys": ["library", "internal", "review", "date"],
       "relevant_fact_ids": ["library_internal_date"],
-      "expected_groups": [],
+      "expected_groups": [["library_internal_date"]],
       "allowed_support_fact_ids": [],
-      "forbidden_fact_ids": ["library_internal_date"]
+      "forbidden_fact_ids": []
     },
     {
       "id": "holdout_sensor_conflict",

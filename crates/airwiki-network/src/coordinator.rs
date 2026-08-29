@@ -46,12 +46,10 @@ impl FederatedCoordinator {
 impl FederatedSearch for FederatedCoordinator {
     async fn search(&self, request: SearchRequest) -> Result<SearchResponse, SearchContractError> {
         request.validate()?;
-        if request.local_collection_scope().is_some() {
-            return self.local.search(request).await;
-        }
+        let peer_request = request.clone().for_remote_transport();
         let (local, peers) = tokio::join!(
             self.local.search(request.clone()),
-            self.peers.search(request.clone())
+            self.peers.search(peer_request)
         );
 
         if local.is_err() && peers.is_err() {
@@ -207,13 +205,22 @@ mod tests {
 
     struct FakeSearch {
         result: Mutex<Option<Result<SearchResponse, SearchContractError>>>,
+        request: Mutex<Option<SearchRequest>>,
     }
 
     impl FakeSearch {
         fn returns(result: Result<SearchResponse, SearchContractError>) -> Arc<Self> {
             Arc::new(Self {
                 result: Mutex::new(Some(result)),
+                request: Mutex::new(None),
             })
+        }
+
+        fn request(&self) -> SearchRequest {
+            self.request
+                .lock()
+                .clone()
+                .expect("fake must have received a request")
         }
     }
 
@@ -221,8 +228,9 @@ mod tests {
     impl FederatedSearch for FakeSearch {
         async fn search(
             &self,
-            _request: SearchRequest,
+            request: SearchRequest,
         ) -> Result<SearchResponse, SearchContractError> {
+            *self.request.lock() = Some(request);
             self.result.lock().take().expect("fake called only once")
         }
     }
@@ -271,9 +279,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn caller_scoped_search_never_reaches_lan_peers() {
+    async fn caller_scope_only_filters_the_local_branch() {
         let request = SearchRequest::new("pagos", airwiki_types::SearchPurpose::ExternalAi, 5)
-            .with_local_collection_scope(vec![uuid::Uuid::new_v4()]);
+            .with_local_collection_scope(vec![uuid::Uuid::new_v4()])
+            .with_disclosure_scope(airwiki_types::SearchDisclosureScope::LocalApplication)
+            .with_public_network(true);
         let mut local = SearchResponse::empty(request.request_id);
         local
             .hits
@@ -285,10 +295,13 @@ mod tests {
         let response = coordinator.search(request).await.unwrap();
 
         assert_eq!(response.hits.len(), 1);
-        assert!(
-            peers.result.lock().is_some(),
-            "LAN backend must not be called"
+        let peer_request = peers.request();
+        assert_eq!(peer_request.local_collection_scope(), None);
+        assert_eq!(
+            peer_request.disclosure_scope(),
+            airwiki_types::SearchDisclosureScope::LocalUser
         );
+        assert!(!peer_request.include_public_network());
     }
 
     #[tokio::test]

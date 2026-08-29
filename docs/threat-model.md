@@ -18,8 +18,9 @@ Controls are not considered effective end to end until the
 - Ed25519 device identity and trusted-peer state;
 - separate public-publisher identity, signed manifests and tombstones;
 - collection grants and network/public policy;
-- application capability secrets, per-Wiki search grants, per-memory roles and managed personal OKF
-  bundles;
+- application capability secrets, per-Wiki search grants, per-application
+  public-query consent, per-memory roles and managed personal OKF bundles;
+- LAN grant receiver-AI consent versions and their one-time migration state;
 - portable `.airwiki` manifests and project OKF bundles, plus private local
   attachments, fingerprints and projections;
 - pending attested-computation parameters and ephemeral receipts;
@@ -75,6 +76,12 @@ Controls are not considered effective end to end until the
     absolute non-linked root, a strict bounded manifest and an in-root bounded
     OKF bundle. Portable IDs identify files; a separate local attachment and
     application grant authorize each clone.
+15. **Connected application → federated sources.** The MCP gateway derives a
+    local-application disclosure scope and applies only that application's
+    local Wiki grants. It strips the scope before LAN transport, where Noise
+    identity and source-owned grants authorize results. Public query text
+    crosses the device only while that active capability's public-search
+    preference is enabled.
 
 ## Threats and controls
 
@@ -83,7 +90,7 @@ Controls are not considered effective end to end until the
 | Unauthorized LAN peer queries data, learns listener endpoints or device metadata, restores stale endpoints or steers private-network probes | Noise, SAS pairing, trust state, per-collection grants and rate limits; the wildcard listener is never announced, a dedicated bounded exchange sends OS-inspected private/on-link endpoints plus a display name and OS family only after durable trust, receivers persist metadata only for the already trusted PeerId, accept only the IP observed on that exact authenticated connection, and reject delayed state with session-scoped monotonic revisions | Excessive grants still disclose data; names and OS labels are mutable presentation metadata rather than authorization, an endpoint is discovery data only, and every redial authenticates the expected PeerId; test pre-trust non-disclosure of endpoints and metadata, multi-interface selection, stale revision and cross-host endpoint rejection, interrupted retry, and the full grant and revocation matrix |
 | LAN browsing enumerates more knowledge than the selected result authorized | Browsing accepts one Wiki ID obtained from an authorized result, revalidates trust, the exact per-Wiki grant, policy, OKF compatibility and publication under a disclosure lease before every bounded frame or page, exposes only that Wiki's complete published OKF workspace, refuses mixed-generation frames and rejects dangling graph edges | A reader can retain the complete published knowledge of a granted Wiki; grant only Wikis intended for that device |
 | Search presentation becomes a private Wiki catalog or crosses trust domains | LAN may attach only the bounded name and OKF compatibility of the exact Wiki that produced an authorized hit; final revalidation removes the hit and metadata together. The explicit Public directory and public search rebuild presentation only from validated, signed, unexpired manifests and exclude LAN identity, device labels and local paths; the default local Library performs no catalog request | A public reader can retain profile metadata after withdrawal or expiry, just as it can retain a returned snippet |
-| A search query leaks through navigation, persistence or diagnostics | The query remains transient UI state and is excluded from hashes, durable preferences and sanitized logs; grouped desktop summaries contain bounded display data rather than query state | Screen capture, manual copying and a compromised host remain outside this protection |
+| A search query leaks through navigation, persistence, diagnostics or an application with public search disabled | The query remains transient UI state and is excluded from hashes, durable preferences and sanitized logs; grouped desktop summaries contain bounded display data rather than query state; the common coordinator never starts the public branch unless the initiating request carries process-local consent from that exact active capability | Screen capture, manual copying and a compromised host remain outside this protection; when public search is enabled, indexes, selected publishers and network providers can observe the query |
 | Private or stale content reaches a public reader | Separate opt-in, stable reviewed-publication checks, fingerprint-bound page reads, signed sequence and fingerprint, final disclosure lease, immediate owner-side revocation | A third party can retain previously returned search metadata or published OKF content |
 | Malicious index redirects or ranks content | Expected index PeerId is pinned; owner manifests are independently signed; index rank selects routes but never final ranking | An index can omit publishers, delay tombstones, or degrade availability until replaced |
 | Public queries exhaust an owner | Three-index, 64-candidate, 12-peer and two-collection caps; bounded payloads, semaphores, per-peer rate limits with a 1,024-identity window cap, a 1 s index stage, a 3 s cold owner-connection budget and a separate 800 ms owner-response budget | Bounded connection setup, local verification and ranking add work after catalog selection; distributed abuse can still consume bounded relay and inference capacity |
@@ -95,11 +102,15 @@ Controls are not considered effective end to end until the
 | Public beta infrastructure exceeds its operating budget | Two minimal independent nodes, live retail-price preflight, per-node monthly budgets, forecast/actual alerts, platform consumption review and whole-group retirement | Azure budgets alert but do not hard-cap spend; notification and cost data can lag |
 | Public beta host or identity is replaced | Pinned image and binary hash, Azure-attested SSH host key, one persistent identity/database per node, compiled expiring registry and higher-version rotation | Older candidates can use only their unchanged or unexpired pinned entries |
 | Pairing impersonation | Six-word SAS derived from identities and nonces, two-minute expiry | A user who skips comparison defeats the control |
-| Network-private collection reaches an unauthorized cloud chat | A native app-connection or Wiki-creation confirmation establishes default read grants; MCP then requires the exact active capability plus per-Wiki grant, scopes retrieval to local collections before ranking, never fans that app-scoped request out to LAN peers, and revalidates both immediately before output | The authorized provider receives requested local snippets and a person can approve the wrong application; review AI Apps per Wiki, revoke unnecessary grants, and use synthetic fixtures |
+| Network-private collection reaches an unauthorized cloud chat | A native app-connection or Wiki-creation confirmation establishes local default read grants; MCP requires the exact active capability, scopes only the local branch to its per-Wiki grants, and revalidates capability and grants before output. LAN results require Noise-authenticated identity plus the source owner's trust, LAN exposure, confirmed receiver-AI grant and current publication | The authorized provider receives requested local or remotely shared snippets and a person can approve the wrong application or LAN grant; review AI Apps per Wiki and device sharing, revoke unnecessary grants, and use synthetic fixtures |
+| A peer forges a disclosure scope, local collection list or response identity | Disclosure scope and local application filters are `serde(skip)` process state. The LAN handler discards caller state, derives `AuthorizedPeer` from the Noise-authenticated channel, and replaces every returned node identity with that authenticated PeerId | A compromised authenticated peer controls content under its own identity; revoke and block it |
+| Public evidence is manipulated, expired or attributed to the wrong publisher | The reader verifies the signed manifest, publisher identity, sequence, expiry, collection fingerprint and current public policy; presentation comes only from that manifest and publisher blocks are rechecked through final fusion | A valid public owner can publish misleading content, which remains explicitly untrusted evidence |
+| Authorization changes while a connected-app search is in flight | MCP reauthorizes after federation. App revocation or a public-consent downgrade discards the whole response; changed local grants filter local hits; LAN/public sources perform their own final disclosure checks | Already delivered evidence cannot be recalled; close or revoke the provider session under its own policy |
+| Existing LAN grants silently expand to receiver AI applications | Migration marks all earlier grants as legacy. Native AirWiki LAN access remains, but `external_ai` requests require a consent version. A non-blocking notice and Rust-owned confirmation upgrade all currently active compatible grants atomically; editing or regranting one Wiki upgrades only that grant | Ignoring the notice preserves old behavior and can produce incomplete AI coverage; mixed-version publishers can also omit results until upgraded |
 | Ranking returns the least-wrong absent fact | Source node applies the pinned local answerability classifier to the bounded outgoing snippet; failures and timeouts close the path | The classifier is probabilistic; reassess both platforms when model, corpus, or policy changes |
 | External chat treats an authorized candidate as relevant | Candidates exist only for `external_ai`, remain separately typed and bounded, pass the same final authorization checks, lose to duplicate evidence, and carry instructions requiring explicit support | A chat model can still misuse an unrelated authorized snippet; minimize externally enabled collections and run the golden prompt set |
 | DNS rebinding reaches MCP | Loopback bind, exact authority including port, bounded body | Compromised local software can already call loopback |
-| Application capability is forged, crossed or revoked mid-operation | Random secret, hash-only SQLite storage, fixed bridge resolution, active-capability and per-Wiki grant checks before local ranking plus final revalidation, and immediate revocation | Malware in the same user account may read the private credential file |
+| Application capability is forged, crossed or revoked mid-operation | Random secret, hash-only SQLite storage, fixed bridge resolution, active-capability and per-Wiki grant checks before local ranking plus final revalidation, per-app public consent reset on rotation/revocation, and immediate revocation | Malware in the same user account may read the private credential file |
 | Assistant forges producer, human verification or permissions | Rust fixes immutable producer/version, generation time and lifecycle; MCP schemas exclude verification and sharing; only AI-memory bundles are writable | A user may still over-grant an application; review grants and revoke it |
 | Opening a folder silently creates or authorizes project memory | Discovery only recognizes an existing manifest; initialize/open create a bounded expiring request, and native approval revalidates the canonical root and fingerprint before any file write or grant | A user can still approve the wrong selected folder; the confirmation names the folder without exposing its path to MCP |
 | A cloned repository inherits another clone's authority | Portable project/Wiki IDs are distinct from the installation-local collection ID; approval is bound to application, canonical root and portable identity | Copying a working tree requires another local confirmation by design |
@@ -178,6 +189,18 @@ Controls are not considered effective end to end until the
   original source files or paths, chunks, embeddings, the operational index, or
   edit operations.
 - `external_ai` is never inferred from tags, classification, or model output.
+- `SearchDisclosureScope`, local application collection scope and public-query
+  consent never cross a transport. Each trusted boundary derives its own scope.
+- `allow_external_ai` gates only applications connected to this device. LAN
+  disclosure uses authenticated trust, LAN exposure and the owner-confirmed
+  receiver-AI grant; public disclosure uses signed current public policy.
+- Connected applications always search their permitted local knowledge and
+  authorized LAN sources. Their public branch starts only with persisted
+  per-application consent, which defaults to false and resets on rotation or
+  revocation. No search or migration changes a Wiki's exposure.
+- Legacy LAN grants remain valid for native AirWiki requests and fail closed for
+  receiver-AI requests until a Rust-owned confirmation records the new consent
+  semantics. The bulk upgrade is atomic.
 - Original source files, local paths, embeddings, chunks, operational search
   indexes and peer-wide Wiki listings do not cross LAN. Opening a result may
   retrieve the complete published OKF workspace for only its exact currently

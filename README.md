@@ -54,7 +54,10 @@ paired-device and Internet exposure. **AI Apps** controls which local ChatGPT,
 Claude, Codex, Gemini, or generic MCP connection may search a Wiki. Confirming a
 new AI connection gives that application read access to compatible Wikis by
 default, but never enables LAN sharing or Internet publication; access remains
-revocable per application and Wiki.
+revocable per application and Wiki. A connected application can also discover
+knowledge already shared by verified LAN devices. Public knowledge is optional
+per application and off by default because enabling it may send that
+application's queries to public indexes and publishers.
 
 ### Give your agents simple, open memory without vendor lock-in
 
@@ -116,6 +119,12 @@ loads the complete published OKF Wiki directly from its owner in a read-only
 workspace. Read the [conceptual search and federation guide](docs/search-and-federation.md)
 for the complete journey and privacy boundaries.
 
+The same accessible-knowledge coordinator serves the Library and connected AI
+applications. Local and authorized LAN branches always run; the Library uses
+its per-query public choice, while each AI application has its own disabled-by-
+default **Search public knowledge** preference. A source device, not the
+requesting application, remains responsible for authorizing every remote hit.
+
 ## See the flow
 
 | Review before publication | Search across authorized sources |
@@ -168,8 +177,9 @@ for the complete journey and privacy boundaries.
 - Original folder contents remain on the source device and are never deleted by AirWiki.
 - Network publication/sharing and AI connection require separate human
   decisions. Connecting an AI application grants default read access to
-  compatible local Wikis but never changes LAN or Internet exposure. App-scoped
-  MCP search stays on this device; LAN search remains a native Library action.
+  compatible local Wikis but never changes LAN or Internet exposure. Its MCP
+  search includes knowledge exposed by verified LAN devices; public query
+  egress remains off until enabled for that exact application.
 - Changed source knowledge is withdrawn from search and every external channel
   until its new revision is reviewed; its replacement remains visible locally
   as an OKF `draft`.
@@ -252,6 +262,10 @@ flowchart LR
     bundle -- "per-Wiki grant" --> lan["Paired LAN devices"]
     bundle -- "explicit opt-in" --> public["Public network"]
     bundle -- "app grant" --> mcp["AI apps via MCP"]
+
+    mcp -. "always" .-> local
+    mcp -. "verified + granted" .-> lan
+    mcp -. "per-app query consent" .-> public
 ```
 
 Original folder documents remain outside the published bundle. Every path beyond local use crosses an explicit, independently managed access boundary.

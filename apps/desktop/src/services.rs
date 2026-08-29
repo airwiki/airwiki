@@ -64,8 +64,8 @@ use airwiki_types::{
     PublicCollectionTombstone, PublicSearchRequest, PublicSearchResponse, PublishedWikiDocument,
     PublishedWikiGraphLink, PublishedWikiPageDescriptor, PublishedWikiPageId,
     PublishedWikiPageRequest, PublishedWikiWorkspacePage, SHARED_WIKI_BROWSE_PROTOCOL_V2,
-    SearchAuthorization, SearchContractError, SearchHit, SearchPurpose, SearchRequest,
-    SearchResponse, SharedWikiBrowsePage, SharedWikiBrowseRequest,
+    SearchAuthorization, SearchContractError, SearchDisclosureScope, SearchHit, SearchPurpose,
+    SearchRequest, SearchResponse, SharedWikiBrowsePage, SharedWikiBrowseRequest,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
@@ -560,6 +560,9 @@ impl AuthorizedSearchBackend for DynamicAuthorizedSearchBackend {
         if request.purpose != authorization.purpose {
             return Err(SearchContractError::Unauthorized);
         }
+        let request = request
+            .for_remote_transport()
+            .with_disclosure_scope(SearchDisclosureScope::AuthorizedPeer);
         let engine = read_lock(&self.engine, "authorized search proxy")
             .map_err(|error| SearchContractError::Unavailable(error.to_string()))?
             .clone()
@@ -1280,13 +1283,19 @@ impl DynamicFederatedSearch {
     async fn revalidate_federated_hits(
         &self,
         hits: Vec<SearchHit>,
-        purpose: SearchPurpose,
+        disclosure_scope: SearchDisclosureScope,
     ) -> std::result::Result<Vec<SearchHit>, SearchContractError> {
         let database = self.database.clone();
         let access = self.access.clone();
         let local_node_id = self.local_node_id.clone();
         run_search_storage("federated result revalidation worker stopped", move || {
-            revalidate_federated_hits_blocking(&database, &access, &local_node_id, hits, purpose)
+            revalidate_federated_hits_blocking(
+                &database,
+                &access,
+                &local_node_id,
+                hits,
+                disclosure_scope,
+            )
         })
         .await
     }
@@ -1313,13 +1322,13 @@ fn revalidate_federated_hits_blocking(
     access: &AccessControl,
     local_node_id: &str,
     hits: Vec<SearchHit>,
-    purpose: SearchPurpose,
+    disclosure_scope: SearchDisclosureScope,
 ) -> std::result::Result<Vec<SearchHit>, SearchContractError> {
     let mut current = Vec::with_capacity(hits.len());
     for hit in hits {
         let keep = if hit.node_id == local_node_id {
             database
-                .hit_is_current(&hit, purpose)
+                .hit_is_current(&hit, disclosure_scope)
                 .map_err(|error| SearchContractError::Backend(error.to_string()))?
         } else {
             PeerId::from_str(&hit.node_id).is_ok_and(|peer| {
@@ -1378,16 +1387,17 @@ impl FederatedSearch for DynamicFederatedSearch {
                 SearchContractError::Unavailable("los modelos locales aún no están listos".into())
             })?;
         let purpose = request.purpose;
+        let disclosure_scope = request.disclosure_scope();
         let mut response = backend.search(request).await?;
         let before_revalidation = response
             .hits
             .len()
             .saturating_add(response.authorized_candidates.len());
         response.hits = self
-            .revalidate_federated_hits(response.hits, purpose)
+            .revalidate_federated_hits(response.hits, disclosure_scope)
             .await?;
         response.authorized_candidates = if purpose == SearchPurpose::ExternalAi {
-            self.revalidate_federated_hits(response.authorized_candidates, purpose)
+            self.revalidate_federated_hits(response.authorized_candidates, disclosure_scope)
                 .await?
         } else {
             Vec::new()
@@ -1403,6 +1413,123 @@ impl FederatedSearch for DynamicFederatedSearch {
                 .push("results changed during final authorization revalidation".into());
         }
         Ok(response)
+    }
+}
+
+/// One search boundary shared by the desktop UI and the MCP gateway.
+/// Local and authorized LAN knowledge are always attempted; public query
+/// egress happens only when the initiating request carries local consent.
+struct AccessibleKnowledgeSearch {
+    database: Database,
+    trusted: Arc<DynamicFederatedSearch>,
+    public: Arc<PublicReader>,
+}
+
+impl AccessibleKnowledgeSearch {
+    fn new(
+        database: Database,
+        trusted: Arc<DynamicFederatedSearch>,
+        public: Arc<PublicReader>,
+    ) -> Self {
+        Self {
+            database,
+            trusted,
+            public,
+        }
+    }
+
+    async fn search_with_route(
+        &self,
+        request: SearchRequest,
+        partials: Option<mpsc::Sender<SearchResponse>>,
+    ) -> std::result::Result<
+        (SearchResponse, PublicRouteKind, HashSet<(String, Uuid)>),
+        SearchContractError,
+    > {
+        request.validate()?;
+        let top_k = usize::from(request.top_k);
+        if !request.include_public_network() {
+            return self
+                .trusted
+                .search(request)
+                .await
+                .map(|response| (response, PublicRouteKind::Offline, HashSet::new()));
+        }
+
+        let public_request = request.clone().for_remote_transport();
+        let trusted = self.trusted.search(request);
+        let public = self.search_public(public_request, partials);
+        let (trusted, public) = tokio::join!(trusted, public);
+        match (trusted, public) {
+            (
+                Ok(trusted),
+                Ok(PublicSearchResult {
+                    response,
+                    route_kind,
+                }),
+            ) => {
+                let (response, public_hits) =
+                    merge_public_search_responses(trusted, response, top_k);
+                Ok((response, route_kind, public_hits))
+            }
+            (Ok(mut trusted), Err(_)) => {
+                trusted.partial = true;
+                trusted
+                    .warnings
+                    .push(PUBLIC_NETWORK_OFFLINE_WARNING.to_owned());
+                Ok((trusted, PublicRouteKind::Offline, HashSet::new()))
+            }
+            (
+                Err(_),
+                Ok(PublicSearchResult {
+                    mut response,
+                    route_kind,
+                }),
+            ) => {
+                response.partial = true;
+                response
+                    .warnings
+                    .push("local or LAN search is unavailable".to_owned());
+                let public_hits = search_hit_keys(&response.hits);
+                Ok((response, route_kind, public_hits))
+            }
+            (Err(_), Err(_)) => Err(SearchContractError::Unavailable(
+                "accessible knowledge search is unavailable".to_owned(),
+            )),
+        }
+    }
+
+    async fn search_public(
+        &self,
+        request: SearchRequest,
+        partials: Option<mpsc::Sender<SearchResponse>>,
+    ) -> std::result::Result<PublicSearchResult, SearchContractError> {
+        let database = self.database.clone();
+        let endpoints = run_search_storage("public index lookup worker stopped", move || {
+            federation_index_endpoints(&database)
+                .map_err(|error| SearchContractError::Backend(error.to_string()))
+        })
+        .await?;
+        match partials {
+            Some(partials) => {
+                self.public
+                    .search_with_route_and_partials(&endpoints, request, partials)
+                    .await
+            }
+            None => self.public.search_with_route(&endpoints, request).await,
+        }
+    }
+}
+
+#[async_trait]
+impl FederatedSearch for AccessibleKnowledgeSearch {
+    async fn search(
+        &self,
+        request: SearchRequest,
+    ) -> std::result::Result<SearchResponse, SearchContractError> {
+        self.search_with_route(request, None)
+            .await
+            .map(|(response, _, _)| response)
     }
 }
 
@@ -1650,6 +1777,7 @@ pub struct DesktopServices {
     network: Mutex<Option<NetworkRuntime>>,
     public_network: Mutex<Option<PublicNetworkRuntime>>,
     public_reader: Arc<PublicReader>,
+    accessible_search: Arc<AccessibleKnowledgeSearch>,
     public_announcements: Arc<RwLock<HashMap<Uuid, PublicAnnouncementState>>>,
     public_announcement_sync: Arc<Semaphore>,
     public_announcement_updates: watch::Sender<u64>,
@@ -1704,6 +1832,7 @@ impl McpApplicationBackend for DesktopMcpApplicationBackend {
             Ok(McpSearchAuthorization {
                 local_node_id,
                 allowed_collection_ids,
+                public_search_enabled: capability.public_search_enabled,
             })
         })
         .await
@@ -2351,6 +2480,11 @@ impl DesktopServices {
                 .set_publisher_blocked(publisher_id, true)
                 .await;
         }
+        let accessible_search = Arc::new(AccessibleKnowledgeSearch::new(
+            database.clone(),
+            Arc::clone(&federated_proxy),
+            Arc::clone(&public_reader),
+        ));
         let memories =
             airwiki_core::AiMemoryService::new(database.clone(), core_paths.vaults.clone());
         let project_memories = airwiki_core::ProjectMemoryService::new(database.clone());
@@ -2371,7 +2505,7 @@ impl DesktopServices {
             .map_or(mcp_config, |port| mcp_config.with_port(port));
         let mcp = match start_with_application_backend(
             mcp_config,
-            federated_proxy.clone(),
+            accessible_search.clone(),
             Some(application_backend),
         )
         .await
@@ -2402,6 +2536,7 @@ impl DesktopServices {
             network: Mutex::new(network),
             public_network: Mutex::new(None),
             public_reader,
+            accessible_search,
             public_announcements: Arc::new(RwLock::new(HashMap::new())),
             public_announcement_sync: Arc::new(Semaphore::new(1)),
             public_announcement_updates,
@@ -3492,7 +3627,7 @@ impl DesktopServices {
         top_k: u8,
         purpose: SearchPurpose,
     ) -> std::result::Result<SearchResponse, SearchContractError> {
-        self.federated_proxy
+        self.accessible_search
             .search(SearchRequest::new(question, purpose, top_k))
             .await
     }
@@ -3507,53 +3642,12 @@ impl DesktopServices {
         (SearchResponse, PublicRouteKind, HashSet<(String, Uuid)>),
         SearchContractError,
     > {
-        let database = self.database.clone();
-        let endpoints = run_search_storage("public index lookup worker stopped", move || {
-            federation_index_endpoints(&database)
-                .map_err(|error| SearchContractError::Backend(error.to_string()))
-        })
-        .await?;
-        let request = SearchRequest::new(question, purpose, top_k);
-        let (trusted, public) = tokio::join!(
-            self.federated_proxy.search(request.clone()),
-            self.public_reader
-                .search_with_route_and_partials(&endpoints, request, partials),
-        );
-        match (trusted, public) {
-            (
-                Ok(trusted),
-                Ok(PublicSearchResult {
-                    response,
-                    route_kind,
-                }),
-            ) => {
-                let (response, public_hits) =
-                    merge_public_search_responses(trusted, response, usize::from(top_k));
-                Ok((response, route_kind, public_hits))
-            }
-            (Ok(mut trusted), Err(_)) => {
-                trusted.partial = true;
-                trusted
-                    .warnings
-                    .push(PUBLIC_NETWORK_OFFLINE_WARNING.to_owned());
-                Ok((trusted, PublicRouteKind::Offline, HashSet::new()))
-            }
-            (
-                Err(_),
-                Ok(PublicSearchResult {
-                    mut response,
-                    route_kind,
-                }),
-            ) => {
-                response.partial = true;
-                response
-                    .warnings
-                    .push("local or LAN search is unavailable".to_owned());
-                let public_hits = search_hit_keys(&response.hits);
-                Ok((response, route_kind, public_hits))
-            }
-            (Err(error), Err(_)) => Err(error),
-        }
+        self.accessible_search
+            .search_with_route(
+                SearchRequest::new(question, purpose, top_k).with_public_network(true),
+                Some(partials),
+            )
+            .await
     }
 
     pub async fn explore_public_catalog(
@@ -4350,7 +4444,14 @@ impl DesktopServices {
             .collect::<HashMap<_, _>>();
         let grants = self.database.list_grants(None)?;
         let mut grants_by_peer = HashMap::<String, HashSet<Uuid>>::new();
+        let mut legacy_ai_grants_by_peer = HashMap::<String, HashSet<Uuid>>::new();
         for grant in grants {
+            if grant.receiver_ai_consent_version == 0 {
+                legacy_ai_grants_by_peer
+                    .entry(grant.peer_id.clone())
+                    .or_default()
+                    .insert(grant.collection_id);
+            }
             grants_by_peer
                 .entry(grant.peer_id)
                 .or_default()
@@ -4367,6 +4468,20 @@ impl DesktopServices {
             let trusted = stored.is_some_and(|peer| peer.trusted);
             let blocked = stored.is_some_and(|peer| peer.blocked);
             let (trust, activity) = peer_presentation_states(trusted, blocked, runtime);
+            let mut legacy_ai_granted_collections = legacy_ai_grants_by_peer
+                .remove(&peer_id)
+                .unwrap_or_default();
+            if trusted && !blocked {
+                let active = self
+                    .database
+                    .granted_collections(&peer_id)?
+                    .into_iter()
+                    .collect::<HashSet<_>>();
+                legacy_ai_granted_collections
+                    .retain(|collection_id| active.contains(collection_id));
+            } else {
+                legacy_ai_granted_collections.clear();
+            }
             views.push(PeerView {
                 peer_id: peer_id.clone(),
                 device_name: stored
@@ -4382,6 +4497,7 @@ impl DesktopServices {
                 activity,
                 sas_words: runtime.and_then(|peer| peer.sas_words.clone()),
                 granted_collections: grants_by_peer.remove(&peer_id).unwrap_or_default(),
+                legacy_ai_granted_collections,
             });
         }
         views.sort_by(|left, right| {
@@ -4398,6 +4514,19 @@ impl DesktopServices {
                 )
         });
         Ok(views)
+    }
+
+    pub fn confirm_all_legacy_lan_ai_grants(&self) -> Result<u64> {
+        let audit = AuditEvent {
+            id: Uuid::new_v4(),
+            actor: "desktop".to_owned(),
+            action: "legacy_lan_ai_grants_confirmed".to_owned(),
+            target_type: "lan_grants".to_owned(),
+            target_id: None,
+            details: serde_json::json!({ "scope": "active_legacy_grants" }),
+            created_at: Utc::now(),
+        };
+        self.database.confirm_all_legacy_lan_ai_grants(&audit)
     }
 
     /// Applies one broadcast event to durable and presentation state. The worker
@@ -5949,6 +6078,58 @@ mod tests {
         assert!(public_hits.contains(&("public-source".to_owned(), public_chunk)));
     }
 
+    #[tokio::test]
+    async fn accessible_search_never_contacts_public_indexes_without_local_consent() {
+        let database = Database::in_memory().unwrap();
+        let trusted = Arc::new(DynamicFederatedSearch::new(
+            database.clone(),
+            AccessControl::default(),
+            "synthetic-local-node".to_owned(),
+        ));
+        trusted.install(Arc::new(EmptyFederatedSearch)).unwrap();
+        let search =
+            AccessibleKnowledgeSearch::new(database, trusted, Arc::new(PublicReader::new()));
+        let request = SearchRequest::new("synthetic question", SearchPurpose::ExternalAi, 5)
+            .with_disclosure_scope(SearchDisclosureScope::LocalApplication);
+
+        let local_and_lan = search.search(request.clone()).await.unwrap();
+        assert!(!local_and_lan.partial);
+        assert!(local_and_lan.warnings.is_empty());
+
+        let with_public = search
+            .search(request.with_public_network(true))
+            .await
+            .unwrap();
+        assert!(with_public.partial);
+        assert_eq!(
+            with_public.warnings,
+            vec![PUBLIC_NETWORK_OFFLINE_WARNING.to_owned()]
+        );
+    }
+
+    #[tokio::test]
+    async fn accessible_search_returns_a_fixed_error_when_every_enabled_branch_fails() {
+        let database = Database::in_memory().unwrap();
+        let trusted = Arc::new(DynamicFederatedSearch::new(
+            database.clone(),
+            AccessControl::default(),
+            "synthetic-local-node".to_owned(),
+        ));
+        let search =
+            AccessibleKnowledgeSearch::new(database, trusted, Arc::new(PublicReader::new()));
+        let request = SearchRequest::new("sensitive synthetic query", SearchPurpose::ExternalAi, 5)
+            .with_disclosure_scope(SearchDisclosureScope::LocalApplication)
+            .with_public_network(true);
+
+        let error = search.search(request).await.unwrap_err();
+        assert!(matches!(
+            &error,
+            SearchContractError::Unavailable(message)
+                if message == "accessible knowledge search is unavailable"
+        ));
+        assert!(!error.to_string().contains("sensitive"));
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn search_storage_work_does_not_block_the_async_runtime() {
         let (started_sender, started_receiver) = oneshot::channel();
@@ -7482,11 +7663,12 @@ mod tests {
         );
         authorization.allowed_collections.push(collection_id);
 
-        // Peer sharing does not imply permission to disclose to external AI.
-        assert!(
+        // A newly confirmed device grant includes that receiver's connected AI
+        // apps and does not reuse this publisher's local-app switch.
+        assert_eq!(
             durable_authorized_collections(&proxy, &authorization, SearchPurpose::ExternalAi)
-                .unwrap()
-                .is_empty()
+                .unwrap(),
+            vec![collection_id]
         );
         database
             .update_collection_policy(
@@ -7515,7 +7697,7 @@ mod tests {
                 CollectionPolicy {
                     local_only: false,
                     peer_shareable: true,
-                    allow_external_ai: true,
+                    allow_external_ai: false,
                     internet_public: false,
                 },
             )

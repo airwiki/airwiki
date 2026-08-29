@@ -14,12 +14,13 @@ or personal information.
 - `relevance/answerability.json`: schema-v2 relevance corpus with calibration,
   holdout, missing facts, contradictions, prompt injection, and cross-language
   cases.
-- `retrieval/search-quality-v3.json`: active domain-separated source-side
+- `retrieval/search-quality-v4.json`: active domain-separated source-side
   retrieval regression corpus for local and federated scopes, policy,
   provenance, deduplication, stability and honest abstention. Direct answer
   evidence, allowed context and forbidden evidence are separate labels; the
   allowed-context label never satisfies recall or changes model inputs and
-  ranking.
+  ranking. Local-application policy remains distinct from a confirmed LAN grant
+  that includes the receiver's connected applications.
 - `selector/answerability-v1/`: bilingual, domain-separated development corpus
   for the answerability selector. Queries, passages and judgments are stored in
   separate JSONL files so labels, disclosure and provenance metadata can never
@@ -78,8 +79,9 @@ and promotion boundary are documented in the
 
 For MCP evaluation:
 
-- the Mac and Windows fixture collections must be published, peer-shareable,
-  granted where required, and explicitly enabled for external chat;
+- the Mac and Windows fixture collections must be published, peer-shareable and
+  granted where required; the origin's local external-chat policy is tested
+  separately from confirmed receiver-AI LAN access;
 - `private/` must remain separate, local-only, and disabled for external chat;
 - every new document requires manual review before the golden prompt set; and
 - expected URNs, revisions, hashes, and PeerIds come from actual hits and are

@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use airwiki_types::{
-    FederatedSearch, MAX_HEADING_OR_PAGE_CHARS, MAX_SNIPPET_CHARS, SearchContractError, SearchHit,
-    SearchPurpose, SearchRequest, SearchResponse,
+    FederatedSearch, MAX_HEADING_OR_PAGE_CHARS, MAX_SNIPPET_CHARS, SearchContractError,
+    SearchDisclosureScope, SearchHit, SearchPurpose, SearchRequest, SearchResponse,
 };
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
@@ -137,8 +137,8 @@ impl HybridSearchEngine {
         }
     }
 
-    /// Local desktop search includes local-only collections. `ExternalAi` is still
-    /// filtered to collections explicitly opted into cloud disclosure.
+    /// Local desktop search includes local-only collections. A connected app's
+    /// trusted process-local scope applies its collection grants independently.
     pub async fn search_local(&self, request: SearchRequest) -> Result<SearchResponse> {
         request.validate()?;
         let collections = if let Some(collections) = request.local_collection_scope() {
@@ -165,6 +165,9 @@ impl HybridSearchEngine {
         peer_id: &str,
     ) -> Result<SearchResponse> {
         request.validate()?;
+        let request = request
+            .for_remote_transport()
+            .with_disclosure_scope(SearchDisclosureScope::AuthorizedPeer);
         let purpose = request.purpose;
         let database = self.database.clone();
         let peer_id = peer_id.to_owned();
@@ -220,8 +223,8 @@ impl HybridSearchEngine {
         if collections.is_empty() {
             bail!("no requested collection is publicly accessible");
         }
-        let mut local_request =
-            SearchRequest::new(request.query, SearchPurpose::LocalAssistant, request.top_k);
+        let mut local_request = SearchRequest::new(request.query, request.purpose, request.top_k)
+            .with_disclosure_scope(SearchDisclosureScope::Public);
         local_request.protocol_version = airwiki_types::SEARCH_PROTOCOL.to_owned();
         local_request.request_id = request.request_id;
         let mut response = self.search_collections(local_request, &collections).await?;
@@ -270,8 +273,15 @@ impl HybridSearchEngine {
             .filter(|collection_id| seen_collections.insert(*collection_id))
             .collect::<Vec<_>>();
         let purpose = request.purpose;
+        let disclosure_scope = request.disclosure_scope();
         let prepared = run_search_blocking("hybrid retrieval worker task failed", move || {
-            prepare_candidates(database, query, collections, purpose, query_embedding)
+            prepare_candidates(
+                database,
+                query,
+                collections,
+                disclosure_scope,
+                query_embedding,
+            )
         })
         .await?;
         let PreparedCandidates {
@@ -347,15 +357,15 @@ impl HybridSearchEngine {
         }
         let before_revalidation = hits.len().saturating_add(authorized_candidates.len());
         let database = self.database.clone();
-        let purpose = request.purpose;
+        let disclosure_scope = request.disclosure_scope();
         let hits = run_search_blocking("local search revalidation worker task failed", move || {
-            revalidate_local_hits(database, hits, purpose)
+            revalidate_local_hits(database, hits, disclosure_scope)
         })
         .await?;
         let database = self.database.clone();
         let authorized_candidates = run_search_blocking(
             "local candidate revalidation worker task failed",
-            move || revalidate_local_hits(database, authorized_candidates, purpose),
+            move || revalidate_local_hits(database, authorized_candidates, disclosure_scope),
         )
         .await?;
         let removed_during_revalidation =
@@ -414,19 +424,19 @@ fn prepare_candidates(
     database: Database,
     query: String,
     collections: Vec<Uuid>,
-    purpose: SearchPurpose,
+    disclosure_scope: SearchDisclosureScope,
     query_embedding: Vec<f32>,
 ) -> Result<PreparedCandidates> {
     let mut lexical = database.lexical_candidates(
         &query,
         &collections,
-        purpose,
+        disclosure_scope,
         PRE_DEDUPLICATION_CANDIDATE_LIMIT,
     )?;
     lexical.extend(database.projected_lexical_candidates(
         &query,
         &collections,
-        purpose,
+        disclosure_scope,
         PRE_DEDUPLICATION_CANDIDATE_LIMIT,
     )?);
     lexical.sort_by(|left, right| {
@@ -442,7 +452,7 @@ fn prepare_candidates(
         loop {
             let batch = database.vector_embedding_candidates_batch(
                 *collection_id,
-                purpose,
+                disclosure_scope,
                 VECTOR_SQL_BATCH_SIZE,
                 after_rowid,
             )?;
@@ -469,7 +479,7 @@ fn prepare_candidates(
         .map(|(chunk_id, _)| *chunk_id)
         .collect::<Vec<_>>();
     let mut hydrated_vector = database
-        .vector_candidates_by_id(&vector_ids, &collections, purpose)?
+        .vector_candidates_by_id(&vector_ids, &collections, disclosure_scope)?
         .into_iter()
         .map(|candidate| (candidate.chunk.id, candidate))
         .collect::<HashMap<_, _>>();
@@ -553,11 +563,11 @@ fn prepare_candidates(
 fn revalidate_local_hits(
     database: Database,
     hits: Vec<SearchHit>,
-    purpose: SearchPurpose,
+    disclosure_scope: SearchDisclosureScope,
 ) -> Result<Vec<SearchHit>> {
     let mut current_hits = Vec::with_capacity(hits.len());
     for hit in hits {
-        if database.hit_is_current(&hit, purpose)? {
+        if database.hit_is_current(&hit, disclosure_scope)? {
             current_hits.push(hit);
         }
     }
@@ -1294,7 +1304,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn peer_grant_and_external_ai_policy_are_both_enforced() {
+    async fn peer_ai_search_uses_receiver_consent_not_local_app_policy() {
         let (db, collection_id, _concept_id) = indexed_database().await;
         db.upsert_peer(&PeerRecord {
             peer_id: "windows".into(),
@@ -1332,25 +1342,6 @@ mod tests {
             1
         );
         let external = SearchRequest::new("pagos", SearchPurpose::ExternalAi, 5);
-        assert!(
-            engine
-                .search_for_peer(external, "windows")
-                .await
-                .unwrap()
-                .hits
-                .is_empty()
-        );
-        db.update_collection_policy(
-            collection_id,
-            CollectionPolicy {
-                local_only: false,
-                peer_shareable: true,
-                allow_external_ai: true,
-                internet_public: false,
-            },
-        )
-        .unwrap();
-        let external = SearchRequest::new("pagos", SearchPurpose::ExternalAi, 5);
         assert_eq!(
             engine
                 .search_for_peer(external, "windows")
@@ -1359,6 +1350,16 @@ mod tests {
                 .hits
                 .len(),
             1
+        );
+        db.set_grant("windows", collection_id, false).unwrap();
+        let external = SearchRequest::new("pagos", SearchPurpose::ExternalAi, 5);
+        assert!(
+            engine
+                .search_for_peer(external, "windows")
+                .await
+                .unwrap()
+                .hits
+                .is_empty()
         );
     }
 
@@ -1452,15 +1453,18 @@ mod tests {
             .unwrap();
         let hit = response.hits.first().unwrap();
         assert!(
-            db.hit_is_current(hit, SearchPurpose::LocalAssistant)
+            db.hit_is_current(hit, SearchDisclosureScope::LocalUser)
                 .unwrap()
         );
-        assert!(!db.hit_is_current(hit, SearchPurpose::ExternalAi).unwrap());
+        assert!(
+            !db.hit_is_current(hit, SearchDisclosureScope::LocalApplication)
+                .unwrap()
+        );
 
         let concept = db.concept(hit.concept_id).unwrap().unwrap();
         db.mark_deleted(concept.source_document_id).unwrap();
         assert!(
-            !db.hit_is_current(hit, SearchPurpose::LocalAssistant)
+            !db.hit_is_current(hit, SearchDisclosureScope::LocalUser)
                 .unwrap()
         );
     }

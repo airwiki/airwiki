@@ -36,6 +36,7 @@ export function readySnapshot(): AppSnapshot {
     lanRuntime: { listener: 'stopped', discovery: 'disabled', addressCount: 0 },
     firewallOperation: null, integrations: { integrations: [], externalAiWikiCount: 0 },
     integrationRequestId: null, integrationCompletedRequestId: null,
+    integrationCompletedRequestSucceeded: null,
     applicationAccess: [], projectMemoryRequests: [], pendingComputations: [], completedComputations: [],
     updater: { status: 'idle', version: null, releaseNotes: null, issue: null, retryable: false },
     notice: null

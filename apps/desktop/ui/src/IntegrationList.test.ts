@@ -7,6 +7,8 @@ import type { IntegrationSummary } from './api';
 function integration(overrides: Partial<IntegrationSummary> = {}): IntegrationSummary {
   return {
     client: 'claudeCode',
+    appId: '00000000-0000-0000-0000-000000000001',
+    publicSearchEnabled: false,
     status: 'configured',
     detectedVersion: '2.1.227',
     activityRecent: false,
@@ -25,6 +27,11 @@ function integration(overrides: Partial<IntegrationSummary> = {}): IntegrationSu
 const labels: Record<string, string> = {
   'integrations-local-connection': 'Local connection',
   'integrations-assisted-memory': 'Assisted memory',
+  'integrations-public-search': 'Search public knowledge',
+  'integrations-public-search-help': 'Queries may reach public indexes. This does not publish your Wikis.',
+  'integrations-public-search-updating': 'Updating…',
+  'integrations-public-search-error': 'Could not update. Try again.',
+  'action-retry': 'Try again',
   'integration-status-available': 'Available',
   'integration-status-configured': 'Configured',
   'integration-status-conflict': 'Conflict',
@@ -105,6 +112,49 @@ describe('IntegrationList', () => {
     expect(container.querySelector('.loading-skeleton.integrations')).toBeInTheDocument();
     expect(container.querySelectorAll('.integration-skeleton-row')).toHaveLength(4);
     expect(container.querySelector('.integration-list')).toHaveAttribute('aria-busy', 'true');
+  });
+
+  it('offers public search only for an active capability and reports per-app progress', async () => {
+    const onpublicsearch = vi.fn();
+    const appId = '00000000-0000-0000-0000-000000000001';
+    const { rerender } = render(IntegrationList, {
+      integrations: [integration({ appId })],
+      busy: false,
+      t: translate,
+      onaction: vi.fn(),
+      oncopy: vi.fn(),
+      onpublicsearch
+    });
+
+    const toggle = screen.getByRole('switch', { name: 'Search public knowledge' });
+    await fireEvent.click(toggle);
+    expect(onpublicsearch).toHaveBeenCalledWith(appId, true);
+
+    await rerender({
+      integrations: [integration({ appId })],
+      busy: false,
+      t: translate,
+      onaction: vi.fn(),
+      oncopy: vi.fn(),
+      onpublicsearch,
+      publicSearchBusyAppId: appId
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('Updating…');
+    expect(screen.getByRole('switch', { name: 'Search public knowledge' })).toBeDisabled();
+
+    await rerender({
+      integrations: [integration({ appId })],
+      busy: false,
+      t: translate,
+      onaction: vi.fn(),
+      oncopy: vi.fn(),
+      onpublicsearch,
+      publicSearchBusyAppId: null,
+      publicSearchErrorAppId: appId
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('Could not update. Try again.');
+    await fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(onpublicsearch).toHaveBeenLastCalledWith(appId, true);
   });
 
   it('installs an available native guide without changing the connection action', async () => {

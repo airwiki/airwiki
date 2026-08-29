@@ -24,8 +24,16 @@ the contributor workflow must not depend on a skill installation.
   iconography; color is supporting information, never the only signal.
 - Treat network sharing and AI connections as distinct user concepts. **Share**
   contains only LAN and Internet exposure. The compact **AI Apps** status opens
-  its own per-Wiki application-permission panel; Settings manages installation
-  and connection health rather than duplicating those permissions.
+  its own per-Wiki application-permission panel; Settings manages installation,
+  connection health and the app-specific **Search public knowledge** query-
+  egress preference rather than duplicating local Wiki permissions.
+- Explain LAN grants as access for the verified receiver device and its
+  connected AI apps. Describe Internet controls only as publishing a Wiki.
+  Never imply that connecting an AI app shares or publishes local knowledge.
+- Keep public search off for each app until a native confirmation explains that
+  its queries can leave the device. Show busy, error and retry state on that
+  exact app row. A legacy-LAN migration notice remains non-blocking and
+  disappears only after confirmed active grants are updated.
 
 ## Appearance roles
 

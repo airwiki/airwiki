@@ -377,6 +377,19 @@ pub enum SearchPurpose {
     ExternalAi,
 }
 
+/// Process-local disclosure context for a search.
+///
+/// This is deliberately not a wire-level claim. UI, application, authenticated
+/// peer, and public transports derive the scope at their trusted boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SearchDisclosureScope {
+    #[default]
+    LocalUser,
+    LocalApplication,
+    AuthorizedPeer,
+    Public,
+}
+
 /// Independent collection egress controls.
 ///
 /// `local_only` is retained in persisted and serialized data for compatibility,
@@ -446,10 +459,11 @@ impl CollectionPolicy {
 
     /// Whether an authenticated peer may use the collection for this purpose.
     ///
-    /// A grant is still required by the network authorization layer. External-AI
-    /// searches require both independent egress opt-ins.
-    pub const fn can_serve_peer(self, purpose: SearchPurpose) -> bool {
-        self.peer_shareable && self.can_serve_locally(purpose)
+    /// A grant is still required by the network authorization layer. The
+    /// `allow_external_ai` setting controls local applications only; a verified
+    /// remote device is authorized by its LAN grant at the publisher.
+    pub const fn can_serve_peer(self, _purpose: SearchPurpose) -> bool {
+        self.peer_shareable
     }
 
     /// Compatibility alias for remote-peer authorization.
@@ -561,14 +575,26 @@ pub struct SearchRequest {
     ///
     /// The field is deliberately absent from the wire format: remote peers
     /// derive their own scope from durable grants. Its presence also marks the
-    /// request as local-only so a caller-specific scope cannot be bypassed by
-    /// federating to peers that cannot identify that caller.
+    /// request at this node without disclosing it to remote peers.
     #[serde(skip)]
     local_collection_scope: Option<Vec<Uuid>>,
+    /// Trusted, process-local authorization context. Transports must derive it
+    /// from their authenticated channel and it is never accepted from the wire.
+    #[serde(skip)]
+    disclosure_scope: SearchDisclosureScope,
+    /// Whether this request may contact configured public indexes/publishers.
+    /// This is process-local because it represents consent at the initiating
+    /// application, not authority delegated to a peer.
+    #[serde(skip)]
+    include_public_network: bool,
 }
 
 impl SearchRequest {
     pub fn new(query: impl Into<String>, purpose: SearchPurpose, top_k: u8) -> Self {
+        let disclosure_scope = match purpose {
+            SearchPurpose::LocalAssistant => SearchDisclosureScope::LocalUser,
+            SearchPurpose::ExternalAi => SearchDisclosureScope::LocalApplication,
+        };
         Self {
             protocol_version: SEARCH_PROTOCOL.to_owned(),
             request_id: Uuid::new_v4(),
@@ -576,6 +602,8 @@ impl SearchRequest {
             purpose,
             top_k,
             local_collection_scope: None,
+            disclosure_scope,
+            include_public_network: false,
         }
     }
 
@@ -588,6 +616,32 @@ impl SearchRequest {
 
     pub fn local_collection_scope(&self) -> Option<&[Uuid]> {
         self.local_collection_scope.as_deref()
+    }
+
+    pub const fn disclosure_scope(&self) -> SearchDisclosureScope {
+        self.disclosure_scope
+    }
+
+    pub const fn with_disclosure_scope(mut self, scope: SearchDisclosureScope) -> Self {
+        self.disclosure_scope = scope;
+        self
+    }
+
+    pub const fn include_public_network(&self) -> bool {
+        self.include_public_network
+    }
+
+    pub const fn with_public_network(mut self, include: bool) -> Self {
+        self.include_public_network = include;
+        self
+    }
+
+    /// Removes all authority that must not cross a transport boundary.
+    pub fn for_remote_transport(mut self) -> Self {
+        self.local_collection_scope = None;
+        self.disclosure_scope = SearchDisclosureScope::LocalUser;
+        self.include_public_network = false;
+        self
     }
 
     pub fn validate(&self) -> Result<(), SearchContractError> {
@@ -1000,7 +1054,7 @@ mod tests {
                 true,
                 true,
                 false,
-                false,
+                true,
             ),
             (
                 CollectionPolicy {
@@ -1079,6 +1133,26 @@ mod tests {
                 internet_public: false,
             }
         );
+    }
+
+    #[test]
+    fn search_disclosure_context_never_crosses_the_wire() {
+        let collection_id = Uuid::new_v4();
+        let request = SearchRequest::new("portable knowledge", SearchPurpose::ExternalAi, 5)
+            .with_local_collection_scope(vec![collection_id])
+            .with_disclosure_scope(SearchDisclosureScope::LocalApplication)
+            .with_public_network(true);
+
+        let encoded = serde_json::to_value(&request).unwrap();
+        let object = encoded.as_object().unwrap();
+        assert!(!object.contains_key("local_collection_scope"));
+        assert!(!object.contains_key("disclosure_scope"));
+        assert!(!object.contains_key("include_public_network"));
+
+        let decoded: SearchRequest = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded.local_collection_scope(), None);
+        assert_eq!(decoded.disclosure_scope(), SearchDisclosureScope::LocalUser);
+        assert!(!decoded.include_public_network());
     }
 
     #[test]

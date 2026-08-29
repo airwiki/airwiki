@@ -16,15 +16,15 @@ contract.
 
 ## Scope
 
-The active schema-v3 fixture at
-`fixtures/retrieval/search-quality-v3.json` has SHA-256
-`8a04bf7eec4aa35e6f5cdfa1c7000ab6d9f666814281c466fb82e5c4b10986ff`.
+The active schema-v4 fixture at
+`fixtures/retrieval/search-quality-v4.json` has SHA-256
+`e64825d6173f5b0086fafabbb453f870c28c65a8180ff9e461cd5afb880a7977`.
 Its 17 regression, calibration and holdout cases cover direct and paraphrased
 retrieval, cross-language and compound questions, absent and withdrawn facts,
 contradictions, common-name ambiguity, prompt injection, near duplicates,
-authorization, external-chat policy and stable ordering.
+local-application policy, confirmed receiver-AI LAN grants and stable ordering.
 
-V3 preserves the five observed failures from the initial run as regression
+V4 preserves the five observed failures from the initial run as regression
 cases. Every case and document belongs to a domain, and the validator rejects
 overlap between regression, calibration and holdout domains, cross-domain gold
 evidence, answerable cases with merely related evidence, no-answer facts that
@@ -53,8 +53,16 @@ The superseded schema-v1 fixture is also no longer versioned. Its historical
 SHA-256 was
 `accd40d8473ad499469c0fd105eec9f34d70f660c9bdada1254d2325f609e727`;
 the initial results and implementation remain available in
-[PR #7](https://github.com/airwiki/airwiki/pull/7). V3 is the only maintained
+[PR #7](https://github.com/airwiki/airwiki/pull/7). V4 is the only maintained
 source-side retrieval corpus.
+
+The superseded schema-v3 fixture had SHA-256
+`8a04bf7eec4aa35e6f5cdfa1c7000ab6d9f666814281c466fb82e5c4b10986ff`.
+V4 keeps its structure and quality thresholds but separates two authorization
+facts: `allow_external_ai` gates applications connected on the source device,
+while a confirmed peer grant covers the receiver device and its connected
+applications. The v3 real-model observations below remain historical and have
+not been recharacterized as measurements of v4.
 
 The evaluator builds temporary origin and peer databases and uses the production
 publication and search interfaces. It covers:
@@ -168,8 +176,9 @@ false-evidence control need focused improvement. This goal does not tune the
 fixture, add query decomposition, introduce another model or change product
 protocols merely to turn that observation green.
 
-Schema v3 deterministically validates the corrected corpus and pipeline
-contract. Its real-model baseline is recorded below.
+Schema v4 deterministically validates the current corpus and pipeline contract.
+No real-model v4 baseline has been recorded yet; the schema-v3 baseline remains
+below as historical selector evidence.
 
 ## V2 stage-attribution observation
 
@@ -201,7 +210,7 @@ size, top-k, policies or the wire protocol.
 ## V3 corrected-contract observation
 
 A second macOS arm64 run on 2026-07-18 used the same pinned model revisions and
-the active schema-v3 corpus. The corrected contract improved the diagnostic
+the then-active schema-v3 corpus. The corrected contract improved the diagnostic
 baseline without changing production search or thresholds:
 
 - regression Recall@5: 0.6667 with two unexpected facts;

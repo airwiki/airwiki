@@ -2,6 +2,7 @@
   import type { IntegrationActionInput, IntegrationSummary } from './api';
   import AiClientIcon from './components/identity/AiClientIcon.svelte';
   import LoadingSkeleton from './components/LoadingSkeleton.svelte';
+  import Switch from './components/controls/Switch.svelte';
   import type { MessageArgs } from './i18n';
 
   let {
@@ -9,13 +10,19 @@
     busy,
     t,
     onaction,
-    oncopy
+    oncopy,
+    publicSearchBusyAppId = null,
+    publicSearchErrorAppId = null,
+    onpublicsearch = () => undefined
   }: {
     integrations: IntegrationSummary[];
     busy: boolean;
     t: (id: string, args?: MessageArgs) => string;
     onaction: (action: IntegrationActionInput) => void;
     oncopy: (command: string, args: string[]) => void;
+    publicSearchBusyAppId?: string | null;
+    publicSearchErrorAppId?: string | null;
+    onpublicsearch?: (appId: string, enabled: boolean) => void;
   } = $props();
 
   function clientName(client: IntegrationSummary['client']): string {
@@ -151,6 +158,28 @@
           <dd class:state-warning={integration.workflowGuide.status === 'conflict'}><span class={`integration-state-dot ${guideTone(integration.workflowGuide.status)}`} aria-hidden="true"></span>{guideState(integration.workflowGuide.status)}</dd>
         </div>
       </dl>
+      {#if integration.appId}
+        <div class="integration-public-search" class:has-error={publicSearchErrorAppId === integration.appId}>
+          <Switch
+            label={t('integrations-public-search')}
+            description={t('integrations-public-search-help')}
+            checked={integration.publicSearchEnabled ?? false}
+            disabled={busy || publicSearchBusyAppId !== null}
+            onchange={(enabled) => onpublicsearch(integration.appId ?? '', enabled)}
+          />
+          {#if publicSearchBusyAppId === integration.appId}
+            <small class="integration-public-search-state" role="status">{t('integrations-public-search-updating')}</small>
+          {:else if publicSearchErrorAppId === integration.appId}
+            <div class="integration-public-search-retry">
+              <small class="integration-public-search-state error" role="alert">{t('integrations-public-search-error')}</small>
+              <button
+                class="text-action"
+                onclick={() => onpublicsearch(integration.appId ?? '', !(integration.publicSearchEnabled ?? false))}
+              >{t('action-retry')}</button>
+            </div>
+          {/if}
+        </div>
+      {/if}
       <div class="integration-actions">
         {#if (integration.status === 'available' || integration.status === 'updateAvailable') && integration.workflowGuide.status !== 'conflict' && integration.workflowGuide.status !== 'unsupported'}
           <button class="secondary" disabled={busy} onclick={() => connectOrUpdate(integration)}>

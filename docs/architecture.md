@@ -2,8 +2,8 @@
 
 AirWiki is a local-first desktop application. It turns files selected by
 the user into human-reviewed knowledge, keeps operational state on that device,
-and can federate bounded search evidence to explicitly paired devices or local
-chat clients.
+and can federate bounded search evidence to explicitly paired devices, public
+readers, or capability-authenticated local chat clients.
 
 ## Dependency direction
 
@@ -148,6 +148,15 @@ durable preferences and logs. The canonical shell routes are `#library` and
 `#settings/{general,connections,apps}`; Settings replaces the normal header so
 returning restores the Library selection, results and scroll position.
 
+`AccessibleKnowledgeSearch` is the common coordinator for desktop and MCP
+knowledge requests. It always starts the local-plus-LAN coordinator and starts
+the public reader only when the initiating UI request or exact application
+capability carries process-local public-query consent. Enabled branches run
+concurrently, preserve existing bounds and deadlines, fuse independent ranks,
+and return explicit partial coverage when another branch fails. A local
+application collection scope is applied only to the local branch and is erased
+before any transport request.
+
 `AppRuntime` and the domain services run on Tauri's Tokio runtime. UI intents
 use a bounded `mpsc` channel, consolidated state uses `watch`, transient
 progress uses bounded `broadcast`, and request-scoped responses use identifiers
@@ -213,13 +222,24 @@ This section defines the underlying trust boundaries.
   only from the already validated signed manifest; no LAN identity, device
   label or local path is accepted into that presentation. See
   [ADR 0008](adr/0008-public-federation.md).
-- Local MCP search requires an active random application capability, a per-Wiki
-  application grant and the internal `allow_external_ai` collection gate. The
-  gate is maintained with the application grants and never implies peer or
-  public sharing. Application-scoped requests are local-only because remote
-  peers cannot authenticate that local application's grant. Local collection
-  scope is applied before ranking and truncation, then capability and grants
-  are revalidated immediately before evidence leaves the gateway.
+- MCP search requires an active random application capability and a per-Wiki
+  application grant for local collections. The internal `allow_external_ai`
+  gate applies only to that local application path and never implies LAN or
+  public sharing. The same request also reaches verified LAN peers; the local
+  collection scope is stripped first because each peer derives authority from
+  its Noise-authenticated identity, durable trust, confirmed grant, LAN policy
+  and current publication. Public search is added only by the application's
+  disabled-by-default preference after native query-egress confirmation.
+  Capability, public consent and local grants are revalidated immediately
+  before evidence leaves the gateway.
+- `SearchPurpose` selects retrieval behavior. A separate non-serialized
+  `SearchDisclosureScope` selects disclosure policy. The UI, capability
+  gateway, Noise-authenticated LAN handler and public publisher derive
+  `LocalUser`, `LocalApplication`, `AuthorizedPeer` and `Public` respectively;
+  no network payload can choose its own scope. LAN serving ignores the source
+  device's local-application gate, while receiver-AI searches additionally
+  require the owner-confirmed LAN grant semantics. Public serving ignores that
+  local gate and revalidates signed public policy instead.
 - Confirming a new application connection grants that application reader access
   to compatible Wikis by default. Creating a compatible Wiki likewise grants
   reader access to active applications after native confirmation. Folder and
@@ -238,14 +258,18 @@ This section defines the underlying trust boundaries.
   a second confirmation and creates machine-confirmed knowledge.
 - External-chat search separates answerability-accepted evidence from bounded
   authorized candidates. Both lanes are revalidated against current policy;
-  local desktop search receives only evidence.
+  local desktop search receives only evidence. Remote evidence remains
+  untrusted and retains authenticated or verified provenance; an application
+  does not receive a second permission matrix for remote Wikis or results.
 - MCP and model runtime listeners bind only to loopback.
 - The client label reported by a bridge is diagnostic, never authentication.
 - When state is uncertain, searchable exposure fails closed.
 
 See [ADR 0005](adr/0005-lan-identity-pairing-and-authorization.md) for LAN
-identity, pairing and revocation, and the [threat model](threat-model.md) for
-boundaries and residual risks.
+identity, pairing and revocation,
+[ADR 0013](adr/0013-connected-app-federated-search.md) for connected-app
+federation, and the [threat model](threat-model.md) for boundaries and residual
+risks.
 
 ## Portability and releases
 

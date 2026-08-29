@@ -9,8 +9,8 @@ use airwiki_types::{
     ConceptAssurance, ConceptType, DisclosureGate, DisclosureLease, DisclosureMutationGuard,
     DocumentStatus, EnrichmentDraft, FreshnessState, MAX_COMPUTATION_REQUESTS_PER_MINUTE,
     MAX_PENDING_COMPUTATIONS_PER_APPLICATION, OkfCompatibility, OkfWarning, PublicConceptSummary,
-    SearchCollectionPresentation, SearchHit, SearchPurpose, SharedWikiConceptSummary,
-    SharedWikiDescriptor, TrustTier,
+    SearchCollectionPresentation, SearchDisclosureScope, SearchHit, SearchPurpose,
+    SharedWikiConceptSummary, SharedWikiDescriptor, TrustTier,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Duration, Utc};
@@ -43,6 +43,7 @@ const MIGRATION_14: &str = include_str!("../migrations/0014_bound_computation_ru
 const MIGRATION_15: &str = include_str!("../migrations/0015_peer_device_platform.sql");
 const MIGRATION_16: &str = include_str!("../migrations/0016_project_memory.sql");
 const MIGRATION_17: &str = include_str!("../migrations/0017_application_search_grants.sql");
+const MIGRATION_18: &str = include_str!("../migrations/0018_ai_federated_search.sql");
 
 const APPLICATION_MUTATIONS_PER_MINUTE: u32 = 30;
 const APPLICATION_WIKI_CREATIONS_PER_HOUR: u32 = 5;
@@ -424,6 +425,7 @@ pub struct ApplicationCapabilityRecord {
     pub producer: String,
     pub capability_prefix: String,
     pub secret_hash: String,
+    pub public_search_enabled: bool,
     pub revoked_at: Option<DateTime<Utc>>,
 }
 
@@ -678,6 +680,7 @@ pub struct GrantRecord {
     pub peer_id: String,
     pub collection_id: Uuid,
     pub granted_at: DateTime<Utc>,
+    pub receiver_ai_consent_version: u32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1224,7 +1227,13 @@ impl Database {
             tx.pragma_update(None, "user_version", 17)?;
             tx.commit()?;
         }
-        if version > 17 {
+        if version < 18 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_18)?;
+            tx.pragma_update(None, "user_version", 18)?;
+            tx.commit()?;
+        }
+        if version > 18 {
             bail!("database schema {version} is newer than this application supports");
         }
         let database = Self {
@@ -1691,6 +1700,7 @@ impl Database {
             producer: producer.to_owned(),
             capability_prefix: capability_prefix.to_owned(),
             secret_hash: secret_hash.to_owned(),
+            public_search_enabled: false,
             revoked_at: None,
         })
     }
@@ -1701,7 +1711,8 @@ impl Database {
     ) -> Result<Option<ApplicationCapabilityRecord>> {
         self.connection()?
             .query_row(
-            "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,revoked_at
+                "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,
+                    public_search_enabled,revoked_at
                  FROM application_capabilities WHERE capability_prefix=?1",
                 [capability_prefix],
                 |row| {
@@ -1712,8 +1723,9 @@ impl Database {
                         producer: row.get(3)?,
                         capability_prefix: row.get(4)?,
                         secret_hash: row.get(5)?,
+                        public_search_enabled: row.get(6)?,
                         revoked_at: row
-                            .get::<_, Option<String>>(6)?
+                            .get::<_, Option<String>>(7)?
                             .map(datetime_sql)
                             .transpose()?,
                     })
@@ -1729,7 +1741,8 @@ impl Database {
     ) -> Result<Option<ApplicationCapabilityRecord>> {
         self.connection()?
             .query_row(
-                "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,revoked_at
+                "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,
+                        public_search_enabled,revoked_at
                  FROM application_capabilities WHERE app_id=?1 AND revoked_at IS NULL",
                 [app_id.to_string()],
                 |row| {
@@ -1740,8 +1753,9 @@ impl Database {
                         producer: row.get(3)?,
                         capability_prefix: row.get(4)?,
                         secret_hash: row.get(5)?,
+                        public_search_enabled: row.get(6)?,
                         revoked_at: row
-                            .get::<_, Option<String>>(6)?
+                            .get::<_, Option<String>>(7)?
                             .map(datetime_sql)
                             .transpose()?,
                     })
@@ -1757,7 +1771,8 @@ impl Database {
     ) -> Result<Option<ApplicationCapabilityRecord>> {
         self.connection()?
             .query_row(
-                "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,revoked_at
+                "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,
+                        public_search_enabled,revoked_at
                  FROM application_capabilities WHERE app_id=?1",
                 [app_id.to_string()],
                 |row| {
@@ -1768,8 +1783,9 @@ impl Database {
                         producer: row.get(3)?,
                         capability_prefix: row.get(4)?,
                         secret_hash: row.get(5)?,
+                        public_search_enabled: row.get(6)?,
                         revoked_at: row
-                            .get::<_, Option<String>>(6)?
+                            .get::<_, Option<String>>(7)?
                             .map(datetime_sql)
                             .transpose()?,
                     })
@@ -1782,7 +1798,8 @@ impl Database {
     pub fn list_application_capabilities(&self) -> Result<Vec<ApplicationCapabilityRecord>> {
         let connection = self.connection()?;
         let mut statement = connection.prepare(
-            "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,revoked_at
+            "SELECT app_id,display_name,owner_kind,producer,capability_prefix,secret_hash,
+                    public_search_enabled,revoked_at
              FROM application_capabilities ORDER BY display_name COLLATE NOCASE,app_id",
         )?;
         let rows = statement.query_map([], |row| {
@@ -1793,8 +1810,9 @@ impl Database {
                 producer: row.get(3)?,
                 capability_prefix: row.get(4)?,
                 secret_hash: row.get(5)?,
+                public_search_enabled: row.get(6)?,
                 revoked_at: row
-                    .get::<_, Option<String>>(6)?
+                    .get::<_, Option<String>>(7)?
                     .map(datetime_sql)
                     .transpose()?,
             })
@@ -1842,7 +1860,8 @@ impl Database {
             "UPDATE application_capabilities
              SET capability_prefix=?3,secret_hash=?4,revoked_at=NULL,last_used_at=NULL,
                  mutations_window_started_at=NULL,mutations_in_window=0,
-                 creations_window_started_at=NULL,creations_in_window=0
+                 creations_window_started_at=NULL,creations_in_window=0,
+                 public_search_enabled=0
              WHERE app_id=?1 AND producer=?2",
             params![app_id.to_string(), producer, capability_prefix, secret_hash],
         )?;
@@ -1876,14 +1895,37 @@ impl Database {
         }
     }
 
+    /// Updates the application-specific consent for public query egress.
+    /// Revoked or unknown capabilities fail closed.
+    pub fn set_application_public_search(
+        &self,
+        app_id: Uuid,
+        enabled: bool,
+        audit: &AuditEvent,
+    ) -> Result<()> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = tx.execute(
+            "UPDATE application_capabilities SET public_search_enabled=?2
+             WHERE app_id=?1 AND revoked_at IS NULL",
+            params![app_id.to_string(), enabled],
+        )?;
+        ensure_changed(changed, "active application capability", app_id)?;
+        record_audit_on(&tx, audit)?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn set_application_capability_revoked(&self, app_id: Uuid, revoked: bool) -> Result<()> {
         let _guard = self.managed_bundle_guard()?;
         let mut connection = self.connection()?;
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = Utc::now().to_rfc3339();
         let count = tx.execute(
-            "UPDATE application_capabilities SET revoked_at=?2 WHERE app_id=?1",
-            params![app_id.to_string(), revoked.then_some(now.as_str())],
+            "UPDATE application_capabilities
+             SET revoked_at=?2,public_search_enabled=CASE WHEN ?3 THEN 0 ELSE public_search_enabled END
+             WHERE app_id=?1",
+            params![app_id.to_string(), revoked.then_some(now.as_str()), revoked],
         )?;
         ensure_changed(count, "application capability", app_id)?;
         if revoked {
@@ -6105,8 +6147,11 @@ impl Database {
         let connection = self.connection()?;
         if granted {
             connection.execute(
-                "INSERT INTO grants(peer_id,collection_id,granted_at) VALUES (?1,?2,?3)
-                 ON CONFLICT(peer_id,collection_id) DO NOTHING",
+                "INSERT INTO grants(peer_id,collection_id,granted_at,receiver_ai_consent_version)
+                 VALUES (?1,?2,?3,1)
+                 ON CONFLICT(peer_id,collection_id) DO UPDATE SET
+                    granted_at=excluded.granted_at,
+                    receiver_ai_consent_version=excluded.receiver_ai_consent_version",
                 params![peer_id, collection_id.to_string(), Utc::now().to_rfc3339()],
             )?;
         } else {
@@ -6123,7 +6168,7 @@ impl Database {
         let mut grants = Vec::new();
         if let Some(peer_id) = peer_id {
             let mut statement = connection.prepare(
-                "SELECT peer_id,collection_id,granted_at FROM grants
+                "SELECT peer_id,collection_id,granted_at,receiver_ai_consent_version FROM grants
                  WHERE peer_id=?1 ORDER BY collection_id",
             )?;
             let rows = statement.query_map([peer_id], grant_from_row)?;
@@ -6132,7 +6177,7 @@ impl Database {
             }
         } else {
             let mut statement = connection.prepare(
-                "SELECT peer_id,collection_id,granted_at FROM grants
+                "SELECT peer_id,collection_id,granted_at,receiver_ai_consent_version FROM grants
                  ORDER BY peer_id,collection_id",
             )?;
             let rows = statement.query_map([], grant_from_row)?;
@@ -6141,6 +6186,27 @@ impl Database {
             }
         }
         Ok(grants)
+    }
+
+    /// Applies the one-time, human-confirmed LAN grant semantics upgrade.
+    /// Existing grants that are not currently active remain legacy.
+    pub fn confirm_all_legacy_lan_ai_grants(&self, audit: &AuditEvent) -> Result<u64> {
+        let mut connection = self.connection()?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let changed = tx.execute(
+            "UPDATE grants SET receiver_ai_consent_version=1
+             WHERE receiver_ai_consent_version=0
+               AND EXISTS(SELECT 1 FROM peers p
+                          WHERE p.peer_id=grants.peer_id AND p.trusted=1 AND p.blocked=0)
+               AND EXISTS(SELECT 1 FROM collections c
+                          WHERE c.id=grants.collection_id AND c.peer_shareable=1
+                            AND c.okf_compatibility IN
+                                ('declared_v02','undeclared_v02_compatible'))",
+            [],
+        )?;
+        record_audit_on(&tx, audit)?;
+        tx.commit()?;
+        u64::try_from(changed).context("legacy LAN grant count exceeds platform capacity")
     }
 
     pub fn revoke_peer(&self, peer_id: &str) -> Result<()> {
@@ -6203,7 +6269,8 @@ impl Database {
     }
 
     /// Returns the durable peer-grant and collection-policy intersection.
-    /// External-AI searches require both independent collection opt-ins.
+    /// External-AI searches require the receiver-app semantics confirmed by the
+    /// owner, but never reuse this device's local-application policy.
     pub fn granted_collections_for_search(
         &self,
         peer_id: &str,
@@ -6215,7 +6282,7 @@ impl Database {
              JOIN collections c ON c.id=g.collection_id
              WHERE g.peer_id=?1 AND p.trusted=1 AND p.blocked=0 AND c.peer_shareable=1
                AND c.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
-               AND (?2=0 OR c.allow_external_ai=1)
+               AND (?2=0 OR g.receiver_ai_consent_version>=1)
                AND (c.memory_scope IS NULL OR c.memory_scope!='project'
                     OR EXISTS(SELECT 1 FROM project_memory_attachments attachment
                               WHERE attachment.collection_id=c.id AND attachment.state='active'))
@@ -6229,20 +6296,8 @@ impl Database {
     }
 
     pub fn record_audit(&self, event: &AuditEvent) -> Result<()> {
-        self.connection()?.execute(
-            "INSERT INTO audit_events(id,actor,action,target_type,target_id,details_json,created_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7)",
-            params![
-                event.id.to_string(),
-                event.actor,
-                event.action,
-                event.target_type,
-                event.target_id,
-                serde_json::to_string(&event.details)?,
-                event.created_at.to_rfc3339(),
-            ],
-        )?;
-        Ok(())
+        let connection = self.connection()?;
+        record_audit_on(&connection, event)
     }
 
     pub fn count(&self, table: &str) -> Result<u64> {
@@ -6299,7 +6354,7 @@ impl Database {
         &self,
         query: &str,
         collections: &[Uuid],
-        purpose: SearchPurpose,
+        scope: SearchDisclosureScope,
         limit: usize,
     ) -> Result<Vec<RankedChunk>> {
         if collections.is_empty() {
@@ -6310,7 +6365,7 @@ impl Database {
             return Ok(Vec::new());
         }
         let placeholders = repeat_placeholders(collections.len(), 3);
-        let external_clause = if purpose == SearchPurpose::ExternalAi {
+        let external_clause = if scope == SearchDisclosureScope::LocalApplication {
             " AND col.allow_external_ai=1"
         } else {
             ""
@@ -6343,7 +6398,7 @@ impl Database {
         &self,
         query: &str,
         collections: &[Uuid],
-        purpose: SearchPurpose,
+        scope: SearchDisclosureScope,
         limit: usize,
     ) -> Result<Vec<RankedChunk>> {
         if collections.is_empty() || limit == 0 {
@@ -6354,9 +6409,12 @@ impl Database {
             return Ok(Vec::new());
         }
         let placeholders = repeat_placeholders(collections.len(), 3);
-        let external_clause = if purpose == SearchPurpose::ExternalAi {
+        let disclosure_clause = if scope == SearchDisclosureScope::LocalApplication {
             " AND col.allow_external_ai=1
               AND col.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
+              AND f.lifecycle_status='stable'"
+        } else if scope != SearchDisclosureScope::LocalUser {
+            " AND col.okf_compatibility IN ('declared_v02','undeclared_v02_compatible')
               AND f.lifecycle_status='stable'"
         } else {
             ""
@@ -6371,7 +6429,7 @@ impl Database {
              JOIN okf_concept_projection p
                ON p.collection_id=f.collection_id AND p.concept_id=f.concept_id
              WHERE okf_projection_fts MATCH ?1
-             AND f.collection_id IN ({placeholders}){external_clause}
+             AND f.collection_id IN ({placeholders}){disclosure_clause}
              AND (col.memory_scope IS NULL OR col.memory_scope!='project'
                   OR EXISTS(SELECT 1 FROM project_memory_attachments attachment
                             WHERE attachment.collection_id=col.id AND attachment.state='active'))
@@ -6432,14 +6490,14 @@ impl Database {
     pub(crate) fn vector_embedding_candidates_batch(
         &self,
         collection_id: Uuid,
-        purpose: SearchPurpose,
+        scope: SearchDisclosureScope,
         limit: usize,
         after_rowid: Option<i64>,
     ) -> Result<Vec<VectorEmbeddingCandidate>> {
         if limit == 0 {
             return Ok(Vec::new());
         }
-        let external_clause = if purpose == SearchPurpose::ExternalAi {
+        let external_clause = if scope == SearchDisclosureScope::LocalApplication {
             " AND col.allow_external_ai=1"
         } else {
             ""
@@ -6479,14 +6537,14 @@ impl Database {
         &self,
         chunk_ids: &[Uuid],
         collections: &[Uuid],
-        purpose: SearchPurpose,
+        scope: SearchDisclosureScope,
     ) -> Result<Vec<RankedChunk>> {
         if chunk_ids.is_empty() || collections.is_empty() {
             return Ok(Vec::new());
         }
         let chunk_placeholders = repeat_placeholders(chunk_ids.len(), 1);
         let collection_placeholders = repeat_placeholders(collections.len(), chunk_ids.len() + 1);
-        let external_clause = if purpose == SearchPurpose::ExternalAi {
+        let external_clause = if scope == SearchDisclosureScope::LocalApplication {
             " AND col.allow_external_ai=1"
         } else {
             ""
@@ -6521,11 +6579,11 @@ impl Database {
     /// rows immediately before it leaves this node. This closes races with a
     /// concurrent modification, deletion, review withdrawal or cloud-policy
     /// restriction that occurred after candidates were loaded.
-    pub fn hit_is_current(&self, hit: &SearchHit, purpose: SearchPurpose) -> Result<bool> {
-        if self.projected_hit_is_current(hit, purpose, None, false)? {
+    pub fn hit_is_current(&self, hit: &SearchHit, scope: SearchDisclosureScope) -> Result<bool> {
+        if self.projected_hit_is_current(hit, scope, None, SearchPurpose::LocalAssistant)? {
             return Ok(true);
         }
-        let external_clause = if purpose == SearchPurpose::ExternalAi {
+        let external_clause = if scope == SearchDisclosureScope::LocalApplication {
             " AND col.allow_external_ai=1"
         } else {
             ""
@@ -6582,8 +6640,13 @@ impl Database {
     }
 
     fn public_hit_is_current_on(connection: &Connection, hit: &SearchHit) -> Result<bool> {
-        if projected_hit_is_current_on(connection, hit, SearchPurpose::LocalAssistant, None, true)?
-        {
+        if projected_hit_is_current_on(
+            connection,
+            hit,
+            SearchDisclosureScope::Public,
+            None,
+            SearchPurpose::LocalAssistant,
+        )? {
             return Ok(true);
         }
         let mut statement = connection.prepare(
@@ -6659,7 +6722,13 @@ impl Database {
         peer_id: &str,
         purpose: SearchPurpose,
     ) -> Result<bool> {
-        if projected_hit_is_current_on(connection, hit, purpose, Some(peer_id), false)? {
+        if projected_hit_is_current_on(
+            connection,
+            hit,
+            SearchDisclosureScope::AuthorizedPeer,
+            Some(peer_id),
+            purpose,
+        )? {
             return Ok(true);
         }
         let external_ai = purpose == SearchPurpose::ExternalAi;
@@ -6677,7 +6746,8 @@ impl Database {
                   AND sd.source_sha256=?3 AND ch.source_revision=?4
                   AND ch.source_revision=sd.revision
                   AND g.peer_id=?5 AND p.trusted=1 AND p.blocked=0
-                  AND col.peer_shareable=1 AND (?6=0 OR col.allow_external_ai=1)",
+                  AND col.peer_shareable=1
+                  AND (?6=0 OR g.receiver_ai_consent_version>=1)",
         )?;
         let mut rows = statement.query(params![
             hit.concept_id.to_string(),
@@ -6693,12 +6763,12 @@ impl Database {
     fn projected_hit_is_current(
         &self,
         hit: &SearchHit,
-        purpose: SearchPurpose,
+        scope: SearchDisclosureScope,
         peer_id: Option<&str>,
-        public: bool,
+        purpose: SearchPurpose,
     ) -> Result<bool> {
         let connection = self.connection()?;
-        projected_hit_is_current_on(&connection, hit, purpose, peer_id, public)
+        projected_hit_is_current_on(&connection, hit, scope, peer_id, purpose)
     }
 }
 
@@ -6776,9 +6846,9 @@ fn replace_okf_concept_projection_on(
 fn projected_hit_is_current_on(
     connection: &Connection,
     hit: &SearchHit,
-    purpose: SearchPurpose,
+    scope: SearchDisclosureScope,
     peer_id: Option<&str>,
-    public: bool,
+    purpose: SearchPurpose,
 ) -> Result<bool> {
     let row = connection
         .query_row(
@@ -6821,27 +6891,32 @@ fn projected_hit_is_current_on(
     else {
         return Ok(false);
     };
-    let local_only = purpose == SearchPurpose::LocalAssistant && peer_id.is_none() && !public;
-    if (!local_only && lifecycle != "stable")
+    let local_user = scope == SearchDisclosureScope::LocalUser;
+    if (!local_user && lifecycle != "stable")
         || fingerprint != hit.source_sha256
-        || (!local_only
+        || (!local_user
             && !matches!(
                 compatibility.as_str(),
                 "declared_v02" | "undeclared_v02_compatible"
             ))
-        || (!local_only && !mutation_free)
+        || (!local_user && !mutation_free)
         || !project_memory_available
-        || (purpose == SearchPurpose::ExternalAi && !external_ai)
-        || (public && !internet_public)
-        || (peer_id.is_some() && !peer_shareable)
+        || (scope == SearchDisclosureScope::LocalApplication && !external_ai)
+        || (scope == SearchDisclosureScope::Public && !internet_public)
+        || (scope == SearchDisclosureScope::AuthorizedPeer && !peer_shareable)
     {
         return Ok(false);
     }
     if let Some(peer_id) = peer_id {
         let allowed = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM grants g JOIN peers p ON p.peer_id=g.peer_id
-             WHERE g.peer_id=?1 AND g.collection_id=?2 AND p.trusted=1 AND p.blocked=0)",
-            params![peer_id, hit.collection_id.to_string()],
+             WHERE g.peer_id=?1 AND g.collection_id=?2 AND p.trusted=1 AND p.blocked=0
+               AND (?3=0 OR g.receiver_ai_consent_version>=1))",
+            params![
+                peer_id,
+                hit.collection_id.to_string(),
+                purpose == SearchPurpose::ExternalAi
+            ],
             |row| row.get::<_, bool>(0),
         )?;
         if !allowed {
@@ -7086,7 +7161,25 @@ fn grant_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<GrantRecord> {
         peer_id: row.get(0)?,
         collection_id: uuid_sql(row.get::<_, String>(1)?)?,
         granted_at: datetime_sql(row.get::<_, String>(2)?)?,
+        receiver_ai_consent_version: row.get(3)?,
     })
+}
+
+fn record_audit_on(connection: &Connection, event: &AuditEvent) -> Result<()> {
+    connection.execute(
+        "INSERT INTO audit_events(id,actor,action,target_type,target_id,details_json,created_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7)",
+        params![
+            event.id.to_string(),
+            event.actor,
+            event.action,
+            event.target_type,
+            event.target_id,
+            serde_json::to_string(&event.details)?,
+            event.created_at.to_rfc3339(),
+        ],
+    )?;
+    Ok(())
 }
 
 fn concept_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ConceptRecord> {
@@ -7785,6 +7878,18 @@ fn repeat_placeholders(count: usize, start_index: usize) -> String {
 mod tests {
     use super::*;
 
+    fn audit_event(action: &str) -> AuditEvent {
+        AuditEvent {
+            id: Uuid::new_v4(),
+            actor: "test".to_owned(),
+            action: action.to_owned(),
+            target_type: "synthetic".to_owned(),
+            target_id: None,
+            details: serde_json::json!({}),
+            created_at: Utc::now(),
+        }
+    }
+
     fn draft() -> EnrichmentDraft {
         EnrichmentDraft {
             concept_type: ConceptType::Runbook,
@@ -8169,7 +8274,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("db.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 17);
+        assert_eq!(db.schema_version().unwrap(), 18);
         for table in [
             "collections",
             "source_documents",
@@ -8189,7 +8294,7 @@ mod tests {
             assert_eq!(db.count(table).unwrap(), 0);
         }
         drop(db);
-        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 17);
+        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 18);
     }
 
     #[test]
@@ -8711,7 +8816,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 17);
+        assert_eq!(database.schema_version().unwrap(), 18);
         assert_eq!(database.count("collections").unwrap(), 1);
         assert_eq!(database.count("source_documents").unwrap(), 1);
         assert_eq!(database.count("publication_claims").unwrap(), 0);
@@ -8751,7 +8856,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 17);
+        assert_eq!(database.schema_version().unwrap(), 18);
         assert_eq!(
             database.collection(collection_id).unwrap().unwrap().policy,
             CollectionPolicy::local_only()
@@ -8786,7 +8891,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
-        assert_eq!(database.schema_version().unwrap(), 17);
+        assert_eq!(database.schema_version().unwrap(), 18);
         assert_eq!(collection.policy, CollectionPolicy::local_only());
         assert!(
             database
@@ -8818,7 +8923,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 17);
+        assert_eq!(database.schema_version().unwrap(), 18);
         let indexes = database.list_federation_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
         assert_eq!(indexes[0].registry_version, 0);
@@ -8857,7 +8962,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::days(1),
         }];
 
-        assert_eq!(database.schema_version().unwrap(), 17);
+        assert_eq!(database.schema_version().unwrap(), 18);
         assert_eq!(
             database
                 .count("federation_bootstrap_registry_state")
@@ -8899,7 +9004,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 17);
+        assert_eq!(database.schema_version().unwrap(), 18);
         assert_eq!(collection.origin, WikiOrigin::Folder);
         assert_eq!(collection.indexing_mode, IndexingMode::Manual);
         assert_eq!(collection.okf_version, "0.1");
@@ -8987,7 +9092,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 17);
+        assert_eq!(database.schema_version().unwrap(), 18);
         assert_eq!(collection.policy, CollectionPolicy::local_only());
         assert_eq!(collection.indexing_mode, IndexingMode::Manual);
         assert_eq!(database.count("collections").unwrap(), 1);
@@ -9119,7 +9224,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let concepts = database.list_okf_concept_projection(collection_id).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 17);
+        assert_eq!(database.schema_version().unwrap(), 18);
         assert_eq!(concepts.len(), 1);
         assert_eq!(concepts[0].concept_type.to_string(), "Unknown Type");
         assert_eq!(concepts[0].lifecycle_status, "stable");
@@ -9845,7 +9950,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let peer = database.peer("existing-peer").unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 17);
+        assert_eq!(database.schema_version().unwrap(), 18);
         assert_eq!(peer.display_name.as_deref(), Some("Atlas Mac"));
         assert!(peer.trusted);
         assert_eq!(peer.device_platform, None);
@@ -9869,14 +9974,42 @@ mod tests {
             db.granted_collections("peer-b").unwrap(),
             vec![collection.id]
         );
+        assert_eq!(
+            db.granted_collections_for_search("peer-b", SearchPurpose::ExternalAi)
+                .unwrap(),
+            vec![collection.id]
+        );
+        assert_eq!(db.list_peers().unwrap().len(), 1);
+        assert_eq!(db.list_grants(Some("peer-b")).unwrap().len(), 1);
+        assert_eq!(db.collection_stats(collection.id).unwrap().sources, 0);
+
+        db.connection()
+            .unwrap()
+            .execute(
+                "UPDATE grants SET receiver_ai_consent_version=0
+                 WHERE peer_id='peer-b' AND collection_id=?1",
+                [collection.id.to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            db.granted_collections("peer-b").unwrap(),
+            vec![collection.id]
+        );
         assert!(
             db.granted_collections_for_search("peer-b", SearchPurpose::ExternalAi)
                 .unwrap()
                 .is_empty()
         );
-        assert_eq!(db.list_peers().unwrap().len(), 1);
-        assert_eq!(db.list_grants(Some("peer-b")).unwrap().len(), 1);
-        assert_eq!(db.collection_stats(collection.id).unwrap().sources, 0);
+        assert_eq!(
+            db.confirm_all_legacy_lan_ai_grants(&audit_event("confirm_legacy_grants"))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.granted_collections_for_search("peer-b", SearchPurpose::ExternalAi)
+                .unwrap(),
+            vec![collection.id]
+        );
 
         db.update_collection_policy(
             collection.id,
@@ -10326,6 +10459,129 @@ mod tests {
     }
 
     #[test]
+    fn public_search_consent_defaults_off_and_resets_on_rotation_or_revocation() {
+        let (_temp, db, _collection) = setup();
+        let app_id = Uuid::new_v4();
+        db.create_application_capability(
+            app_id,
+            "ChatGPT",
+            "chatgpt",
+            "chatgpt/test",
+            "0123456789abcdef",
+            &"a".repeat(64),
+        )
+        .unwrap();
+        assert!(
+            !db.application_capability_by_app_id(app_id)
+                .unwrap()
+                .unwrap()
+                .public_search_enabled
+        );
+
+        db.set_application_public_search(app_id, true, &audit_event("enable_public_search"))
+            .unwrap();
+        assert!(
+            db.application_capability_by_app_id(app_id)
+                .unwrap()
+                .unwrap()
+                .public_search_enabled
+        );
+
+        db.rotate_application_capability(
+            app_id,
+            "chatgpt/test",
+            "fedcba9876543210",
+            &"b".repeat(64),
+        )
+        .unwrap();
+        assert!(
+            !db.application_capability_by_app_id(app_id)
+                .unwrap()
+                .unwrap()
+                .public_search_enabled
+        );
+
+        db.set_application_public_search(app_id, true, &audit_event("reenable_public_search"))
+            .unwrap();
+        db.set_application_capability_revoked(app_id, true).unwrap();
+        assert!(
+            !db.application_capability_any_by_app_id(app_id)
+                .unwrap()
+                .unwrap()
+                .public_search_enabled
+        );
+        assert!(
+            db.set_application_public_search(app_id, true, &audit_event("revoked_public_search"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn public_search_consent_rolls_back_when_its_audit_cannot_be_stored() {
+        let (_temp, db, _collection) = setup();
+        let app_id = Uuid::new_v4();
+        db.create_application_capability(
+            app_id,
+            "ChatGPT",
+            "chatgpt",
+            "chatgpt/test",
+            "0123456789abcdef",
+            &"a".repeat(64),
+        )
+        .unwrap();
+        let duplicate_audit = audit_event("duplicate_public_search_audit");
+        db.record_audit(&duplicate_audit).unwrap();
+
+        assert!(
+            db.set_application_public_search(app_id, true, &duplicate_audit)
+                .is_err()
+        );
+        assert!(
+            !db.application_capability_by_app_id(app_id)
+                .unwrap()
+                .unwrap()
+                .public_search_enabled
+        );
+    }
+
+    #[test]
+    fn legacy_lan_ai_upgrade_rolls_back_when_its_audit_cannot_be_stored() {
+        let (_temp, db, collection) = setup();
+        db.upsert_peer(&PeerRecord {
+            peer_id: "peer-legacy-audit".into(),
+            display_name: None,
+            device_platform: None,
+            trusted: true,
+            blocked: false,
+            paired_at: Some(Utc::now()),
+            last_seen_at: None,
+        })
+        .unwrap();
+        db.set_grant("peer-legacy-audit", collection.id, true)
+            .unwrap();
+        db.connection()
+            .unwrap()
+            .execute(
+                "UPDATE grants SET receiver_ai_consent_version=0
+                 WHERE peer_id='peer-legacy-audit' AND collection_id=?1",
+                [collection.id.to_string()],
+            )
+            .unwrap();
+        let duplicate_audit = audit_event("duplicate_legacy_grant_audit");
+        db.record_audit(&duplicate_audit).unwrap();
+
+        assert!(
+            db.confirm_all_legacy_lan_ai_grants(&duplicate_audit)
+                .is_err()
+        );
+        assert!(
+            db.granted_collections_for_search("peer-legacy-audit", SearchPurpose::ExternalAi)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn revoking_the_last_application_closes_ai_access_without_disabling_lan() {
         let (_temp, db, collection) = setup();
         db.update_collection_policy(collection.id, CollectionPolicy::shared_with_peers())
@@ -10525,7 +10781,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 17);
+        assert_eq!(database.schema_version().unwrap(), 18);
         assert_eq!(
             database.collection(id).unwrap().unwrap().memory_scope,
             Some(MemoryScope::Personal)
@@ -10675,7 +10931,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 17);
+        assert_eq!(database.schema_version().unwrap(), 18);
         assert_eq!(
             database
                 .application_wiki_role(editor_app_id, approved_memory_id)
@@ -10707,6 +10963,124 @@ mod tests {
                 .into_iter()
                 .all(|grant| grant.collection_id != closed_id
                     && grant.collection_id != incompatible_id)
+        );
+    }
+
+    #[test]
+    fn migration_17_to_18_preserves_access_without_silently_expanding_ai_scope() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("federated-app-search.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        for (version, migration) in [
+            MIGRATION_1,
+            MIGRATION_2,
+            MIGRATION_3,
+            MIGRATION_4,
+            MIGRATION_5,
+            MIGRATION_6,
+            MIGRATION_7,
+            MIGRATION_8,
+            MIGRATION_9,
+            MIGRATION_10,
+            MIGRATION_11,
+            MIGRATION_12,
+            MIGRATION_13,
+            MIGRATION_14,
+            MIGRATION_15,
+            MIGRATION_16,
+            MIGRATION_17,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            connection.execute_batch(migration).unwrap();
+            connection
+                .pragma_update(None, "user_version", u32::try_from(version + 1).unwrap())
+                .unwrap();
+        }
+
+        let collection_id = Uuid::new_v4();
+        let app_id = Uuid::new_v4();
+        let now = Utc::now().to_rfc3339();
+        connection
+            .execute(
+                "INSERT INTO collections
+                 (id,name,source_folder,wiki_folder,local_only,peer_shareable,allow_external_ai,
+                  internet_public,origin,indexing_mode,okf_version,declared_okf_version,
+                  okf_compatibility,managed_size_bytes,created_at,updated_at)
+                 VALUES (?1,'Existing LAN Wiki',?2,?3,0,1,0,0,'folder','continuous',
+                         '0.2','0.2','declared_v02',0,?4,?4)",
+                params![
+                    collection_id.to_string(),
+                    path_text(&temp.path().join("source")),
+                    path_text(&temp.path().join("wiki")),
+                    now,
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO peers
+                 (peer_id,display_name,device_platform,trusted,blocked,paired_at,last_seen_at,
+                  created_at,updated_at)
+                 VALUES ('legacy-peer','Legacy Mac','macos',1,0,?1,NULL,?1,?1)",
+                [&now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO grants(peer_id,collection_id,granted_at)
+                 VALUES ('legacy-peer',?1,?2)",
+                params![collection_id.to_string(), now],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO application_capabilities
+                 (app_id,display_name,owner_kind,secret_hash,created_at,producer,capability_prefix)
+                 VALUES (?1,'Existing app','generic',?2,?3,'synthetic/1.0','0123456789abcdef')",
+                params![app_id.to_string(), "a".repeat(64), now],
+            )
+            .unwrap();
+        drop(connection);
+
+        let database = Database::open(&path).unwrap();
+        assert_eq!(database.schema_version().unwrap(), 18);
+        assert!(
+            !database
+                .application_capability_by_app_id(app_id)
+                .unwrap()
+                .unwrap()
+                .public_search_enabled
+        );
+        let grant = database
+            .list_grants(Some("legacy-peer"))
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(grant.receiver_ai_consent_version, 0);
+        assert_eq!(
+            database.granted_collections("legacy-peer").unwrap(),
+            [collection_id]
+        );
+        assert!(
+            database
+                .granted_collections_for_search("legacy-peer", SearchPurpose::ExternalAi)
+                .unwrap()
+                .is_empty()
+        );
+
+        database
+            .set_grant("legacy-peer", collection_id, true)
+            .unwrap();
+        assert_eq!(
+            database
+                .granted_collections_for_search("legacy-peer", SearchPurpose::ExternalAi)
+                .unwrap(),
+            [collection_id]
         );
     }
 }

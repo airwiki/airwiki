@@ -24,10 +24,10 @@ use uuid::Uuid;
 
 use crate::{replace_file, workspace_root};
 
-const FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v3.json";
+const FIXTURE_PATH: &str = "fixtures/retrieval/search-quality-v4.json";
 const REPORT_DIRECTORY: &str = "target/evals";
 const REPORT_SCHEMA_VERSION: u32 = 4;
-const FIXTURE_SCHEMA_VERSION: u32 = 3;
+const FIXTURE_SCHEMA_VERSION: u32 = 4;
 const TOP_K: u8 = 5;
 const MIN_RECALL_AT_FIVE: f64 = 0.9;
 const ORIGIN_NODE_ID: &str = "fixture-origin";
@@ -44,12 +44,12 @@ const EXPECTED_CASE_IDS: [&str; 17] = [
     "holdout_harbor_compound_federated",
     "holdout_harbor_owner_cross_language",
     "holdout_harbor_paraphrase_recovery",
-    "holdout_library_external_policy",
+    "holdout_library_receiver_ai_grant",
     "holdout_quasar_unrelated_injection",
     "holdout_sensor_conflict",
     "regression_atlas_compound_federated",
     "regression_atlas_date_cross_language",
-    "regression_atlas_external_ai_policy",
+    "regression_atlas_receiver_ai_grant",
     "regression_atlas_paraphrase_recovery",
     "regression_atlas_unrelated_injection",
 ];
@@ -1075,12 +1075,11 @@ fn node_has_searchable_document(
         if collection.node != node {
             return false;
         }
-        let purpose_allowed = purpose != SearchPurpose::ExternalAi || collection.allow_external_ai;
         match node {
-            FixtureNode::Origin => purpose_allowed,
-            FixtureNode::Peer => {
-                purpose_allowed && collection.peer_shareable && collection.granted_to_origin
+            FixtureNode::Origin => {
+                purpose != SearchPurpose::ExternalAi || collection.allow_external_ai
             }
+            FixtureNode::Peer => collection.peer_shareable && collection.granted_to_origin,
         }
     })
 }
@@ -2312,7 +2311,7 @@ mod tests {
             .fixture
             .cases
             .iter_mut()
-            .find(|case| case.id == "regression_atlas_external_ai_policy")
+            .find(|case| case.id == "calibration_orion_external_private")
             .unwrap();
         case.allowed_support_fact_ids
             .push("atlas_target_date".to_owned());
@@ -2345,7 +2344,7 @@ mod tests {
             .fixture
             .cases
             .iter_mut()
-            .find(|case| case.id == "regression_atlas_external_ai_policy")
+            .find(|case| case.id == "calibration_orion_external_private")
             .unwrap();
         case.forbidden_fact_ids.clear();
 

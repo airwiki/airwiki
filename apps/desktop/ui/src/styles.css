@@ -738,7 +738,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .content-filters::-webkit-scrollbar { display: none; }
 .wiki-content-sticky { position: sticky; z-index: 4; top: var(--wiki-sticky-offset); display: grid; grid-template-columns: minmax(740px, 1fr) auto auto; gap: 14px; min-height: 64px; padding: 6px 2px; background: color-mix(in srgb, var(--ink) 96%, var(--slate)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); box-shadow: 0 9px 18px color-mix(in srgb, var(--ink) 18%, transparent); }
 .wiki-content-sticky .content-tabs { min-width: max-content; }
-.content-tabs-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 176px; min-height: 38px; }
+.content-tabs-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 176px; }
 .content-tabs-actions > .wiki-update-action { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 8px; color: var(--strong); background: transparent; border: 1px solid var(--line); border-radius: var(--control-radius); white-space: nowrap; cursor: pointer; }
 .content-tabs-actions > .wiki-update-action:hover:not(:disabled) { background: var(--surface-raised); }
 .content-tabs-actions > .wiki-update-action:disabled { color: var(--muted); cursor: wait; }

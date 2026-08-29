@@ -11,7 +11,7 @@
 <div class:compact class:ai={tone === 'ai'} class="loading-state" role="status" aria-live="polite">
   <Spinner size={compact ? 'small' : 'medium'} />
   <span class="loading-copy">
-    <strong>{#if tone === 'ai'}<ShimmerText text={label} />{:else}{label}{/if}</strong>
+    <strong><ShimmerText text={label} {tone} /></strong>
     {#if detail}<small>{detail}</small>{/if}
   </span>
 </div>

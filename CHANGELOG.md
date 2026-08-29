@@ -81,7 +81,8 @@ All notable user-visible changes to AirWiki will be documented here. The project
   and one continuous Settings surface instead of a stack of generic cards.
 - Refined desktop information density with compact Wiki and Library headers,
   richer Wiki rows, structured integration and device records, and loading
-  skeletons that preserve layout during initial discovery.
+  skeletons that preserve layout during initial discovery and motion-safe
+  shimmer titles that distinguish ordinary loading from AI work.
 - Fixed global-search focus loss, aligned compact toolbar and dialog actions,
   and distinguished queued model preparation from an active download.
 - Kept the default desktop opening at 1180 × 760 while restoring a tested

@@ -184,24 +184,6 @@ async function measureNavigationPaintP95(): Promise<number> {
       performance.clearMeasures(measureName);
       performance.mark(startMark);
       const deadline = performance.now() + 2_000;
-      let completed = false;
-      let routePoll = 0;
-      let paintFallback = 0;
-      let watchdog = 0;
-      const complete = (value: number | null) => {
-        if (completed) return;
-        completed = true;
-        window.clearInterval(routePoll);
-        window.clearTimeout(paintFallback);
-        window.clearTimeout(watchdog);
-        done(value);
-      };
-      const recordPaint = () => {
-        if (completed) return;
-        performance.mark(endMark);
-        const measurement = performance.measure(measureName, startMark, endMark);
-        complete(measurement.duration);
-      };
       const waitForPaint = () => {
         const page = document.querySelector<HTMLElement>('.route-page');
         const bounds = page?.getBoundingClientRect();
@@ -211,22 +193,21 @@ async function measureNavigationPaintP95(): Promise<number> {
           && bounds.width > 0
           && bounds.height > 0
           && style?.visibility === 'visible') {
-          window.clearInterval(routePoll);
-          requestAnimationFrame(recordPaint);
-          // WebKit can suspend animation frames when its test window is
-          // occluded. One frame-length fallback keeps the measurement bounded.
-          paintFallback = window.setTimeout(recordPaint, 16);
+          requestAnimationFrame(() => {
+            performance.mark(endMark);
+            const measurement = performance.measure(measureName, startMark, endMark);
+            done(measurement.duration);
+          });
           return;
         }
         if (performance.now() >= deadline) {
-          complete(null);
+          done(null);
           return;
         }
+        requestAnimationFrame(waitForPaint);
       };
-      watchdog = window.setTimeout(() => complete(null), 2_100);
       button.click();
-      routePoll = window.setInterval(waitForPaint, 5);
-      waitForPaint();
+      requestAnimationFrame(waitForPaint);
     });
     if (typeof duration !== 'number') throw new Error(`navigation paint sample ${sample} returned an invalid timestamp`);
     samples.push(duration);
@@ -553,12 +534,12 @@ async function importOkfWiki(): Promise<void> {
       actionsWidth: actions?.getBoundingClientRect().width ?? 0
     };
   });
-  await $('.content-filters').$('button*=Drafts').click();
+  await $('.content-tabs').$('button*=Pending').click();
   await browser.waitUntil(
     () => browser.execute(() => document.querySelector('.view-switch') === null),
-    { timeout: 5_000, timeoutMsg: 'all-content view controls remained visible in Drafts' }
+    { timeout: 5_000, timeoutMsg: 'content-only view controls remained visible in Pending' }
   );
-  const draftToolbarGeometry = await browser.execute(() => {
+  const pendingToolbarGeometry = await browser.execute(() => {
     const sticky = document.querySelector<HTMLElement>('.wiki-content-sticky');
     const summary = sticky?.querySelector<HTMLElement>('.wiki-journey-compact');
     const actions = sticky?.querySelector<HTMLElement>('.content-tabs-actions');
@@ -568,13 +549,13 @@ async function importOkfWiki(): Promise<void> {
       actionsWidth: actions?.getBoundingClientRect().width ?? 0
     };
   });
-  expect(Math.abs(draftToolbarGeometry.stickyHeight - contentToolbarGeometry.stickyHeight)).toBeLessThan(1);
-  expect(Math.abs(draftToolbarGeometry.summaryWidth - contentToolbarGeometry.summaryWidth)).toBeLessThan(1);
-  expect(Math.abs(draftToolbarGeometry.actionsWidth - contentToolbarGeometry.actionsWidth)).toBeLessThan(1);
-  await $('.content-filters').$('button*=All').click();
+  expect(Math.abs(pendingToolbarGeometry.stickyHeight - contentToolbarGeometry.stickyHeight)).toBeLessThan(1);
+  expect(Math.abs(pendingToolbarGeometry.summaryWidth - contentToolbarGeometry.summaryWidth)).toBeLessThan(1);
+  expect(Math.abs(pendingToolbarGeometry.actionsWidth - contentToolbarGeometry.actionsWidth)).toBeLessThan(1);
+  await $('.content-tabs').$('button*=Content').click();
   await browser.waitUntil(
     () => browser.execute(() => document.querySelector('.view-switch') !== null),
-    { timeout: 5_000, timeoutMsg: 'all-content view controls did not return after leaving Drafts' }
+    { timeout: 5_000, timeoutMsg: 'content view controls did not return after leaving Pending' }
   );
   if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') {
     await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-content-scroll-review-${captureTheme}.png`));
@@ -695,9 +676,8 @@ async function exerciseProjectMemory(client: McpStdioClient): Promise<void> {
 
   const row = await $(`.wiki-row*=${projectName}`);
   await row.click();
-  await $('.wiki-content-sticky').$('button*=Details').click();
-  await expect($('.project-memory-details')).toBeDisplayed();
-  await $('.project-memory-details').$('button*=Detach').click();
+  await expect($('.project-memory-strip')).toHaveText(expect.stringContaining('Project memory'));
+  await $('.project-memory-strip').$('button*=Detach').click();
   await browser.waitUntil(
     () => browser.execute((name) => !Array.from(document.querySelectorAll('.wiki-row'))
       .some((candidate) => candidate.textContent?.includes(name) === true), projectName),
@@ -860,7 +840,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
     expect(readable.bodyMarkdown).toBe('# Portable agent memory updated\n\nUpdated synthetic decision.');
     expect(targetedRead.nextCursor).toBeNull();
     await $('.file-list').$('button*=Portable agent memory updated').click();
-    await expect($('.concept-assurance')).toHaveText(expect.stringContaining('Reviewed'));
+    await expect($('.concept-assurance')).toHaveText(expect.stringContaining('stable'));
 
     const deprecated = await client.callTool('deprecate_airwiki_memory', {
       wiki_id: wikiId,
@@ -873,7 +853,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
       { timeout: 10_000, timeoutMsg: 'the open AI-memory page was not invalidated after deprecation' }
     );
     await $('.file-list').$('button*=Portable agent memory updated').click();
-    await expect($('.concept-assurance')).toHaveText(expect.stringContaining('Deprecated'));
+    await expect($('.concept-assurance')).toHaveText(expect.stringContaining('deprecated'));
 
     await openAiAppsSettings();
     await clickGenericMcpAction('Disconnect');
@@ -1142,7 +1122,7 @@ describe('AirWiki real IPC journey', () => {
       { timeout: 10_000, timeoutMsg: 'explicit public catalog exploration did not settle' }
     );
     await expect($('h1=Explore public Wikis')).toBeDisplayed();
-    await expect($('.public-library-state')).toHaveText(expect.stringContaining('No public index is configured'));
+    await expect($('.public-library-state')).toHaveText(expect.stringContaining('public catalog is unavailable'));
     expect(await $$('.public-wiki-row')).toHaveLength(0);
     await $('.library-scope-tabs').$('button*=On this device').click();
     await browser.waitUntil(

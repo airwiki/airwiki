@@ -1659,21 +1659,6 @@ describe('AirWiki wiki workspace', () => {
     );
   });
 
-  it('labels a deprecated OKF lifecycle without presenting it as reviewed', async () => {
-    const wiki = snapshot.wikis[0];
-    snapshot.knowledge = {
-      wikiId: wiki.id, wikiName: wiki.name, version: 'deprecated-okf', status: 'ready', errorCount: 0, warningCount: 0,
-      reservedPages: [],
-      concepts: [{ conceptId: 'deprecated-concept', page: { kind: 'concept', path: 'deprecated.md' }, title: 'Legacy guide', description: 'No longer active.', conceptType: 'Guide', tags: [], lifecycle: 'deprecated', generatedBy: null, verifiedBy: [], sources: [], staleAfter: null, assurance: { trust: 'unverified', freshness: 'notDeclared', verificationOutdated: false }, warnings: [], executionAvailable: false, fingerprint: 'd'.repeat(64) }],
-      links: []
-    };
-    window.location.hash = `#wikis/${wiki.id}`;
-    render(App);
-
-    expect(await screen.findByRole('button', { name: 'Legacy guide, deprecated.md, Retirado' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Legacy guide, deprecated.md, Revisado' })).not.toBeInTheDocument();
-  });
-
   it('explains a concurrent Wiki update without mislabeling it as a search error', async () => {
     const wiki = snapshot.wikis[0];
     const fingerprint = 'f'.repeat(64);

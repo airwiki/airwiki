@@ -2194,9 +2194,8 @@
     return t(labels[change] ?? 'knowledge-repair-error-generic');
   }
 
-  function conceptReviewState(concept: KnowledgeConceptSummary): 'draft' | 'reviewed' | 'excluded' | 'deprecated' {
+  function conceptReviewState(concept: KnowledgeConceptSummary): 'draft' | 'reviewed' | 'excluded' {
     if (selectedWikiReviewByConcept.get(concept.conceptId)?.excluded) return 'excluded';
-    if (concept.lifecycle === 'deprecated') return 'deprecated';
     return concept.lifecycle === 'draft' ? 'draft' : 'reviewed';
   }
 

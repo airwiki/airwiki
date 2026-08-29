@@ -1230,7 +1230,6 @@ desktop-wiki-content-filter-excluded-empty-body = Drafts you set aside will rema
 desktop-review-state-draft = Draft
 desktop-review-state-reviewed = Reviewed
 desktop-review-state-excluded = Excluded
-desktop-review-state-deprecated = Deprecated
 desktop-wiki-detected-count =
     { $count ->
         [one] 1 detected item

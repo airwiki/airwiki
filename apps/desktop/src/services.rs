@@ -71,7 +71,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use tokio::{
-    sync::{Semaphore, broadcast, mpsc, oneshot, watch},
+    sync::{OwnedSemaphorePermit, Semaphore, broadcast, mpsc, oneshot, watch},
     task::JoinHandle,
 };
 
@@ -1582,15 +1582,92 @@ where
 
 /// Generation provider that starts the bundled llama.cpp sidecar on first use
 /// and refreshes its five-minute idle deadline after each request.
+///
+/// llama.cpp is configured for a single parallel request. Keeping this permit
+/// outside the provider instance makes clones wait in the same cancel-safe
+/// Tokio semaphore queue instead of competing for the sidecar.
+#[derive(Clone)]
+struct GenerationAdmission {
+    semaphore: Arc<Semaphore>,
+}
+
+impl GenerationAdmission {
+    fn single() -> Self {
+        Self {
+            semaphore: Arc::new(Semaphore::new(1)),
+        }
+    }
+
+    async fn acquire(&self) -> Result<OwnedSemaphorePermit> {
+        Arc::clone(&self.semaphore)
+            .acquire_owned()
+            .await
+            .context("la cola de generación se cerró inesperadamente")
+    }
+}
+
+struct ModelActivityLease {
+    cancellation: CancellationToken,
+    task: Option<JoinHandle<()>>,
+}
+
+impl ModelActivityLease {
+    fn start(supervisor: LlamaSupervisor) -> Self {
+        let cancellation = CancellationToken::new();
+        let task_cancellation = cancellation.clone();
+        let task = tokio::spawn(async move {
+            let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                tokio::select! {
+                    _ = task_cancellation.cancelled() => break,
+                    _ = heartbeat.tick() => supervisor.mark_activity().await,
+                }
+            }
+        });
+        Self {
+            cancellation,
+            task: Some(task),
+        }
+    }
+
+    #[cfg(test)]
+    fn from_task(cancellation: CancellationToken, task: JoinHandle<()>) -> Self {
+        Self {
+            cancellation,
+            task: Some(task),
+        }
+    }
+
+    async fn stop(mut self) {
+        self.cancellation.cancel();
+        if let Some(task) = self.task.as_mut() {
+            let result = task.await;
+            drop(self.task.take());
+            log_task_join("model_activity_lease", result);
+        }
+    }
+}
+
+impl Drop for ModelActivityLease {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
+}
+
 #[derive(Clone)]
 struct SupervisedGenerationProvider {
     supervisor: LlamaSupervisor,
     model_id: String,
     runtime_config: GenerationRuntimeConfig,
+    admission: GenerationAdmission,
 }
 
 impl SupervisedGenerationProvider {
     async fn verify_activation_smoke(&self) -> Result<()> {
+        let _permit = self.admission.acquire().await?;
         let endpoint = self.supervisor.ensure_running().await?;
         let provider = activation_stage(
             LlamaServerProvider::for_activation_smoke(
@@ -1613,6 +1690,7 @@ impl GenerationProvider for SupervisedGenerationProvider {
     }
 
     async fn enrich(&self, document_text: &str) -> Result<EnrichmentDraft> {
+        let _permit = self.admission.acquire().await?;
         let endpoint = self.supervisor.ensure_running().await?;
         let provider = activation_stage(
             LlamaServerProvider::with_config(
@@ -1625,21 +1703,9 @@ impl GenerationProvider for SupervisedGenerationProvider {
         // Hierarchical enrichment can span several individually bounded HTTP
         // calls. Keep the sidecar leased for the whole operation so its idle
         // reaper cannot stop it between summary stages.
-        let lease_cancel = CancellationToken::new();
-        let lease_task_cancel = lease_cancel.clone();
-        let lease_supervisor = self.supervisor.clone();
-        let lease_task = tokio::spawn(async move {
-            let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
-            loop {
-                tokio::select! {
-                    _ = lease_task_cancel.cancelled() => break,
-                    _ = heartbeat.tick() => lease_supervisor.mark_activity().await,
-                }
-            }
-        });
+        let lease = ModelActivityLease::start(self.supervisor.clone());
         let result = provider.enrich(document_text).await;
-        lease_cancel.cancel();
-        log_task_join("model_activity_lease", lease_task.await);
+        lease.stop().await;
         self.supervisor.mark_activity().await;
         result
     }
@@ -2904,6 +2970,7 @@ impl DesktopServices {
                 },
                 execution_class: bundled_generation_execution_class(),
             },
+            admission: GenerationAdmission::single(),
         };
         if let Err(error) = generation_provider.verify_activation_smoke().await {
             let _ = supervisor.stop().await;
@@ -5897,9 +5964,102 @@ mod tests {
     };
     use async_trait::async_trait;
     use tokio::net::TcpStream;
-    use tokio::sync::{Notify, oneshot};
+    use tokio::sync::{
+        Notify,
+        oneshot::{self, error::TryRecvError},
+    };
 
     use super::*;
+
+    #[tokio::test]
+    async fn generation_admission_serializes_clones_and_releases_on_cancellation() {
+        let admission = GenerationAdmission::single();
+        let initial_permit = admission.acquire().await.expect("initial permit");
+        let waiting_admission = admission.clone();
+        let (entered, mut entered_receiver) = oneshot::channel();
+        let waiting_generation = tokio::spawn(async move {
+            let _permit = waiting_admission.acquire().await.expect("queued permit");
+            let _ = entered.send(());
+            std::future::pending::<()>().await;
+        });
+
+        tokio::task::yield_now().await;
+        assert_eq!(entered_receiver.try_recv(), Err(TryRecvError::Empty));
+
+        drop(initial_permit);
+        entered_receiver.await.expect("queued generation enters");
+
+        waiting_generation.abort();
+        assert!(waiting_generation.await.is_err());
+        let recovered_permit =
+            tokio::time::timeout(std::time::Duration::from_secs(1), admission.acquire())
+                .await
+                .expect("cancelled generation releases its permit")
+                .expect("generation admission remains open");
+        drop(recovered_permit);
+    }
+
+    #[tokio::test]
+    async fn generation_admission_allows_the_next_request_after_a_waiter_is_cancelled() {
+        let admission = GenerationAdmission::single();
+        let initial_permit = admission.acquire().await.expect("initial permit");
+        let waiting_admission = admission.clone();
+        let (waiting, waiting_receiver) = oneshot::channel();
+        let waiting_generation = tokio::spawn(async move {
+            let _ = waiting.send(());
+            let _permit = waiting_admission.acquire().await.expect("queued permit");
+            std::future::pending::<()>().await;
+        });
+
+        waiting_receiver
+            .await
+            .expect("queued generation starts waiting");
+        tokio::task::yield_now().await;
+        waiting_generation.abort();
+        assert!(waiting_generation.await.is_err());
+
+        drop(initial_permit);
+        let recovered_permit =
+            tokio::time::timeout(std::time::Duration::from_secs(1), admission.acquire())
+                .await
+                .expect("cancelled waiter does not block the queue")
+                .expect("generation admission remains open");
+        drop(recovered_permit);
+    }
+
+    #[tokio::test]
+    async fn model_activity_lease_aborts_its_heartbeat_when_dropped() {
+        struct TaskDropSignal(Option<oneshot::Sender<()>>);
+
+        impl Drop for TaskDropSignal {
+            fn drop(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+
+        let cancellation = CancellationToken::new();
+        let (dropped, dropped_receiver) = oneshot::channel();
+        let (started, started_receiver) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _signal = TaskDropSignal(Some(dropped));
+            let _ = started.send(());
+            std::future::pending::<()>().await;
+        });
+        let lease = ModelActivityLease::from_task(cancellation.clone(), task);
+
+        started_receiver
+            .await
+            .expect("heartbeat task starts before the lease is dropped");
+        drop(lease);
+
+        tokio::time::timeout(std::time::Duration::from_secs(1), dropped_receiver)
+            .await
+            .expect("heartbeat task is terminated")
+            .expect("heartbeat task drop is observed");
+        assert!(cancellation.is_cancelled());
+    }
 
     #[test]
     fn mcp_application_errors_preserve_conflicts_and_limits() {

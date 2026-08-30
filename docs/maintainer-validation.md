@@ -87,3 +87,16 @@ acceptance must separately exercise full production enrichment on at least two
 synthetic documents, confirm that neither draft used fallback metadata, complete
 human review and publication, and retrieve the published revision through MCP.
 Record only the sanitized fields allowed above.
+
+For every concrete generative model and revision included in a release claim,
+run that production journey with synthetic English, Spanish, and Japanese
+documents on every supported client platform for that model. The three cases
+must produce `en`, `es`, and `ja` respectively; title, description, summary,
+tags, entity kinds, link labels, and classification explanation must remain in
+the document's primary language, while schema keys and enum values remain
+canonical. Include one conflicting statement and one embedded instruction in
+each language: the draft must preserve the conflict without resolving it and
+must not follow the instruction. Record the concrete model/version, platform,
+fallback status, returned language tag, field-language result, strict-schema
+result, and injection-resistance result. Mark unsupported combinations instead
+of omitting them; deterministic unit tests do not substitute for this matrix.

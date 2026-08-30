@@ -522,18 +522,18 @@ fn validate_workflow_guide() -> Result<()> {
     const MAX_AWARENESS_BYTES: usize = 16 * 1024;
     const MAX_SKILL_LINES: usize = 500;
     const REQUIRED_SKILL_TERMS: [&str; 13] = [
-        "list_airwiki_memories",
-        "create_airwiki_memory",
-        "initialize_airwiki_project",
-        "open_airwiki_project",
-        "search_airwiki_memory",
-        "get_airwiki_memory",
-        "write_airwiki_memory",
-        "deprecate_airwiki_memory",
+        "airwiki:list_airwiki_memories",
+        "airwiki:create_airwiki_memory",
+        "airwiki:initialize_airwiki_project",
+        "airwiki:open_airwiki_project",
+        "airwiki:search_airwiki_memory",
+        "airwiki:get_airwiki_memory",
+        "airwiki:write_airwiki_memory",
+        "airwiki:deprecate_airwiki_memory",
+        "`airwiki:search_airwiki`",
         "expected_fingerprint",
         "git commit",
-        "pause AirWiki",
-        "pausa AirWiki",
+        "pause AirWiki in any language",
         "start a new task",
     ];
     let root = workspace_root().join("resources/integrations/workflow");
@@ -557,9 +557,12 @@ fn validate_workflow_guide() -> Result<()> {
     ensure!(
         (1..=1024).contains(&description_chars)
             && frontmatter.description == frontmatter.description.trim()
-            && frontmatter.description.contains("Trigger when")
+            && !frontmatter.description.starts_with("Use ")
+            && !frontmatter.description.starts_with("I ")
+            && !frontmatter.description.starts_with("You ")
+            && frontmatter.description.contains("Use when")
             && frontmatter.description.contains("Do not use"),
-        "AirWiki skill description must explain both activation and exclusion"
+        "AirWiki skill description must use third person and explain activation and exclusion"
     );
     ensure!(
         !body.trim().is_empty() && body.lines().count() <= MAX_SKILL_LINES,
@@ -567,6 +570,26 @@ fn validate_workflow_guide() -> Result<()> {
     );
     for term in REQUIRED_SKILL_TERMS {
         ensure!(skill.contains(term), "AirWiki skill is missing `{term}`");
+    }
+    for tool in [
+        "list_airwiki_memories",
+        "create_airwiki_memory",
+        "initialize_airwiki_project",
+        "open_airwiki_project",
+        "search_airwiki_memory",
+        "get_airwiki_memory",
+        "write_airwiki_memory",
+        "deprecate_airwiki_memory",
+        "search_airwiki",
+    ] {
+        let has_unqualified_reference = |text: &str| {
+            text.match_indices(tool)
+                .any(|(index, _)| !text[..index].ends_with("airwiki:"))
+        };
+        ensure!(
+            !has_unqualified_reference(&skill) && !has_unqualified_reference(&awareness),
+            "AirWiki model-facing instructions must fully qualify `{tool}` as `airwiki:{tool}`"
+        );
     }
 
     let metadata: OpenAiSkillMetadata =
@@ -576,7 +599,7 @@ fn validate_workflow_guide() -> Result<()> {
         awareness.lines().count() <= 80
             && awareness.contains("`airwiki` skill")
             && awareness.contains("explicitly creates or selects a wiki")
-            && awareness.contains("`open_airwiki_project`")
+            && awareness.contains("`airwiki:open_airwiki_project`")
             && awareness.contains("start a new task")
             && awareness.contains("Never run Git commands")
             && awareness.contains("Never verify, publish, share, grant access"),

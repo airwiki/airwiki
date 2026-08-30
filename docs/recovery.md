@@ -138,8 +138,9 @@ the PeerId through Noise. It never bypasses trust, grants, or policy.
 - Startup and 15-minute reconciliation recover missed watcher events.
 - Verify supported extension, 50 MiB maximum size, unencrypted PDF, and a text
   layer. OCR, hidden files, temporary files, and symlinks are unsupported.
-- One invalid structured LLM response may retry once; subsequent failure requires
-  human metadata and never automatic publication.
+- A timeout or temporarily unavailable local model may retry once. Invalid or
+  protocol-breaking output fails immediately to human metadata and never
+  automatic publication.
 - Interrupted ingestion jobs become failed at restart and may be reclaimed by an
   idempotent scan without increasing revision when content is unchanged.
 

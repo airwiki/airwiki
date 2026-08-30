@@ -163,7 +163,11 @@ progress uses bounded `broadcast`, and request-scoped responses use identifiers
 that discard stale results. Filesystem traversal, parsing, hashing,
 SQLite-heavy operations, inference, process work and blocking operating-system
 calls use the worker boundary and `spawn_blocking`; no lock is held across an
-await.
+await. Generative requests share one admission permit to match the sidecar's
+single-request parallelism; only timeout and temporary-unavailability failures
+are retried once. Model-facing system instructions are consistently written in
+English, while human-readable metadata and summaries use the source document's
+primary language.
 
 The WebView loads only bundled assets under a strict CSP. Markdown becomes a
 typed safe AST in Rust; it never reaches `innerHTML`, and images, SVG, embeds,

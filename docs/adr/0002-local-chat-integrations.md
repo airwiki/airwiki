@@ -19,7 +19,7 @@ Relevant contracts are the official [Codex MCP documentation], [Codex skills
 documentation], [Claude Code memory documentation], [Gemini CLI skills
 documentation], [Gemini CLI MCP server documentation], the normative [MCP
 2026-07-28 specification], Anthropic's [MCP guidance], [security guidance] and
-[tool design guidance], the [Agent Skills best practices], and [MCPB manifest
+[tool design guidance], [Anthropic skill authoring best practices], and [MCPB manifest
 v0.3].
 
 [Codex MCP documentation]: https://developers.openai.com/codex/mcp/
@@ -31,7 +31,7 @@ v0.3].
 [MCP guidance]: https://code.claude.com/docs/en/mcp
 [security guidance]: https://code.claude.com/docs/en/security
 [tool design guidance]: https://www.anthropic.com/engineering/writing-tools-for-agents
-[Agent Skills best practices]: https://agentskills.io/skill-creation/best-practices
+[Anthropic skill authoring best practices]: https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices
 [MCPB manifest v0.3]: https://github.com/modelcontextprotocol/mcpb/blob/70fe3b34cd6dff1b3bba046638edc72a6467a4fb/MANIFEST.md
 
 ## Decision

@@ -26,8 +26,16 @@
     return page.kind === 'concept' ? `concept:${page.conceptId}` : page.kind;
   }
 
-  function graphElements(): ElementDefinition[] {
+  function pageTitle(page: RemoteWikiPageInput): string {
+    return pages.find((descriptor) => pageKey(descriptor.page) === pageKey(page))?.title ?? pageKey(page);
+  }
+
+  function visibleLinks() {
     const nodeIds = new Set(pages.map((descriptor) => pageKey(descriptor.page)));
+    return links.filter((link) => nodeIds.has(pageKey(link.source)) && nodeIds.has(pageKey(link.target)));
+  }
+
+  function graphElements(): ElementDefinition[] {
     const nodes = pages.map((descriptor) => ({
       data: {
         id: pageKey(descriptor.page),
@@ -36,8 +44,7 @@
         kind: descriptor.page.kind
       }
     }));
-    const edges = links
-      .filter((link) => nodeIds.has(pageKey(link.source)) && nodeIds.has(pageKey(link.target)))
+    const edges = visibleLinks()
       .map((link, index) => ({
         data: {
           id: `link:${pageKey(link.source)}:${pageKey(link.target)}:${index}`,
@@ -141,11 +148,21 @@
     <p class="graph-error" role="status">{errorLabel}</p>
   {:else}
     <div class="graph-stage">
-      <div class="graph-canvas" bind:this={container} role="img" aria-label={graphLabel}></div>
+      <div class="graph-canvas" bind:this={container} aria-hidden="true"></div>
       {#if !graphReady}<div class="graph-loading"><LoadingState label={loadingLabel} compact /></div>{/if}
     </div>
   {/if}
-  <div class="graph-index" aria-label={pagesLabel}>
+  {#if !loadFailed}
+    <div class="sr-only">
+      <p>{graphLabel}. {countsLabel}</p>
+      <ul>
+        {#each visibleLinks() as link (pageKey(link.source) + pageKey(link.target) + link.label)}
+          <li>{pageTitle(link.source)} → {pageTitle(link.target)}</li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
+  <div class="graph-index" role="group" aria-label={pagesLabel}>
     {#each pages as descriptor (pageKey(descriptor.page))}
       <button onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage(descriptor.page)}>{descriptor.title}</button>
     {/each}
@@ -164,4 +181,5 @@
   .graph-index button { flex: 1 1 220px; min-width: 0; padding: 7px 10px; overflow-wrap: anywhere; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: var(--control-radius); text-align: left; cursor: pointer; }
   .graph-index button:hover, .graph-index button:focus-visible { color: inherit; border-color: var(--cyan); }
   .graph-error { padding: 20px; color: var(--amber); border-left: 2px solid var(--amber); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 </style>

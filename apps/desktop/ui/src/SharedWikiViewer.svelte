@@ -115,6 +115,14 @@
     return page.kind === 'concept' ? `concept:${page.conceptId}` : page.kind;
   }
 
+  function visibleGraphLinkCount(
+    value: NearbyBrowseSummary | PublicBrowseSummary,
+    available: RemoteWikiPageDescriptorSummary[]
+  ): number {
+    const pageIds = new Set(available.map((descriptor) => pageKey(descriptor.page)));
+    return value.links.filter((link) => pageIds.has(pageKey(link.source)) && pageIds.has(pageKey(link.target))).length;
+  }
+
   function samePage(left: RemoteWikiPageInput, right: RemoteWikiPageInput | null): boolean {
     return pageKey(left) === pageKey(right);
   }
@@ -231,7 +239,7 @@
               errorLabel={t('desktop-graph-error')}
               loadingLabel={t('desktop-graph-loading')}
               pagesLabel={t('desktop-graph-pages-label')}
-              countsLabel={t('knowledge-graph-counts', { nodes: descriptors.length, links: browse.links.length })}
+              countsLabel={t('knowledge-graph-counts', { nodes: descriptors.length, links: visibleGraphLinkCount(browse, descriptors) })}
             />
           {/key}
         </section>

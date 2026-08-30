@@ -119,6 +119,7 @@
   let connectivityRequestId: string | null = null;
   let peerActionId: string | null = null;
   let integrationRequestId: string | null = null;
+  let integrationPendingAction: IntegrationActionInput | null = null;
   let publicSearchRequestId: string | null = null;
   let publicSearchBusyAppId: string | null = null;
   let publicSearchErrorAppId: string | null = null;
@@ -434,6 +435,8 @@
 
   let t = translate;
   $: t = translatorFor(locale);
+  $: integrationRefreshBusy = integrationRequestId !== null
+    && (integrationPendingAction === null || integrationPendingAction.kind === 'refresh');
 
   function wikiNeedsAttention(wiki: WikiSummary): boolean {
     return wikiRequiresAttention(wiki)
@@ -1045,6 +1048,7 @@
     }
     if (completedRequestId === integrationRequestId) {
       integrationRequestId = activeRequestId;
+      integrationPendingAction = null;
     }
   }
 
@@ -1052,10 +1056,12 @@
     if (integrationRequestId !== null || publicSearchRequestId !== null) return;
     const requestId = crypto.randomUUID();
     integrationRequestId = requestId;
+    integrationPendingAction = action;
     try {
       await manageIntegration(requestId, action);
     } catch {
       integrationRequestId = null;
+      integrationPendingAction = null;
       if (reportError) actionMessage = t('error-chat');
     }
   }
@@ -2307,7 +2313,7 @@
 
   async function decideReview(decision: 'approve' | 'reject') {
     if (!selectedReview || selectedReviewIsUpdating() || (decision === 'approve' && selectedReviewIsReadOnly())) return;
-    if (decision === 'approve' && (!editDraft || !evidenceIsCurrent())) return;
+    if (!evidenceIsCurrent() || (decision === 'approve' && !editDraft)) return;
     actionBusy = true;
     try {
       if (decision === 'approve' && editDraft) await approveReview(selectedReview.conceptId, selectedReview.sourceRevision, editDraft);
@@ -2500,7 +2506,7 @@
           onsearch={submitGlobalSearch}
           onopen={openGlobalSearch}
         />
-        <div class="top-actions"><button class="secondary new-wiki-command" aria-label={t('desktop-new-wiki')} title={t('desktop-new-wiki')} aria-expanded={newWikiMenuOpen} onclick={() => { newWikiMenuOpen = !newWikiMenuOpen; }}><Plus size={17} aria-hidden="true" />{t('desktop-new-wiki')}</button><SystemStatusButton {snapshot} {t} onclick={() => openSettings(lastSettingsSection)} /></div>
+        <div class="top-actions"><button class="secondary new-wiki-command" aria-label={t('desktop-new-wiki')} title={t('desktop-new-wiki')} aria-haspopup="dialog" aria-expanded={newWikiMenuOpen} onclick={() => { newWikiMenuOpen = !newWikiMenuOpen; }}><Plus size={17} aria-hidden="true" />{t('desktop-new-wiki')}</button><SystemStatusButton {snapshot} {t} onclick={() => openSettings(lastSettingsSection)} /></div>
       </header>
     {/if}
 
@@ -2564,10 +2570,10 @@
                     <LoadingState label={t('search-running')} detail={snapshot.search.results.length > 0 ? t('desktop-search-loading-partial') : t('desktop-search-loading-detail')} tone="ai" compact />
                     {#if snapshot.search.results.length === 0}<LoadingSkeleton variant="results" rows={3} />{/if}
                   {:else if snapshot.search.status === 'failed'}
-                    <div class="search-state error" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span>{t('search-error-title')}</span></div>
+                    <div class="search-state error" role="alert"><AlertTriangle size={17} aria-hidden="true" /><span>{t('search-error-title')}</span><button class="secondary" onclick={submitGlobalSearch}>{t('action-retry')}</button></div>
                   {/if}
                   {#if snapshot.search.results.length > 0}
-                    <div class="search-filter-bar" aria-label={t('desktop-search-filter-label')}>
+                    <div class="search-filter-bar" role="group" aria-label={t('desktop-search-filter-label')}>
                       {#each ['all', 'local', 'nearby', 'public'] as filter (filter)}
                         <button class:active={searchFilter === filter} aria-pressed={searchFilter === filter} onclick={() => { searchFilter = filter as SearchFilter; }}>{t(`desktop-search-filter-${filter}`)} <span>{searchFilterCounts[filter as SearchFilter]}</span></button>
                       {/each}
@@ -2710,7 +2716,7 @@
                 {/each}
               </div>
               <div class="content-tabs-actions">
-                {#if contentFilter === 'all'}<div class="view-switch" aria-label={t('desktop-view-mode')}><button class:active={knowledgeMode === 'document'} onclick={() => setKnowledgeMode('document')}>{t('desktop-list-view')}</button><button class:active={knowledgeMode === 'graph'} onclick={() => setKnowledgeMode('graph')}>{t('knowledge-tab-graph')}</button></div>{/if}
+                {#if contentFilter === 'all'}<div class="view-switch" role="group" aria-label={t('desktop-view-mode')}><button class:active={knowledgeMode === 'document'} aria-pressed={knowledgeMode === 'document'} onclick={() => setKnowledgeMode('document')}>{t('desktop-list-view')}</button><button class:active={knowledgeMode === 'graph'} aria-pressed={knowledgeMode === 'graph'} onclick={() => setKnowledgeMode('graph')}>{t('knowledge-tab-graph')}</button></div>{/if}
                 {#if wikiCanUpdateFromFolder(selectedWiki)}
                   <button class="wiki-update-action" onclick={() => scanWiki(selectedWiki.id)} disabled={wikiUpdateRunning(selectedWiki.id)} title={t('desktop-wiki-update-folder-help')}>
                     {#if wikiUpdateRunning(selectedWiki.id)}<Spinner size="small" />{t('desktop-wiki-update-running')}{:else}<RefreshCw size={15} aria-hidden="true" />{t('desktop-wiki-update-folder')}{/if}
@@ -2926,7 +2932,20 @@
                   <ConnectionAdvanced lanRuntime={snapshot.lanRuntime} peerId={federationPeerId} address={federationAddress} blockedPublishers={snapshot.blockedPublicPublishers} busy={peerActionId !== null} {t} onpeerid={(value) => { federationPeerId = value; }} onaddress={(value) => { federationAddress = value; }} onadd={() => saveFederationIndex(false)} onremove={() => saveFederationIndex(true)} onunblock={(publisherId) => changePublisherBlock(publisherId, false)} />
                   <details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><TextField label={t('desktop-address')} bind:value={manualPeerAddress} maxlength={500} placeholder={t('desktop-multiaddress-placeholder')} /><button class="secondary" onclick={connectManualPeer}>{t('action-connect')}</button></details>
                 {:else}
-                  <section class="integrations-settings-section"><div class="section-heading"><div><p class="section-label">{t('desktop-status-ai-apps')}</p><h2>{t('integrations-title')}</h2><p>{t('desktop-integration-body')}</p></div><button class="text-action" disabled={integrationRequestId !== null || publicSearchRequestId !== null} onclick={() => runIntegrationAction({ kind: 'refresh' })}>{t('action-refresh')}</button></div><IntegrationList integrations={snapshot.integrations?.integrations ?? []} busy={integrationRequestId !== null} {publicSearchBusyAppId} {publicSearchErrorAppId} {t} onaction={runIntegrationAction} onpublicsearch={changeApplicationPublicSearch} oncopy={copyMcpSetup} /></section>
+                  <section class="integrations-settings-section">
+                    <div class="section-heading">
+                      <div><p class="section-label">{t('desktop-status-ai-apps')}</p><h2>{t('integrations-title')}</h2><p>{t('desktop-integration-body')}</p></div>
+                      <button
+                        class="text-action integration-refresh-action"
+                        aria-busy={integrationRefreshBusy}
+                        disabled={integrationRequestId !== null || publicSearchRequestId !== null}
+                        onclick={() => runIntegrationAction({ kind: 'refresh' })}
+                      >
+                        {#if integrationRefreshBusy}<Spinner size="small" /><span>{t('integrations-checking')}</span>{:else}{t('action-refresh')}{/if}
+                      </button>
+                    </div>
+                    <IntegrationList integrations={snapshot.integrations?.integrations ?? []} busy={integrationRequestId !== null} pendingAction={integrationPendingAction} {publicSearchBusyAppId} {publicSearchErrorAppId} {t} onaction={runIntegrationAction} onpublicsearch={changeApplicationPublicSearch} oncopy={copyMcpSetup} />
+                  </section>
                   {#if snapshot.projectMemoryRequests.length > 0}<section aria-labelledby="project-memory-requests-title"><div class="section-heading"><div><h2 id="project-memory-requests-title">{t('desktop-project-memory-requests-title')}</h2><p>{t('desktop-project-memory-requests-body')}</p></div><button class="text-action" onclick={refreshApplicationAccess}>{t('action-refresh')}</button></div><div class="computation-list">{#each snapshot.projectMemoryRequests as request (request.requestId)}<article><span class="pending-icon project-memory-link" aria-hidden="true"><BookOpen size={17} /></span><div><strong>{t(request.kind === 'initialize' ? 'desktop-project-memory-initialize-request' : 'desktop-project-memory-attach-request', { application: request.applicationName })}</strong><p>{t('desktop-project-memory-request-folder', { folder: request.folderName })}</p>{#if request.requestedName}<small>{request.requestedName}</small>{/if}</div><div class="row-actions"><button class="secondary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, false)}>{t('action-reject')}</button><button class="primary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, true)}>{t('action-approve')}</button></div></article>{/each}</div></section>{/if}
                   {#if snapshot.pendingComputations.length > 0}<section aria-labelledby="computations-title"><div class="section-heading"><div><h2 id="computations-title">{t('desktop-computation-requests-title')}</h2><p>{t('desktop-computation-requests-body')}</p></div><button class="text-action" onclick={refreshComputations}>{t('action-refresh')}</button></div><div class="computation-list">{#each snapshot.pendingComputations as computation (computation.runId)}<article><span class="pending-icon"><Sparkles size={17} aria-hidden="true" /></span><div><strong>{t('desktop-computation-request-title', { application: computation.applicationName })}</strong><p>{t('desktop-computation-request-body', { wiki: computation.wikiName, path: computation.logicalPath })}</p>{#if computation.parameters.length > 0}<ul class="computation-parameters">{#each computation.parameters as parameter (`${parameter.name}:${parameter.parameterType}`)}<li><code>{parameter.name}</code><span>{parameter.parameterType}</span></li>{/each}</ul>{/if}</div><div class="row-actions"><button class="secondary" disabled={actionBusy} onclick={() => decideComputation(computation.runId, 'reject')}>{t('action-reject')}</button><button class="primary" disabled={actionBusy} onclick={() => decideComputation(computation.runId, 'execute')}>{t('desktop-computation-review-run')}</button></div></article>{/each}</div></section>{/if}
                   {#if snapshot.completedComputations.length > 0}<section aria-labelledby="completed-computations-title"><div class="section-heading"><div><h2 id="completed-computations-title">{t('desktop-computation-results-title')}</h2><p>{t('desktop-computation-results-body')}</p></div><button class="text-action" onclick={refreshComputations}>{t('action-refresh')}</button></div><div class="computation-list">{#each snapshot.completedComputations as computation (computation.runId)}<article><span class="pending-icon"><CheckCircle2 size={17} aria-hidden="true" /></span><div><strong>{t('desktop-computation-result-title', { application: computation.applicationName })}</strong><p>{t('desktop-computation-result-body', { wiki: computation.wikiName, path: computation.logicalPath })}</p></div>{#if computation.verdict === 'accepted'}<div class="row-actions computation-save-actions"><SelectField label={t('desktop-computation-save-target')} value={computationSaveTargets[computation.runId] ?? ''} onchange={(value) => { computationSaveTargets = { ...computationSaveTargets, [computation.runId]: value }; }} options={[{ value: '', label: t('desktop-computation-save-select') }, ...snapshot.wikis.filter((wiki) => wiki.origin === 'aiMemory').map((wiki) => ({ value: wiki.id, label: wiki.name }))]} /><button class="primary" disabled={actionBusy || !computationSaveTargets[computation.runId]} onclick={() => saveAcceptedComputation(computation.runId)}>{t('desktop-computation-save')}</button></div>{:else}<span class="status-pill warning">{t('desktop-computation-rejected')}</span>{/if}</article>{/each}</div></section>{/if}
@@ -3189,7 +3208,7 @@
       <footer>
         <div class="review-secondary-actions">
           <button class="secondary" onclick={closeReview} disabled={actionBusy}>{t('review-later')}</button>
-          {#if !selectedReview.excluded}<button class="secondary exclude-review" onclick={() => decideReview('reject')} disabled={actionBusy || selectedReviewIsUpdating()}>{t('review-exclude')}</button>{/if}
+          {#if !selectedReview.excluded}<button class="secondary exclude-review" onclick={() => decideReview('reject')} disabled={actionBusy || selectedReviewIsUpdating() || !evidenceIsCurrent()}>{t('review-exclude')}</button>{/if}
         </div>
         <button class="primary" onclick={() => decideReview('approve')} disabled={actionBusy || selectedReviewIsReadOnly() || selectedReviewIsUpdating() || !evidenceIsCurrent()}>{t('review-approve-next')}</button>
       </footer>

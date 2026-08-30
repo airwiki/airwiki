@@ -33,7 +33,7 @@ const bundle: KnowledgeBundleSummary = {
     { page: { kind: 'log' }, fingerprint: 'b'.repeat(64) }
   ],
   concepts: [],
-  links: [],
+  links: [{ source: { kind: 'index' }, target: { kind: 'log' }, label: 'history' }],
   errorCount: 0,
   warningCount: 0
 };
@@ -78,7 +78,12 @@ describe('KnowledgeGraph', () => {
     render(KnowledgeGraph, { bundle, locale: 'en', onselect: vi.fn() });
 
     await waitFor(() => expect(cytoscapeMocks.create).toHaveBeenCalledOnce());
-    expect(screen.getByRole('img', { name: 'Relationship map for Layout fixture' })).toBeInTheDocument();
+    const canvas = document.querySelector('.graph-canvas');
+    expect(canvas).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.queryByRole('img', { name: 'Relationship map for Layout fixture' })).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Graph pages' })).toBeInTheDocument();
+    expect(screen.getByText('Relationship map for Layout fixture. 2 nodes · 1 links')).toBeInTheDocument();
+    expect(screen.getByText(/Folder index → Restore publication history/)).toBeInTheDocument();
     expect(cytoscapeMocks.graph.layout).not.toHaveBeenCalled();
 
     canvasWidth = 640;
@@ -96,7 +101,7 @@ describe('KnowledgeGraph', () => {
     }));
     expect(cytoscapeMocks.graph.layout).toHaveBeenCalledWith(expect.objectContaining({
       name: 'breadthfirst',
-      roots: ['index', 'log']
+      roots: ['index']
     }));
     expect(cytoscapeMocks.layoutRun).toHaveBeenCalledOnce();
     expect(cytoscapeMocks.graph.fit).toHaveBeenCalledWith(undefined, 24);

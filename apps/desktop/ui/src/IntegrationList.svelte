@@ -2,8 +2,11 @@
   import type { IntegrationActionInput, IntegrationSummary } from './api';
   import AiClientIcon from './components/identity/AiClientIcon.svelte';
   import LoadingSkeleton from './components/LoadingSkeleton.svelte';
+  import Spinner from './components/Spinner.svelte';
   import Switch from './components/controls/Switch.svelte';
   import type { MessageArgs } from './i18n';
+
+  type ClientIntegrationAction = Extract<IntegrationActionInput, { client: IntegrationSummary['client'] }>;
 
   let {
     integrations,
@@ -11,6 +14,7 @@
     t,
     onaction,
     oncopy,
+    pendingAction = null,
     publicSearchBusyAppId = null,
     publicSearchErrorAppId = null,
     onpublicsearch = () => undefined
@@ -20,6 +24,7 @@
     t: (id: string, args?: MessageArgs) => string;
     onaction: (action: IntegrationActionInput) => void;
     oncopy: (command: string, args: string[]) => void;
+    pendingAction?: IntegrationActionInput | null;
     publicSearchBusyAppId?: string | null;
     publicSearchErrorAppId?: string | null;
     onpublicsearch?: (appId: string, enabled: boolean) => void;
@@ -107,6 +112,26 @@
     onaction({ kind: 'removeWorkflowGuide', client: integration.client });
   }
 
+  function pendingActionFor(integration: IntegrationSummary): ClientIntegrationAction | null {
+    if (!busy || pendingAction === null || !('client' in pendingAction)) return null;
+    return pendingAction.client === integration.client ? pendingAction : null;
+  }
+
+  function progressLabel(action: ClientIntegrationAction, integration: IntegrationSummary): string {
+    if (action.kind === 'connect') {
+      return t(integration.status === 'updateAvailable'
+        ? 'integrations-updating-progress'
+        : 'integrations-connecting-progress');
+    }
+    if (action.kind === 'disconnect') return t('integrations-disconnecting-progress');
+    if (action.kind === 'installWorkflowGuide') {
+      return t(integration.workflowGuide.status === 'updateAvailable'
+        ? 'workflow-guide-updating-progress'
+        : 'workflow-guide-installing-progress');
+    }
+    return t('workflow-guide-removing-progress');
+  }
+
   function needsFreshClientSession(integration: IntegrationSummary): boolean {
     return (integration.restartRequired || integration.workflowGuide.restartRequired)
       && integration.status === 'configured'
@@ -132,10 +157,12 @@
     <LoadingSkeleton variant="integrations" rows={4} />
   {:else}
   {#each integrations as integration (integration.client)}
+    {@const activeAction = pendingActionFor(integration)}
     <article
       class="integration-item"
       class:needs-attention={integration.status === 'conflict' || integration.status === 'error' || integration.workflowGuide.status === 'conflict'}
       class:has-update={integration.status === 'updateAvailable' || integration.workflowGuide.status === 'updateAvailable'}
+      aria-busy={activeAction !== null}
     >
       <div class="integration-client-heading">
         <AiClientIcon client={integration.client} label={clientName(integration.client)} decorative />
@@ -181,7 +208,12 @@
         </div>
       {/if}
       <div class="integration-actions">
-        {#if (integration.status === 'available' || integration.status === 'updateAvailable') && integration.workflowGuide.status !== 'conflict' && integration.workflowGuide.status !== 'unsupported'}
+        {#if activeAction}
+          <p class="integration-operation" role="status" aria-live="polite" aria-atomic="true">
+            <Spinner size="small" />
+            <span>{progressLabel(activeAction, integration)}</span>
+          </p>
+        {:else if (integration.status === 'available' || integration.status === 'updateAvailable') && integration.workflowGuide.status !== 'conflict' && integration.workflowGuide.status !== 'unsupported'}
           <button class="secondary" disabled={busy} onclick={() => connectOrUpdate(integration)}>
             {integration.status === 'updateAvailable' ? t('integrations-update') : t('integrations-connect')}
           </button>
@@ -192,7 +224,7 @@
         {:else if integration.status === 'configured'}
           <button class="text-action" disabled={busy} onclick={() => onaction({ kind: 'disconnect', client: integration.client })}>{t('integrations-disconnect')}</button>
         {/if}
-        {#if integration.workflowGuide.kind === 'nativeSkill' && (integration.workflowGuide.status === 'installed' || integration.workflowGuide.status === 'updateAvailable')}
+        {#if activeAction === null && integration.workflowGuide.kind === 'nativeSkill' && (integration.workflowGuide.status === 'installed' || integration.workflowGuide.status === 'updateAvailable')}
           <button class="text-action subtle-action" disabled={busy} onclick={() => removeGuide(integration)}>{t('workflow-guide-remove')}</button>
         {/if}
       </div>

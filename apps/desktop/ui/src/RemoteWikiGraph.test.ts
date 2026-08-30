@@ -76,7 +76,12 @@ describe('RemoteWikiGraph', () => {
     });
 
     await waitFor(() => expect(cytoscapeMocks.create).toHaveBeenCalledOnce());
-    expect(screen.getByRole('img', { name: 'Relationship map for Remote fixture' })).toBeInTheDocument();
+    const canvas = document.querySelector('.graph-canvas');
+    expect(canvas).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.queryByRole('img', { name: 'Relationship map for Remote fixture' })).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Graph pages' })).toBeInTheDocument();
+    expect(screen.getByText('Relationship map for Remote fixture. 2 nodes · 1 link')).toBeInTheDocument();
+    expect(screen.getByText('Index → Guide')).toBeInTheDocument();
     expect(screen.getByText('Building graph')).toBeInTheDocument();
     expect(cytoscapeMocks.graph.layout).not.toHaveBeenCalled();
 

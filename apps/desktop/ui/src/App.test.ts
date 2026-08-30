@@ -717,6 +717,9 @@ describe('AirWiki wiki workspace', () => {
     await waitFor(() => expect(manageIntegration).toHaveBeenCalledWith(expect.any(String), { kind: 'refresh' }));
     const refreshRequestId = vi.mocked(manageIntegration).mock.calls[0]?.[0];
     expect(refreshRequestId).toEqual(expect.any(String));
+    const refreshProgress = screen.getByRole('button', { name: 'Comprobando integraciones de chat…' });
+    expect(refreshProgress).toBeDisabled();
+    expect(refreshProgress.querySelector('.spinner')).toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Conectar' }));
     const genericMcpArticle = (await screen.findByText('Cliente MCP genérico')).closest('article');
@@ -769,6 +772,7 @@ describe('AirWiki wiki workspace', () => {
       });
     });
     expect(connectButton).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Actualizar' })).toBeEnabled();
   });
 
   it('releases integration controls when dispatch fails after an active snapshot', async () => {
@@ -1405,6 +1409,33 @@ describe('AirWiki wiki workspace', () => {
     expect(within(dialog).getByRole('button', { name: 'Aprobar y continuar' })).toBeDisabled();
   });
 
+  it('requires current evidence before a review can be excluded', async () => {
+    const wiki = snapshot.wikis[0];
+    wiki.needsReviewCount = 1;
+    const review = {
+      conceptId: 'review-without-evidence', wikiId: wiki.id, sourceRevision: 4, excluded: false,
+      sourceName: 'without-evidence.md', wikiName: wiki.name,
+      draft: {
+        type: 'Reference', title: 'Draft proposal', description: 'Synthetic fixture.',
+        language: 'es', tags: [], entities: [], links: [], summary: 'Pending human review.',
+        classificationConfidence: 1, classificationExplanation: 'Synthetic fixture.'
+      }
+    };
+    snapshot.reviews = [review];
+    snapshot.reviewEvidence = null;
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 3 revisados/ }));
+    await fireEvent.click(screen.getByRole('button', { name: /^Borradores/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'without-evidence.md, Borrador' }));
+    const dialog = await screen.findByRole('dialog', { name: 'without-evidence.md' });
+    const exclude = within(dialog).getByRole('button', { name: 'Excluir de esta wiki' });
+
+    expect(exclude).toBeDisabled();
+    await fireEvent.click(exclude);
+    expect(rejectReview).not.toHaveBeenCalled();
+  });
+
   it('keeps review evidence progress local and clears it when the matching request completes', async () => {
     const wiki = snapshot.wikis[0];
     wiki.needsReviewCount = 1;
@@ -1605,7 +1636,7 @@ describe('AirWiki wiki workspace', () => {
       { ...common, conceptId: 'public-concept', wikiId: 'public-wiki', title: 'Guía pública', nodeId: '12D3KooPublicPublisher', route: 'publicNetwork' }
     ]);
     render(App);
-    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Buscar también en la red pública' }));
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
     await submitVisibleSearch('guía');
 
     expect(screen.getByRole('button', { name: 'Todas 3' })).toHaveAttribute('aria-pressed', 'true');
@@ -1616,6 +1647,42 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('heading', { name: 'Guía cercana' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Atlas' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Guía pública' })).not.toBeInTheDocument();
+  });
+
+  it('retries a failed search without hiding its partial results', async () => {
+    activateLocalSearch();
+    snapshot.search = searchSummary('failed-search', 'partial', [{
+      conceptId: 'partial-concept', wikiId: snapshot.wikis[0].id, title: 'Resultado parcial',
+      snippet: 'Contenido disponible antes del fallo.', headingOrPage: 'Guía', logicalResourceUri: 'urn:airwiki:partial',
+      sourceRevision: 1, sourceSha256: 'c'.repeat(64), rank: 1, nodeId: snapshot.nodeId!,
+      route: 'deviceNetwork', assurance: null, lifecycle: 'stable'
+    }], 'failed');
+    window.location.hash = '#search';
+    render(App);
+    await submitVisibleSearch('consulta parcial');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo completar esta búsqueda');
+    expect(screen.getByText('Resultado parcial')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a intentar' }));
+
+    expect(searchKnowledge).toHaveBeenCalledTimes(2);
+    expect(searchKnowledge).toHaveBeenLastCalledWith('consulta parcial', false);
+    expect(screen.getByText('Resultado parcial')).toBeInTheDocument();
+  });
+
+  it('exposes the current Wiki view with pressed state', async () => {
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 2 revisados/ }));
+    await screen.findByRole('heading', { name: 'Atlas' });
+    const switcher = await screen.findByRole('group', { name: 'Vista del contenido' });
+    const list = within(switcher).getByRole('button', { name: 'Lista' });
+    const graph = within(switcher).getByRole('button', { name: 'Grafo' });
+
+    expect(list).toHaveAttribute('aria-pressed', 'true');
+    expect(graph).toHaveAttribute('aria-pressed', 'false');
+    await fireEvent.click(graph);
+    expect(list).toHaveAttribute('aria-pressed', 'false');
+    expect(graph).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('distinguishes an empty origin filter from an empty search', async () => {
@@ -2115,7 +2182,7 @@ describe('AirWiki wiki workspace', () => {
     snapshot.search = searchSummary('empty-public-search', 'complete', []);
     window.location.hash = '#search';
     render(App);
-    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Buscar también en la red pública' }));
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
     await submitVisibleSearch('sin coincidencias públicas');
 
     expect(screen.getByText('Buscamos en este equipo, en los equipos autorizados disponibles y en la red pública. Prueba formular una pregunta completa sobre la evidencia que necesitas.')).toBeInTheDocument();
@@ -2126,7 +2193,7 @@ describe('AirWiki wiki workspace', () => {
     snapshot.search = searchSummary('offline-public-search', 'publicNetworkOffline', []);
     window.location.hash = '#search';
     render(App);
-    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Buscar también en la red pública' }));
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
     await submitVisibleSearch('red pública offline');
 
     expect(await screen.findByText('No se pudieron consultar todas las fuentes')).toBeInTheDocument();
@@ -2139,7 +2206,7 @@ describe('AirWiki wiki workspace', () => {
     snapshot.search = searchSummary('public-assurance-search', 'complete', [{ conceptId: 'public-v2', wikiId: 'public-wiki', title: 'Concepto v2', snippet: 'Resumen público', headingOrPage: 'Guía', logicalResourceUri: 'urn:airwiki:public', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: '12D3KooPublicPublisher', route: 'publicNetwork', assurance: null, lifecycle: 'stable' }]);
     window.location.hash = '#search';
     render(App);
-    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Buscar también en la red pública' }));
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
     await submitVisibleSearch('Concepto v2');
     await openFirstSearchMatch();
     const currentWorkspace = publishedRemoteWorkspace('public-v2', 'Concepto v2', 'Contenido v2 completo.');
@@ -2214,7 +2281,7 @@ describe('AirWiki wiki workspace', () => {
     snapshot.search = searchSummary('public-search', 'complete', [{ conceptId: 'public-concept', wikiId: 'public-wiki', title: 'Resultado público', snippet: 'Evidencia pública.', headingOrPage: 'Guía', logicalResourceUri: 'urn:airwiki:public', sourceRevision: 1, sourceSha256: '0123456789abcdef', rank: 1, nodeId: '12D3KooPublicPublisher', route: 'publicNetwork', assurance: null, lifecycle: 'stable' }]);
     window.location.hash = '#search';
     const { container } = render(App);
-    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Buscar también en la red pública' }));
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
     await submitVisibleSearch('Resultado público');
 
     expect(screen.getAllByText('Red pública').length).toBeGreaterThan(0);
@@ -2307,7 +2374,7 @@ describe('AirWiki wiki workspace', () => {
     vi.useFakeTimers();
     try {
       await fireEvent.input(input!, { target: { value: 'consulta pública' } });
-      const publicSearch = screen.getByRole('checkbox', { name: 'Buscar también en la red pública' });
+      const publicSearch = screen.getByRole('checkbox', { name: 'Incluir públicas' });
       await fireEvent.click(publicSearch);
       await act(async () => { await vi.advanceTimersByTimeAsync(400); });
       expect(searchKnowledge).toHaveBeenLastCalledWith('consulta pública', true);
@@ -2427,7 +2494,7 @@ describe('AirWiki wiki workspace', () => {
     await submitVisibleSearch('consulta local');
 
     expect(await screen.findByText('No encontramos evidencia coincidente')).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole('checkbox', { name: 'Buscar también en la red pública' }));
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Incluir públicas' }));
 
     expect(screen.queryByText('No encontramos evidencia coincidente')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Busca en todas tus wikis' })).toBeInTheDocument();
@@ -2903,7 +2970,7 @@ describe('AirWiki wiki workspace', () => {
       window.location.hash = route;
       render(App);
       expect(await screen.findByRole('heading', { name: 'Tus wikis' })).toBeInTheDocument();
-      expect(screen.getByRole('checkbox', { name: 'Buscar también en la red pública' })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'Incluir públicas' })).not.toBeChecked();
       cleanup();
     }
   });

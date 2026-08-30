@@ -2259,8 +2259,9 @@ fn verify_tools_list(stdout: &str) -> Result<()> {
                             && tool.get("outputSchema").is_some_and(Value::is_object),
                         "la herramienta {name} no expuso schemas tipados"
                     );
-                    let (read_only, destructive, idempotent) = expected_tool_hints(name)
-                        .context("tools/list devolvió una herramienta no administrada")?;
+                    let (read_only, destructive, idempotent, open_world) =
+                        expected_tool_hints(name)
+                            .context("tools/list devolvió una herramienta no administrada")?;
                     ensure!(
                         tool.pointer("/annotations/readOnlyHint")
                             .and_then(Value::as_bool)
@@ -2276,7 +2277,7 @@ fn verify_tools_list(stdout: &str) -> Result<()> {
                             && tool
                                 .pointer("/annotations/openWorldHint")
                                 .and_then(Value::as_bool)
-                                == Some(false),
+                                == Some(open_world),
                         "la herramienta {name} no expuso anotaciones de seguridad correctas"
                     );
                 }
@@ -2299,18 +2300,20 @@ fn verify_tools_list(stdout: &str) -> Result<()> {
     Ok(())
 }
 
-fn expected_tool_hints(name: &str) -> Option<(bool, bool, bool)> {
+fn expected_tool_hints(name: &str) -> Option<(bool, bool, bool, bool)> {
     match name {
-        SEARCH_TOOL
-        | "list_airwiki_memories"
+        // Knowledge search can contact authorized LAN peers and optional public
+        // publishers, so MCP correctly classifies it as open-world.
+        SEARCH_TOOL => Some((true, false, true, true)),
+        "list_airwiki_memories"
         | "search_airwiki_memory"
         | "get_airwiki_memory"
-        | "get_airwiki_computation_run" => Some((true, false, true)),
+        | "get_airwiki_computation_run" => Some((true, false, true, false)),
         "create_airwiki_memory"
         | "initialize_airwiki_project"
         | "open_airwiki_project"
-        | "request_airwiki_computation" => Some((false, false, false)),
-        "write_airwiki_memory" | "deprecate_airwiki_memory" => Some((false, true, false)),
+        | "request_airwiki_computation" => Some((false, false, false, false)),
+        "write_airwiki_memory" | "deprecate_airwiki_memory" => Some((false, true, false, false)),
         _ => None,
     }
 }
@@ -2849,7 +2852,7 @@ mod tests {
         let tools = MANAGED_TOOLS
             .iter()
             .map(|name| {
-                let (read_only, destructive, idempotent) =
+                let (read_only, destructive, idempotent, open_world) =
                     expected_tool_hints(name).expect("managed tool hints");
                 serde_json::json!({
                     "name": name,
@@ -2861,7 +2864,7 @@ mod tests {
                         "readOnlyHint": read_only,
                         "destructiveHint": destructive,
                         "idempotentHint": idempotent,
-                        "openWorldHint": false,
+                        "openWorldHint": open_world,
                     },
                 })
             })
@@ -3227,7 +3230,7 @@ mod tests {
         let exact_tools = MANAGED_TOOLS
             .iter()
             .map(|name| {
-                let (read_only, destructive, idempotent) =
+                let (read_only, destructive, idempotent, open_world) =
                     expected_tool_hints(name).expect("managed tool hints");
                 serde_json::json!({
                     "name": name,
@@ -3239,7 +3242,7 @@ mod tests {
                         "readOnlyHint": read_only,
                         "destructiveHint": destructive,
                         "idempotentHint": idempotent,
-                        "openWorldHint": false,
+                        "openWorldHint": open_world,
                     }
                 })
             })

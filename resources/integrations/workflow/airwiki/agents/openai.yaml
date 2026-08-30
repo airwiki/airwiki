@@ -2,7 +2,7 @@ interface:
   display_name: "AirWiki"
   short_description: "Maintain durable knowledge in local AirWiki memory"
   brand_color: "#0B8394"
-  default_prompt: "Use $airwiki to create or update durable knowledge for this work."
+  default_prompt: "Use $airwiki to consult or maintain the durable knowledge relevant to this work."
 dependencies:
   tools:
     - type: "mcp"

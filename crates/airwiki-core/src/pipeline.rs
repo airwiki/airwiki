@@ -10,7 +10,9 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::chunk_identity::stored_chunk_id;
-use crate::inference::{EmbeddingProvider, GenerationProvider, MAX_GENERATION_INPUT_TOKENS};
+use crate::inference::{
+    EmbeddingProvider, GenerationFailure, GenerationProvider, MAX_GENERATION_INPUT_TOKENS,
+};
 use crate::ingest::{
     ChunkDraft, Chunker, FileCandidate, FileDiscovery, IngestLimits, SourceFormat, SourceIssueCode,
     Tokenizer, WhitespaceTokenizer, discover_files_with_issues, extract_file, sha256_file,
@@ -680,15 +682,9 @@ impl IngestPipeline {
         }
 
         let text = prepared.generation_text;
-        let (draft, used_fallback_metadata) = match self.generation.enrich(&text).await {
+        let (draft, used_fallback_metadata) = match self.enrich_with_transient_retry(&text).await {
             Ok(draft) => (draft, false),
-            Err(first_error) => match self.generation.enrich(&text).await {
-                Ok(draft) => (draft, false),
-                Err(second_error) => (
-                    fallback_draft(&candidate.path, &text, &first_error, &second_error),
-                    true,
-                ),
-            },
+            Err(error) => (fallback_draft(&candidate.path, &text, &error), true),
         };
         if !self.database.mark_enriched_if_current(claim)? {
             return Err(SupersededProcessing.into());
@@ -781,7 +777,7 @@ impl IngestPipeline {
             }
             Err(error) => {
                 self.database
-                    .fail_review_reanalysis(&claim, error.to_string())?;
+                    .fail_review_reanalysis(&claim, sanitized_reanalysis_failure(&error))?;
                 Err(error)
             }
         }
@@ -800,15 +796,10 @@ impl IngestPipeline {
         })
         .await?;
         let text = prepared.generation_text;
-        let draft = match self.generation.enrich(&text).await {
-            Ok(draft) => draft,
-            Err(first_error) => match self.generation.enrich(&text).await {
-                Ok(draft) => draft,
-                Err(second_error) => {
-                    bail!("automatic enrichment failed twice: {first_error:#}; {second_error:#}")
-                }
-            },
-        };
+        let draft = self
+            .enrich_with_transient_retry(&text)
+            .await
+            .context("automatic enrichment failed during review reanalysis")?;
         let embeddings = self.embed_chunk_drafts(&prepared.chunks).await?;
         let chunks = prepared.chunks;
         // Inference can take minutes on a small Windows machine. Re-hash at the
@@ -857,6 +848,21 @@ impl IngestPipeline {
                 .context("reanalyzed concept disappeared")
         })
         .await
+    }
+
+    /// Retries exactly once when the local runtime reports a transient failure.
+    /// Invalid, protocol, and unclassified errors are returned immediately so a
+    /// deterministic bad response cannot consume another inference attempt.
+    async fn enrich_with_transient_retry(&self, text: &str) -> Result<EnrichmentDraft> {
+        match self.generation.enrich(text).await {
+            Ok(draft) => Ok(draft),
+            Err(first_error) if generation_failure_is_transient(&first_error) => {
+                self.generation.enrich(text).await.context(format!(
+                    "automatic enrichment retry failed after transient error: {first_error:#}"
+                ))
+            }
+            Err(error) => Err(error),
+        }
     }
 
     async fn embed_chunk_drafts(&self, chunks: &[ChunkDraft]) -> Result<Vec<Vec<f32>>> {
@@ -1044,12 +1050,7 @@ fn materialize_current_draft(database: &Database, concept_id: Uuid) -> Result<()
     Ok(())
 }
 
-fn fallback_draft(
-    path: &Path,
-    text: &str,
-    first_error: &anyhow::Error,
-    second_error: &anyhow::Error,
-) -> EnrichmentDraft {
+fn fallback_draft(path: &Path, text: &str, error: &anyhow::Error) -> EnrichmentDraft {
     let title = path
         .file_stem()
         .and_then(|value| value.to_str())
@@ -1067,12 +1068,29 @@ fn fallback_draft(
         summary: text.chars().take(1_000).collect(),
         classification_confidence: 0.0,
         classification_explanation: format!(
-            "Dos intentos fallaron: {first_error:#}; {second_error:#}"
-        )
-        .chars()
-        .take(1_000)
-        .collect(),
+            "El enriquecimiento automático falló ({})",
+            generation_failure_code(error)
+        ),
     }
+}
+
+fn generation_failure_code(error: &anyhow::Error) -> &'static str {
+    error
+        .downcast_ref::<GenerationFailure>()
+        .map_or("generation_failed", |failure| failure.kind().error_kind())
+}
+
+fn sanitized_reanalysis_failure(error: &anyhow::Error) -> String {
+    format!(
+        "review reanalysis failed ({})",
+        generation_failure_code(error)
+    )
+}
+
+fn generation_failure_is_transient(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<GenerationFailure>()
+        .is_some_and(|failure| failure.kind().is_transient())
 }
 
 fn normalized_path(path: &Path) -> PathBuf {
@@ -1100,7 +1118,8 @@ mod tests {
 
     use super::*;
     use crate::inference::{
-        DeterministicEmbeddingProvider, DeterministicGenerationProvider, GenerationProvider,
+        DeterministicEmbeddingProvider, DeterministicGenerationProvider, GenerationFailure,
+        GenerationFailureKind, GenerationProvider,
     };
     use crate::okf::OkfConcept;
     use crate::search::HybridSearchEngine;
@@ -2054,27 +2073,153 @@ mod tests {
 
         async fn enrich(&self, _document_text: &str) -> Result<EnrichmentDraft> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Err(anyhow!("unexpected token at byte 7").context("invalid JSON"))
+            Err(anyhow!(
+                "unexpected token at byte 7 in /synthetic/private/source.md via http://127.0.0.1:43123"
+            )
+                .context(GenerationFailure::new(GenerationFailureKind::Invalid))
+                .context("invalid JSON"))
         }
     }
 
+    struct FailsOnceWithTimeout {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl GenerationProvider for FailsOnceWithTimeout {
+        fn model_id(&self) -> &str {
+            "timeout-then-ready"
+        }
+
+        async fn enrich(&self, document_text: &str) -> Result<EnrichmentDraft> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            if call == 0 {
+                return Err(anyhow!("local generation timed out")
+                    .context(GenerationFailure::new(GenerationFailureKind::Timeout)));
+            }
+            DeterministicGenerationProvider.enrich(document_text).await
+        }
+    }
+
+    struct FailsTwiceWithTransientErrors {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl GenerationProvider for FailsTwiceWithTransientErrors {
+        fn model_id(&self) -> &str {
+            "transient-failure-test"
+        }
+
+        async fn enrich(&self, _document_text: &str) -> Result<EnrichmentDraft> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst);
+            let (kind, message) = match call {
+                0 => (GenerationFailureKind::Timeout, "first transient failure"),
+                1 => (
+                    GenerationFailureKind::Unavailable,
+                    "second transient failure",
+                ),
+                _ => return Err(anyhow!("generation was called more than twice")),
+            };
+            Err(anyhow!(message).context(GenerationFailure::new(kind)))
+        }
+    }
+
+    #[test]
+    fn generation_retry_policy_accepts_only_classified_transient_errors() {
+        for (kind, expected) in [
+            (GenerationFailureKind::Timeout, true),
+            (GenerationFailureKind::Unavailable, true),
+            (GenerationFailureKind::Protocol, false),
+            (GenerationFailureKind::Invalid, false),
+        ] {
+            let error = anyhow!("classified test failure").context(GenerationFailure::new(kind));
+            assert_eq!(generation_failure_is_transient(&error), expected);
+        }
+        assert!(!generation_failure_is_transient(&anyhow!(
+            "unclassified test failure"
+        )));
+    }
+
     #[tokio::test]
-    async fn generation_retries_once_then_creates_manual_review_draft() {
-        let generator = Arc::new(AlwaysInvalid {
+    async fn transient_generation_failure_is_retried_once_during_ingestion() {
+        let generator = Arc::new(FailsOnceWithTimeout {
             calls: AtomicUsize::new(0),
         });
         let (temp, _db, collection_id, pipeline) = setup(generator.clone());
-        let path = temp.path().join("source/manual.md");
+        let path = temp.path().join("source/timeout.md");
         std::fs::write(&path, "contenido importante para revisar").unwrap();
+
         let outcome = pipeline.ingest_path(collection_id, path).await.unwrap();
+
         assert!(matches!(
             outcome,
             IngestOutcome::NeedsReview {
-                used_fallback_metadata: true,
+                used_fallback_metadata: false,
                 ..
             }
         ));
         assert_eq!(generator.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn two_transient_generation_failures_create_a_sanitized_fallback() {
+        let generator = Arc::new(FailsTwiceWithTransientErrors {
+            calls: AtomicUsize::new(0),
+        });
+        let (temp, db, collection_id, pipeline) = setup(generator.clone());
+        let path = temp.path().join("source/two-transient-failures.md");
+        std::fs::write(&path, "contenido importante para revisar").unwrap();
+
+        let outcome = pipeline.ingest_path(collection_id, path).await.unwrap();
+        let concept_id = match outcome {
+            IngestOutcome::NeedsReview {
+                concept_id,
+                used_fallback_metadata: true,
+                ..
+            } => concept_id,
+            other => panic!("unexpected outcome: {other:?}"),
+        };
+
+        let draft = db.concept(concept_id).unwrap().unwrap().draft;
+        assert_eq!(
+            draft.classification_explanation,
+            "El enriquecimiento automático falló (generation_unavailable)"
+        );
+        assert_eq!(generator.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn invalid_generation_response_creates_manual_review_draft_without_retry() {
+        let generator = Arc::new(AlwaysInvalid {
+            calls: AtomicUsize::new(0),
+        });
+        let (temp, db, collection_id, pipeline) = setup(generator.clone());
+        let path = temp.path().join("source/manual.md");
+        std::fs::write(&path, "contenido importante para revisar").unwrap();
+        let outcome = pipeline.ingest_path(collection_id, path).await.unwrap();
+        let concept_id = match outcome {
+            IngestOutcome::NeedsReview {
+                concept_id,
+                used_fallback_metadata: true,
+                ..
+            } => concept_id,
+            other => panic!("unexpected outcome: {other:?}"),
+        };
+        let explanation = db
+            .concept(concept_id)
+            .unwrap()
+            .unwrap()
+            .draft
+            .classification_explanation;
+
+        assert_eq!(
+            explanation,
+            "El enriquecimiento automático falló (generation_invalid)"
+        );
+        assert!(!explanation.contains("/synthetic/private/source.md"));
+        assert!(!explanation.contains("127.0.0.1:43123"));
+        assert_eq!(generator.calls.load(Ordering::SeqCst), 1);
     }
 
     struct FailsInitialAttempts {
@@ -2090,7 +2235,8 @@ mod tests {
         async fn enrich(&self, document_text: &str) -> Result<EnrichmentDraft> {
             let call = self.calls.fetch_add(1, Ordering::SeqCst);
             if call < 2 {
-                bail!("model was not ready")
+                return Err(anyhow!("model was not ready")
+                    .context(GenerationFailure::new(GenerationFailureKind::Unavailable)));
             }
             DeterministicGenerationProvider.enrich(document_text).await
         }
@@ -2160,11 +2306,17 @@ mod tests {
         let before_chunks = db.chunks_for_concept(concept_id).unwrap();
 
         let error = pipeline.reanalyze_review(concept_id).await.unwrap_err();
+        let detailed_error = format!("{error:#}");
 
-        assert!(error.to_string().contains("failed twice"));
         assert!(
-            error.to_string().contains("unexpected token at byte 7"),
-            "nested inference cause was discarded: {error:#}"
+            error
+                .to_string()
+                .contains("failed during review reanalysis")
+        );
+        assert!(
+            detailed_error.contains("/synthetic/private/source.md")
+                && detailed_error.contains("127.0.0.1:43123"),
+            "nested inference cause was discarded: {detailed_error}"
         );
         let after = db.concept(concept_id).unwrap().unwrap();
         assert_eq!(after.status, DocumentStatus::NeedsReview);
@@ -2178,9 +2330,10 @@ mod tests {
             .unwrap();
         assert_eq!(source.status, DocumentStatus::NeedsReview);
         let last_error = source.last_error.unwrap();
-        assert!(last_error.contains("failed twice"));
-        assert!(last_error.contains("unexpected token at byte 7"));
-        assert_eq!(generator.calls.load(Ordering::SeqCst), 4);
+        assert_eq!(last_error, "review reanalysis failed (generation_invalid)");
+        assert!(!last_error.contains("/synthetic/private/source.md"));
+        assert!(!last_error.contains("127.0.0.1:43123"));
+        assert_eq!(generator.calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

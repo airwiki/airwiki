@@ -9,6 +9,27 @@ Versioned source code, accessibility tests, and this document remain
 authoritative. Local design skills may help contributors apply these rules, but
 the contributor workflow must not depend on a skill installation.
 
+## Cross-platform design contract
+
+AirWiki presents one coherent product on macOS and Windows, not a pixel-identical
+shell. The following are shared across platforms:
+
+- information architecture, product terminology, and privacy and authorization
+  boundaries;
+- semantic tokens for appearance, typography roles, spacing, sizing, focus,
+  selection, and status;
+- core workflows, state and error/recovery behavior, and accessibility intent;
+- keyboard-operable controls, semantic names and roles, and non-color-only
+  communication of state.
+
+The host platform adapts the presentation and interaction details: font stack
+and text metrics; `Command` versus `Control` shortcut labels; focus and
+selection treatment; and native window chrome, dialogs, file pickers, menus,
+and notifications. A shared semantic token must therefore be mapped and tested
+per platform rather than treated as a promise of identical pixels. Preserve the
+native window's resize, system-menu, tile/snap, high-DPI, and accessibility
+behavior; do not replace it with decorative WebView chrome.
+
 ## Design principles
 
 - Keep content, knowledge state, and access boundaries visually primary.
@@ -22,6 +43,10 @@ the contributor workflow must not depend on a skill installation.
   and transparency. Use quiet opaque surfaces when native material is absent.
 - Keep privacy, publication, AI access, and recovery state explicit in text and
   iconography; color is supporting information, never the only signal.
+- Keep asynchronous progress visible at the point of action. A disabled control
+  or busy pointer is not sufficient feedback: retain safe existing content and
+  pair an indeterminate indicator with a concise verb when meaningful progress
+  cannot be measured.
 - Treat network sharing and AI connections as distinct user concepts. **Share**
   contains only LAN and Internet exposure. The compact **AI Apps** status opens
   its own per-Wiki application-permission panel; Settings manages installation,
@@ -69,6 +94,10 @@ AirWiki deliberately keeps two product faces:
 Use the platform system stack for compact control text when native familiarity
 is more important than brand expression. Do not embed or redistribute Apple
 system fonts; `-apple-system` and `system-ui` select the installed platform face.
+On Windows, prefer `Segoe UI Variable` with `Segoe UI` as the system-font
+fallback for compact UI text. Keep product display and reading faces in their
+explicit roles, but never let them prevent system text scaling, localization,
+or high-contrast readability.
 
 Use these macOS-informed targets in logical CSS pixels, then validate them in
 the installed application because CSS pixels and points can diverge with engine
@@ -111,6 +140,9 @@ the bottom edge of a macOS window.
   hit region, and a keyboard path.
 - Prefer 40–44 pixels for isolated primary actions or touch-capable hardware.
 - Provide visible hover, pressed, disabled, selected, and keyboard-focus states.
+- Reserve visible focus rings for interactive controls. A noninteractive route
+  heading may receive programmatic focus for semantic navigation without
+  drawing a full-width control outline.
 - Keep adjacent buttons in a coherent group visually consistent.
 - On macOS, use an ellipsis when a command opens another view that requires more
   input, when that convention remains clear after localization.
@@ -119,16 +151,47 @@ AirWiki uses its cross-platform icon system by default. SF Symbols can inform
 icon semantics, weight, and alignment but must not be copied into unsupported
 platforms or used outside Apple terms.
 
+## Windows and Fluent adaptation
+
+Windows uses the same product hierarchy and semantic roles, while retaining
+Windows conventions. Use `Control` shortcut labels and conventional keyboard
+interactions, including visible focus, logical tab order, arrow-key behavior in
+composite controls, `Escape` for safe dismissal, and focus restoration after a
+dialog closes. Do not rely on hover, a pointer, or a subtle selection tint as
+the only way to find or operate a control.
+
+Respect Windows system theme, high-contrast settings, text scaling, reduced
+motion, and the user's configured accessibility behavior. In high contrast,
+system-provided colors and focus indicators take priority over decorative
+appearance; labels, boundaries, focus, and states must still be distinguishable
+without color alone. Layout must reflow or expose secondary detail before text
+or essential controls clip at enlarged text sizes.
+
+Prefer native title-bar, system-menu, resizing, maximization, and snap-layout
+behavior. Native dialogs and file pickers retain their host ownership and focus
+rules. A custom title bar is acceptable only when it fully preserves these
+behaviors, accessible hit targets, and scaling; it is not a reason to imitate
+macOS traffic lights or toolbars. Fluent-inspired NavigationView and command
+patterns may guide navigation when they fit the task, but they must not obscure
+the product's Library, Wiki, Settings, or privacy concepts.
+
+Fluent material is not a cross-platform visual default. Use quiet opaque
+surfaces for dense or content-first panes on Windows as on macOS. Do not mimic
+Mica, Acrylic, Liquid Glass, or another platform material with fixed blur,
+transparency, or decorative highlights when the host does not provide it.
+
 ## Accessibility and validation
 
 - Meet WCAG 2.2 AA: at least 4.5:1 for normal text and 3:1 for essential
   non-text controls, focus, and state indicators.
 - Test keyboard-only operation, visible focus, reduced motion, appearance
-  switching, localization expansion, and 200% text or display scaling where the
-  shell supports it.
+  switching, localization expansion, and 125%, 150%, and 200% text or display
+  scaling where the shell supports it. On Windows, also test high-contrast
+  settings and platform focus treatment.
 - Inspect realistic Library, Wiki content, and Settings screens at a constrained
   window near 1024×720, a comfortable window near 1180×760, and a wider window
-  near 1440×900.
+  near 1440×900. Treat these as acceptance states for responsive behavior, not
+  universal breakpoints or fixed platform metrics.
 - Open the native window at 1180×760 by default, but keep the complete primary
   workflow usable down to its supported 1024×720 minimum for Split View and
   tiled desktop layouts.
@@ -145,3 +208,12 @@ platforms or used outside Apple terms.
 - [Buttons](https://developer.apple.com/design/human-interface-guidelines/buttons)
 - [SF Symbols](https://developer.apple.com/design/human-interface-guidelines/sf-symbols)
 - [Apple Design Resources](https://developer.apple.com/design/resources/)
+
+## Microsoft references
+
+- [Typography](https://learn.microsoft.com/windows/apps/design/signature-experiences/typography)
+- [High contrast](https://learn.microsoft.com/windows/apps/design/accessibility/high-contrast-themes)
+- [Text scaling](https://learn.microsoft.com/windows/apps/develop/input/text-scaling)
+- [Keyboard interactions](https://learn.microsoft.com/windows/apps/develop/input/keyboard-interactions)
+- [NavigationView](https://learn.microsoft.com/windows/apps/develop/ui/controls/navigationview)
+- [Title bar](https://learn.microsoft.com/windows/apps/develop/title-bar)

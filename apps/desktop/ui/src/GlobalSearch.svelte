@@ -23,7 +23,7 @@
   <Search size={18} aria-hidden="true" />
   <TextField id="global-search" label={t('desktop-search-question')} value={question} oninput={onquestion} oncompositionstart={oncompositionstart} oncompositionend={oncompositionend} onfocus={onopen} maxlength={4096} describedby={!ready ? 'global-search-readiness' : undefined} placeholder={ready ? t('desktop-search-placeholder') : t('desktop-search-preparing-placeholder')} variant="search" />
   {#if !ready}<span id="global-search-readiness" class="sr-only">{t('desktop-search-preparing-body')}</span>{/if}
-  <div class="search-scope" aria-label={t('desktop-search-scope-label')}>
+  <div class="search-scope" role="group" aria-label={t('desktop-search-scope-label')}>
     <span class="search-scope-base">{privateScopeLabel}</span>
     <Checkbox label={t('desktop-search-public-short')} checked={includePublic} onchange={onpublic} compact />
   </div>

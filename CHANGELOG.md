@@ -4,6 +4,14 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Refined the desktop's cross-platform interaction system for macOS and Windows:
+  compact controls now use platform-appropriate system text, layouts reflow at
+  the supported minimum window and enlarged text sizes, keyboard focus and view
+  state remain explicit, graph relationships have an accessible text
+  alternative, and failed global searches offer an in-place retry without
+  discarding partial results. AI-app integration actions now keep a visible,
+  localized progress state beside the affected app instead of relying on the
+  pointer's busy cursor.
 - Let each connected AI application search its permitted local Wikis and
   knowledge already shared by verified LAN devices through the same bounded
   federated coordinator. Optional public knowledge is disabled per application

@@ -36,14 +36,17 @@
     ];
   }
 
+  function visibleLinks() {
+    const nodeIds = new Set(pageEntries().map(({ page }) => pageKey(page)));
+    return bundle.links.filter((link) => nodeIds.has(pageKey(link.source)) && nodeIds.has(pageKey(link.target)));
+  }
+
   function graphElements(): ElementDefinition[] {
     const entries = pageEntries();
-    const nodeIds = new Set(entries.map(({ page }) => pageKey(page)));
     const nodes: ElementDefinition[] = entries.map(({ page, fingerprint }) => ({
       data: { id: pageKey(page), label: pageTitle(page), page, fingerprint, kind: page.kind }
     }));
-    const edges: ElementDefinition[] = bundle.links
-      .filter((link) => nodeIds.has(pageKey(link.source)) && nodeIds.has(pageKey(link.target)))
+    const edges: ElementDefinition[] = visibleLinks()
       .map((link, index) => ({
         data: {
           id: `link:${pageKey(link.source)}:${pageKey(link.target)}:${index}`,
@@ -145,14 +148,24 @@
 <div class="graph-shell">
   <div class="graph-heading">
     <div><p>{t('desktop-graph-verified')}</p><h3>{bundle.wikiName}</h3></div>
-    <small>{t('knowledge-graph-counts', { nodes: bundle.concepts.length + bundle.reservedPages.length, links: bundle.links.length })}</small>
+    <small>{t('knowledge-graph-counts', { nodes: pageEntries().length, links: visibleLinks().length })}</small>
   </div>
   {#if loadFailed}
     <p class="graph-error" role="status">{t('desktop-graph-error')}</p>
   {:else}
-    <div class="graph-canvas" bind:this={container} role="img" aria-label={t('desktop-graph-map-label', { wiki: bundle.wikiName })}></div>
+    <div class="graph-canvas" bind:this={container} aria-hidden="true"></div>
   {/if}
-  <div class="graph-index" aria-label={t('desktop-graph-pages-label')}>
+  {#if !loadFailed}
+    <div class="sr-only">
+      <p>{t('desktop-graph-map-label', { wiki: bundle.wikiName })}. {t('knowledge-graph-counts', { nodes: pageEntries().length, links: visibleLinks().length })}</p>
+      <ul>
+        {#each visibleLinks() as link (pageKey(link.source) + pageKey(link.target) + link.label)}
+          <li>{pageTitle(link.source)} → {pageTitle(link.target)}</li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
+  <div class="graph-index" role="group" aria-label={t('desktop-graph-pages-label')}>
     {#each bundle.reservedPages as reserved (pageKey(reserved.page))}
       <button onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage(reserved.page, reserved.fingerprint)}>{pageTitle(reserved.page)}</button>
     {/each}
@@ -174,4 +187,5 @@
   .graph-index button { flex: 1 1 220px; min-width: 0; padding: 7px 10px; overflow-wrap: anywhere; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: var(--control-radius); text-align: left; cursor: pointer; }
   .graph-index button:hover, .graph-index button:focus-visible { color: inherit; border-color: var(--cyan); }
   .graph-error { padding: 20px; color: var(--amber); border-left: 2px solid var(--amber); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 </style>

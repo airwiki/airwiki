@@ -361,9 +361,12 @@ integrations-restart-chatgpt = Las tareas abiertas conservan las herramientas de
 integrations-restart-conversation = Las conversaciones abiertas conservan las herramientas de AirWiki con las que comenzaron. Abre una conversación nueva de { $client } en el mismo proyecto; reinicia el cliente solo si la memoria de proyecto sigue sin aparecer.
 integrations-restart-gemini = Ejecuta /mcp reload en la sesión actual de Gemini o inicia una sesión nueva en el mismo proyecto si la memoria de proyecto sigue sin aparecer.
 integrations-connect = Conectar
+integrations-connecting-progress = Conectando…
 integrations-open-settings = Abrir configuración
 integrations-disconnect = Desconectar
+integrations-disconnecting-progress = Desconectando…
 integrations-update = Actualizar integración
+integrations-updating-progress = Actualizando integración…
 integrations-installed = Ya lo instalé
 integrations-installed-help = Esto solo confirma el estado visible de esta sesión; no concede permisos ni autentica a Claude.
 integrations-open-claude = Abrir Claude
@@ -388,8 +391,11 @@ workflow-guide-status-builtIn = Incluida en la conexión
 workflow-guide-status-conflict = Modificada fuera de AirWiki
 workflow-guide-status-unsupported = No compatible
 workflow-guide-install = Instalar memoria
+workflow-guide-installing-progress = Instalando memoria…
 workflow-guide-update = Actualizar memoria
+workflow-guide-updating-progress = Actualizando memoria…
 workflow-guide-remove = Retirar guía
+workflow-guide-removing-progress = Retirando guía…
 workflow-guide-conflict-help = AirWiki no reemplazará archivos modificados por ti. Retira o restaura manualmente la guía antes de intentar nuevamente.
 integration-recovery-label = Siguiente paso
 integration-recovery-chatgpt-title = Abre una tarea nueva de ChatGPT/Codex
@@ -1173,7 +1179,7 @@ desktop-search-private-scope-nearby =
         [one] Este equipo + 1 cercano
        *[other] Este equipo + { $count } cercanos
     }
-desktop-search-public-short = Buscar también en la red pública
+desktop-search-public-short = Incluir públicas
 desktop-search-local-source = En este dispositivo
 desktop-search-nearby-source = Equipo cercano
 desktop-search-welcome-title = Busca en todas tus wikis

@@ -185,4 +185,25 @@ describe('desktop style tokens', () => {
 
     expect([...explicitSizes, ...shorthandSizes].filter((size) => size < 10)).toEqual([]);
   });
+
+  it('reflows the installed minimum window and maps compact UI type per platform', () => {
+    const stylesheet = desktopStyles();
+
+    expect(stylesheet).not.toMatch(/body\s*{[^}]*min-width:\s*1020px/);
+    expect(stylesheet).toContain('html, body, #app { min-width: 0; }');
+    expect(stylesheet).toContain(':root[data-platform=\'windows\'] { --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;');
+    expect(stylesheet).toMatch(/@media \(max-width: 1040px\)[\s\S]*?\.top-bar\s*{[^}]*grid-template-rows: auto auto/);
+    expect(stylesheet).toMatch(/@media \(max-width: 1040px\)[\s\S]*?\.wiki-row\s*{[^}]*'knowledge knowledge'/);
+  });
+
+  it('keeps programmatically focused headings quiet without hiding control focus', () => {
+    const stylesheet = desktopStyles();
+    const controlFocusRule = stylesheet.match(
+      /:where\(a, button, \[role='tab'\], \.brand, \.top-brand\):focus-visible\s*{([^}]*)}/,
+    )?.[1];
+
+    expect(stylesheet).toContain("h1[tabindex='-1']:focus { outline: none; }");
+    expect(stylesheet).not.toContain("h1[tabindex]:focus, h1[tabindex='-1']:focus");
+    expect(controlFocusRule).toContain('outline: 2px solid var(--cyan)');
+  });
 });

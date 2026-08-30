@@ -361,9 +361,12 @@ integrations-restart-chatgpt = Existing tasks keep the AirWiki tools they loaded
 integrations-restart-conversation = Existing conversations keep the AirWiki tools they loaded when they started. Open a new { $client } conversation in the same project; restart the client only if project memory is still unavailable.
 integrations-restart-gemini = Run /mcp reload in the current Gemini session, or start a new session in the same project if project memory is still unavailable.
 integrations-connect = Connect
+integrations-connecting-progress = Connecting…
 integrations-open-settings = Open settings
 integrations-disconnect = Disconnect
+integrations-disconnecting-progress = Disconnecting…
 integrations-update = Update integration
+integrations-updating-progress = Updating integration…
 integrations-installed = I installed it
 integrations-installed-help = This confirms only the visible state for this session; it does not grant permissions or authenticate Claude.
 integrations-open-claude = Open Claude
@@ -388,8 +391,11 @@ workflow-guide-status-builtIn = Included with the connection
 workflow-guide-status-conflict = Modified outside AirWiki
 workflow-guide-status-unsupported = Unsupported
 workflow-guide-install = Install memory
+workflow-guide-installing-progress = Installing memory…
 workflow-guide-update = Update memory
+workflow-guide-updating-progress = Updating memory…
 workflow-guide-remove = Remove guide
+workflow-guide-removing-progress = Removing guide…
 workflow-guide-conflict-help = AirWiki will not replace files you modified. Remove or restore the guide manually before trying again.
 integration-recovery-label = Next step
 integration-recovery-chatgpt-title = Open a new ChatGPT/Codex task
@@ -1173,7 +1179,7 @@ desktop-search-private-scope-nearby =
         [one] This device + 1 nearby
        *[other] This device + { $count } nearby
     }
-desktop-search-public-short = Search public too
+desktop-search-public-short = Include public
 desktop-search-local-source = On this device
 desktop-search-nearby-source = Nearby device
 desktop-search-welcome-title = Search all your wikis

@@ -35,6 +35,7 @@ const labels: Record<string, string> = {
   'integration-status-available': 'Available',
   'integration-status-configured': 'Configured',
   'integration-status-conflict': 'Conflict',
+  'integration-status-update-available': 'Update available',
   'integration-summary-not-installed': 'Install this chat app before connecting it.',
   'integration-summary-available': 'This chat app is ready to connect.',
   'integration-summary-awaiting-approval': 'Complete approval in the chat app.',
@@ -51,9 +52,16 @@ const labels: Record<string, string> = {
   'workflow-guide-status-builtIn': 'Included with the connection',
   'workflow-guide-status-conflict': 'Modified outside AirWiki',
   'integrations-connect': 'Connect',
+  'integrations-connecting-progress': 'Connecting…',
   'integrations-disconnect': 'Disconnect',
+  'integrations-disconnecting-progress': 'Disconnecting…',
+  'integrations-update': 'Update integration',
+  'integrations-updating-progress': 'Updating integration…',
   'workflow-guide-install': 'Install memory',
+  'workflow-guide-installing-progress': 'Installing memory…',
   'workflow-guide-remove': 'Remove guide',
+  'workflow-guide-removing-progress': 'Removing guide…',
+  'workflow-guide-updating-progress': 'Updating memory…',
   'workflow-guide-conflict-help': 'AirWiki preserves modified files.',
   'integration-recovery-label': 'Next step',
   'integration-recovery-chatgpt-title': 'Open a new ChatGPT/Codex task',
@@ -112,6 +120,28 @@ describe('IntegrationList', () => {
     expect(container.querySelector('.loading-skeleton.integrations')).toBeInTheDocument();
     expect(container.querySelectorAll('.integration-skeleton-row')).toHaveLength(4);
     expect(container.querySelector('.integration-list')).toHaveAttribute('aria-busy', 'true');
+  });
+
+  it('shows persistent progress in the affected integration card', () => {
+    render(IntegrationList, {
+      integrations: [integration({ status: 'updateAvailable' })],
+      busy: true,
+      pendingAction: { kind: 'connect', client: 'claudeCode' },
+      t: translate,
+      onaction: vi.fn(),
+      oncopy: vi.fn()
+    });
+
+    const item = screen.getByText('Claude Code').closest('article');
+    expect(item).not.toBeNull();
+    expect(item).toHaveAttribute('aria-busy', 'true');
+    const progress = within(item as HTMLElement).getByRole('status');
+    expect(progress).toHaveTextContent('Updating integration…');
+    expect(progress.querySelector('.spinner')).toBeInTheDocument();
+    expect(within(item as HTMLElement).queryByRole('button', { name: 'Update integration' }))
+      .not.toBeInTheDocument();
+    expect(within(item as HTMLElement).queryByRole('button', { name: 'Remove guide' }))
+      .not.toBeInTheDocument();
   });
 
   it('offers public search only for an active capability and reports per-app progress', async () => {

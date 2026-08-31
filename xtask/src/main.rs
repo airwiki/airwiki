@@ -9535,6 +9535,34 @@ policy:
     }
 
     #[test]
+    fn macos_notarization_rehearsal_remains_private_and_commit_bound() {
+        let rehearsal = fs::read_to_string(
+            workspace_root().join(".github/workflows/macos-notarization-rehearsal.yml"),
+        )
+        .unwrap();
+
+        assert!(
+            rehearsal.contains("commit_sha:")
+                && rehearsal.contains("rehearsal_confirmation:")
+                && rehearsal.contains("rehearse-macos-notarization-${AIRWIKI_RELEASE_COMMIT}")
+                && rehearsal.contains("runs-on: macos-14")
+                && rehearsal.contains("environment: macos-signing")
+                && rehearsal.contains("timeout-minutes: 90")
+                && rehearsal.contains("actions: read")
+                && rehearsal.contains("checks: read")
+                && rehearsal.contains("contents: read")
+                && rehearsal.contains("./packaging/release-macos.sh")
+                && rehearsal.contains("./packaging/verify-macos-release.sh")
+                && rehearsal.contains("retention-days: 14")
+                && !rehearsal.contains("id-token:")
+                && !rehearsal.contains("gh release")
+                && !rehearsal.contains("contents: write")
+                && !rehearsal.contains("generate-update-manifest.py")
+                && !rehearsal.contains("packaging/release_assets.py")
+        );
+    }
+
+    #[test]
     fn tauri_window_icons_match_the_packaging_brand_assets() {
         let root = workspace_root();
         let build_script = fs::read_to_string(root.join("apps/desktop/build.rs")).unwrap();

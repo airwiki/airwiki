@@ -9,9 +9,9 @@ have passed.
 
 ## Local preview
 
-Open `index.html` directly in a browser, run `pnpm dev`, or build and preview
-the Cloudflare-compatible artifact with `pnpm build && pnpm preview`. The
-landing keeps its media assets next to the page. Its documentation links
+Run `pnpm dev`, or build and preview the Cloudflare-compatible artifact with
+`pnpm build && pnpm preview`. The landing keeps its media assets next to the
+page. Its documentation links
 deliberately use absolute GitHub `main` URLs. No browser request should be made
 for analytics, cookies, web fonts, CDNs, or third-party scripts. Links to the
 public source repository and GitHub Releases are intentional user-initiated
@@ -57,6 +57,20 @@ decision. Before enabling public access:
    nosniff`, a restrictive `Permissions-Policy`, and an appropriate
    `Referrer-Policy`. Test the exact deployed headers rather than relying only
    on the source declaration.
+   The production build deliberately removes the static client `index.html`
+   and generated active CSS/JavaScript. The Worker serves `/`, the referenced
+   CSS/JavaScript, and virtual media routes with the same seven headers; the
+   binary files remain as unreferenced backing assets for `ASSETS.fetch`.
+   The Worker also supplies a bounded single-range fallback for the small demo
+   video when a local or hosted asset layer ignores `Range`; verify playback and
+   seeking on the deployed version.
+   This routing is a workaround for private Sites previews that bypass the
+   Worker for existing static files, so verify `/`, every referenced virtual
+   route, a 404, and a disallowed method on the exact deployment. If the host
+   bypasses any referenced route, or policy requires protected headers on the
+   unreferenced backing-object URLs too, use a host that guarantees Worker-first
+   routing instead of treating this workaround as a public-launch control.
+
    The HTML also carries an early CSP meta element and a referrer meta element
    as limited defense in depth when a private preview layer omits response
    headers. Those elements do not implement `frame-ancestors`, COOP, CORP,

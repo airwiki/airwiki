@@ -9,10 +9,10 @@
   "packageManager": "pnpm@10.18.3",
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
-    "build": "pnpm clean && vite build",
+    "build": "pnpm clean && vite build && node scripts/protect-static-output.mjs && node scripts/verify-worker-routes.mjs",
     "check": "tsc --noEmit && pnpm build",
     "dev": "vite",
-    "preview": "vite preview"
+    "preview": "wrangler dev --cwd dist/server --config wrangler.json --local"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",

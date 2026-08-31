@@ -16,8 +16,10 @@
   <a href="#how-airwiki-works">How it works</a> ·
   <a href="#availability">Availability</a> ·
   <a href="https://github.com/airwiki/airwiki/releases">Technical beta</a> ·
+  <a href="FAQ.md">Beta FAQ</a> ·
   <a href="#run-from-source">Run from source</a> ·
-  <a href="CONTRIBUTING.md">Contribute</a>
+  <a href="CONTRIBUTING.md">Contribute</a> ·
+  <a href="SUPPORT.md">Feedback</a>
 </p>
 
 AirWiki is an open-source desktop app that turns folders, [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundles, and assistant conversations into wikis you can search, review, and selectively share. Knowledge stays on the device that owns it by default. Local AI can organize and index it, but cannot publish it or grant access.
@@ -155,6 +157,11 @@ The first-run flow explains local privacy and offers a direct path to the first 
 
 Contributions around Rust, local AI, privacy-preserving search, knowledge management, and accessible desktop UX are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the [open issues](https://github.com/airwiki/airwiki/issues).
 
+For beta setup questions, reproducible feedback, and reporting boundaries, read
+[SUPPORT.md](SUPPORT.md). Public issue reports must use synthetic data only.
+Potential security or data-exposure concerns belong in the private process in
+[SECURITY.md](SECURITY.md).
+
 ## Architecture at a glance
 
 AirWiki is a Rust workspace with a Tauri v2 desktop shell and Svelte UI. SQLite owns operational state and local paths; managed OKF `draft` and `stable` files are the source of truth for each locally visible wiki. Domain rules stay outside widgets and transports.
@@ -211,6 +218,10 @@ Every route beyond local use crosses an independently managed access boundary. S
 - [Public release process](docs/release-process.md)
 - [Code signing policy](docs/code-signing-policy.md)
 - [Security policy](SECURITY.md)
+- [Privacy and data handling](PRIVACY.md)
+- [Beta FAQ and known limitations](FAQ.md)
+- [Beta roadmap and feedback focus](ROADMAP.md)
+- [Support and feedback](SUPPORT.md)
 - [Changelog](CHANGELOG.md)
 
 ## Deliberate limits

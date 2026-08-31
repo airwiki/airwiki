@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability privately
+    url: https://github.com/airwiki/airwiki/security/advisories/new
+    about: Do not disclose suspected vulnerabilities or data exposure in public issues.
+  - name: Beta support and feedback
+    url: https://github.com/airwiki/airwiki/blob/main/SUPPORT.md
+    about: Choose the public beta channel and use only synthetic, non-sensitive material.

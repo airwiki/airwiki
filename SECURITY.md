@@ -17,6 +17,11 @@ Do not open a public issue or attach sensitive logs, documents, databases, scree
 
 The project will assess a complete report, prepare a fix and tests, and coordinate disclosure. Never include real knowledge or credentials in a report.
 
+For ordinary beta feedback, setup questions, and feature ideas, use the public
+channels in [SUPPORT.md](SUPPORT.md). Those reports are public and must use only
+synthetic material; they are never an alternative for suspected vulnerabilities
+or data exposure.
+
 ## Operational containment
 
 If exposure is suspected, quit AirWiki completely, revoke affected peer access, disable external-chat permission for affected Wikis, and disconnect local chat integrations. Preserve only sanitized audit records for investigation. See the [threat model](docs/threat-model.md) for the complete containment sequence.

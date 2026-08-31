@@ -196,7 +196,9 @@ runs only the exact-source validation and the Windows build/clean
 install-uninstall smoke; it skips Linux and macOS jobs, beta staging,
 `upload-artifact`, artifact summaries, attestation, signing, publication and
 release credentials. It does not create a downloadable artifact or release
-evidence, and must not be treated as a technical prerelease.
+evidence, and must not be treated as a technical prerelease. The job may restore
+an existing Rust cache, but explicitly disables its post-job cache save so the
+new `target/packages/windows` MSI bytes are not retained through that cache.
 
 `prepare-unsigned-windows-beta.ps1` rejects input outside `target`, reparse
 points, unexpected files, a non-official repository identity, a mismatched

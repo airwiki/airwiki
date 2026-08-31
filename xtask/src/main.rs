@@ -3536,6 +3536,10 @@ fn verify_windows_msi_smoke_sources(smoke: &str, smoke_test: &str, pilot: &str) 
                 .matches("if: inputs.target != 'windows-msi-smoke-no-artifact'")
                 .count()
                 == 3
+            && pilot
+                .matches("save-if: ${{ inputs.target != 'windows-msi-smoke-no-artifact' }}")
+                .count()
+                == 1
             && pilot.contains("if: inputs.target == 'all-internal-candidates' || inputs.target == 'public-prerelease'")
             && pilot.contains("if: inputs.target == 'public-prerelease'"),
         "{SMOKE_TARGET} must run only the Windows smoke without artifact, attestation, or publication paths"

@@ -453,13 +453,13 @@ button:active:not(:disabled) { transform: scale(.985); }
   }
 }
 :root[data-theme='light'] .primary,
-:root[data-theme='light'] .global-search > button,
+:root[data-theme='light'] .global-search > button[type='submit'],
 :root[data-theme='light'] .brand-mark,
 :root[data-theme='light'] .onboarding-mark { color: var(--on-accent); }
 :root[data-theme='light'] .top-brand .brand-mark::after { border-color: #ffffff88; box-shadow: 3px 3px 0 -2px #ffffff88; }
 @media (prefers-color-scheme: light) {
   :root[data-theme='system'] .primary,
-  :root[data-theme='system'] .global-search > button,
+  :root[data-theme='system'] .global-search > button[type='submit'],
   :root[data-theme='system'] .brand-mark,
   :root[data-theme='system'] .onboarding-mark { color: var(--on-accent); }
   :root[data-theme='system'] .top-brand .brand-mark::after { border-color: #ffffff88; box-shadow: 3px 3px 0 -2px #ffffff88; }
@@ -485,9 +485,9 @@ button:active:not(:disabled) { transform: scale(.985); }
 .search-scope-base { padding-right: 8px; border-right: 1px solid var(--line); }
 .global-search .check-label { white-space: nowrap; }
 .global-search kbd { color: var(--muted); font: 500 10px system-ui; }
-.global-search > button { display: grid; place-items: center; width: 32px; height: 32px; margin-left: 7px; color: var(--on-action); background: var(--action-fill); border: 0; border-radius: 4px; cursor: pointer; }
-.global-search > button:disabled { color: var(--muted); background: var(--surface-raised); cursor: not-allowed; }
-.global-search .search-preparing-action { grid-column: 2 / -1; justify-self: start; min-height: 28px; margin: -1px 0 7px 10px; padding: 0; color: var(--cyan); background: transparent; border: 0; border-radius: 0; font-size: 12px; font-weight: 650; text-decoration: underline; text-underline-offset: 2px; }
+.global-search > button[type='submit'] { display: grid; place-items: center; width: 32px; height: 32px; margin-left: 7px; color: var(--on-action); background: var(--action-fill); border: 0; border-radius: 4px; cursor: pointer; }
+.global-search > button[type='submit']:disabled { color: var(--muted); background: var(--surface-raised); cursor: not-allowed; }
+.global-search .search-preparing-action { grid-column: 2 / -1; justify-self: start; width: auto; min-width: 0; min-height: 28px; height: auto; margin: -1px 0 7px 10px; padding: 0; color: var(--cyan); background: transparent; border: 0; border-radius: 0; font-size: 12px; font-weight: 650; line-height: 1.2; text-align: left; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
 .drive-page { --wiki-sticky-offset: -28px; min-width: 0; min-height: 0; padding: 28px 38px 42px; overflow: auto; overflow-anchor: none; overscroll-behavior: contain; }
 .drive-route { width: min(1240px, 100%); margin: 0 auto; }
 .drive-page.wiki-open { padding-bottom: 42px; overflow-x: hidden; overflow-y: auto; }
@@ -1452,7 +1452,7 @@ h1[tabindex='-1']:focus { outline: none; }
 
 /* Baseline hit target for compact desktop controls; visual glyphs may remain smaller. */
 button, a[href], input:not([type='hidden']), select { min-height: 28px; }
-.global-search > button { min-width: 32px; min-height: 32px; }
+.global-search > button[type='submit'] { min-width: 32px; min-height: 32px; }
 .top-brand, .brand { min-height: 32px; }
 
 @media (max-width: 1040px) {
@@ -1519,7 +1519,7 @@ button, a[href], input:not([type='hidden']), select { min-height: 28px; }
   :root { forced-color-adjust: auto; }
   :where(button, a, input, textarea, select, .global-search, .wiki-row, .file-browser, .settings-sidebar a) { border-color: CanvasText; }
   :where(button, a, input, textarea, select):focus-visible { outline-color: Highlight; }
-  .primary, .new-wiki-button, .global-search > button, .wiki-row.active, .settings-sidebar a.active { color: HighlightText; background: Highlight; border-color: Highlight; }
+  .primary, .new-wiki-button, .global-search > button[type='submit'], .wiki-row.active, .settings-sidebar a.active { color: HighlightText; background: Highlight; border-color: Highlight; }
   .check-control > input:checked + .check-indicator, .switch-control > input:checked + .switch-track { color: HighlightText; background: Highlight; border-color: Highlight; }
   .status-dot, .health-signal, .pulse, .settings-status-dot { background: CanvasText; box-shadow: none; }
 }

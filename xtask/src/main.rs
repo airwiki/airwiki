@@ -9535,6 +9535,71 @@ policy:
     }
 
     #[test]
+    fn macos_notarization_rehearsal_remains_private_and_commit_bound() {
+        let rehearsal = fs::read_to_string(
+            workspace_root().join(".github/workflows/macos-notarization-rehearsal.yml"),
+        )
+        .unwrap();
+
+        assert!(
+            rehearsal.contains("commit_sha:")
+                && rehearsal.contains("rehearsal_confirmation:")
+                && rehearsal.contains("rehearse-macos-notarization-${AIRWIKI_RELEASE_COMMIT}")
+                && rehearsal.contains("runs-on: macos-14")
+                && rehearsal.contains("environment: macos-signing")
+                && rehearsal.contains("timeout-minutes: 90")
+                && rehearsal.contains("actions: read")
+                && rehearsal.contains("checks: read")
+                && rehearsal.contains("contents: read")
+                && rehearsal.contains("Frontend checks (macos-arm64)")
+                && rehearsal.contains("Frontend checks (windows-x64)")
+                && rehearsal.contains("Rust checks (macos-14)")
+                && rehearsal.contains("Rust checks (windows-2022)")
+                && rehearsal.contains("Advisories, licenses and sources")
+                && rehearsal.contains("Launch site checks")
+                && rehearsal.contains("./packaging/release-macos.sh")
+                && rehearsal.contains("./packaging/verify-macos-release.sh")
+                && rehearsal.contains("Rehearsal commit changed before signing and notarization.")
+                && rehearsal.contains("name: Revalidate source and green release gates before signing and notarization")
+                && rehearsal.contains("https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$commit/check-runs?per_page=100")
+                && rehearsal
+                    .contains("Revalidate source and green release gates before recording receipt")
+                && rehearsal.contains("must have exactly one run")
+                && rehearsal.contains(".app.slug == \"github-actions\"")
+                && rehearsal.contains(".app.id == 15368")
+                && rehearsal.contains("Record non-binary rehearsal receipt")
+                && rehearsal.contains("airwiki-macos-notarization-rehearsal-receipt-")
+                && rehearsal.contains("macos-notarization-rehearsal-receipt.json")
+                && rehearsal.contains(
+                    "No installer, updater archive, signature, tag, release, or updater manifest"
+                )
+                && rehearsal.contains("retention-days: 14")
+                && !rehearsal.contains("name: airwiki-macos-arm64-notarization-rehearsal-")
+                && !rehearsal.contains("path: |\n            target/packages/macos")
+                && !rehearsal.contains("    Sign-off\n")
+                && !rehearsal.contains("id-token:")
+                && !rehearsal.contains("gh release")
+                && !rehearsal.contains("contents: write")
+                && !rehearsal.contains("generate-update-manifest.py")
+                && !rehearsal.contains("packaging/release_assets.py")
+                && !rehearsal.contains("][0]")
+        );
+        let pre_secret_revalidation = rehearsal
+            .find("name: Revalidate source and green release gates before signing and notarization")
+            .unwrap();
+        let signing = rehearsal
+            .find("name: Sign, notarize and verify rehearsal bytes")
+            .unwrap();
+        let next_step = rehearsal[..signing].rfind("\n      - ").unwrap();
+        assert!(
+            pre_secret_revalidation < signing
+                && next_step + "\n      - ".len() == signing
+                && !rehearsal[pre_secret_revalidation..next_step].contains("secrets."),
+            "the credential-free revalidation must immediately precede the signing step"
+        );
+    }
+
+    #[test]
     fn tauri_window_icons_match_the_packaging_brand_assets() {
         let root = workspace_root();
         let build_script = fs::read_to_string(root.join("apps/desktop/build.rs")).unwrap();

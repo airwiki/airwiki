@@ -116,6 +116,31 @@ notarization role, and approving protected environments are human account
 administration gates. Do not run the stable workflow until the account owner has
 confirmed those approvals; no CI setting substitutes for them.
 
+## Rehearse macOS signing and notarization
+
+After the `macos-signing` environment is configured, run **Rehearse macOS
+notarization** from `main` before preparing any stable draft. Provide the exact
+current 40-character `commit_sha` and set `rehearsal_confirmation` to exactly
+`rehearse-macos-notarization-<commit_sha>`. The workflow permits only the clean,
+current green tip of `airwiki/airwiki` `main`, uses the same protected macOS
+identity and ephemeral keychain/API-key handling as release preparation, and
+verifies the final DMG and updater archive. Immediately before recording any
+evidence it again requires that the checkout and `origin/main` resolve to that SHA,
+that the checkout is clean, and that every named release context has exactly one
+successful run from the GitHub Actions app: both Frontend and Rust platform
+checks, Advisories/licenses/sources, and Launch site checks. It repeats that
+same revalidation in a separate, credential-free step immediately before the
+step that creates a keychain, decodes a secret or submits anything for
+notarization. `Sign-off` is intentionally not queried on a
+`main` SHA: it is a pull-request-only DCO check, enforced by branch protection
+before the merge that created `main`. It never uploads the signed binaries:
+GitHub Actions artifacts are not a private package channel. The only retained
+evidence is a 14-day JSON receipt with the commit, version, verification result,
+artifact names and SHA-256 values; it contains no installer bytes, paths,
+signing identity or credentials. It cannot create tags or releases, publish
+`latest.json`, or request OIDC credentials; a successful rehearsal is evidence
+of the macOS path only and does not promote a release.
+
 Before enabling the protected job, prevalidate the project entity with SSL.com
 and purchase the OV code-signing certificate plus required eSigner tier. Keep
 the CKA installer from the reviewed `SSLcom/eSignerCKA` release and CodeSignTool

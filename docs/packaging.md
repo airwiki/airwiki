@@ -380,3 +380,11 @@ re-downloads and verifies that draft on both platforms, then waits for the
 protected human release approval. The stable manifest is derived from final
 signed bytes and becomes public with the installers. Archived workflows remain
 inert historical references and are not release inputs.
+
+Before any stable draft, **Rehearse macOS notarization** can exercise the
+protected macOS signing path against the exact green `main` tip. It creates no
+tag, release, updater manifest or public download. It retains no installer
+bytes: GitHub Actions artifacts are not a private package channel. The 14-day
+workflow artifact is only a non-sensitive receipt of commit, version,
+verification result, artifact names and hashes. Follow the exact dispatch inputs
+in the [release process](release-process.md#rehearse-macos-signing-and-notarization).

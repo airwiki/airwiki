@@ -9560,6 +9560,8 @@ policy:
                 && rehearsal.contains("./packaging/release-macos.sh")
                 && rehearsal.contains("./packaging/verify-macos-release.sh")
                 && rehearsal.contains("Rehearsal commit changed before signing and notarization.")
+                && rehearsal.contains("name: Revalidate source and green release gates before signing and notarization")
+                && rehearsal.contains("https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$commit/check-runs?per_page=100")
                 && rehearsal
                     .contains("Revalidate source and green release gates before recording receipt")
                 && rehearsal.contains("must have exactly one run")
@@ -9581,6 +9583,19 @@ policy:
                 && !rehearsal.contains("generate-update-manifest.py")
                 && !rehearsal.contains("packaging/release_assets.py")
                 && !rehearsal.contains("][0]")
+        );
+        let pre_secret_revalidation = rehearsal
+            .find("name: Revalidate source and green release gates before signing and notarization")
+            .unwrap();
+        let signing = rehearsal
+            .find("name: Sign, notarize and verify rehearsal bytes")
+            .unwrap();
+        let next_step = rehearsal[..signing].rfind("\n      - ").unwrap();
+        assert!(
+            pre_secret_revalidation < signing
+                && next_step + "\n      - ".len() == signing
+                && !rehearsal[pre_secret_revalidation..next_step].contains("secrets."),
+            "the credential-free revalidation must immediately precede the signing step"
         );
     }
 

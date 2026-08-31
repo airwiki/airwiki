@@ -119,14 +119,7 @@ jobs:
           corepack prepare pnpm@10.18.3 --activate
           pnpm --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
           pnpm --dir apps/desktop/ui run licenses:check macos-arm64
-      - name: Sign, notarize and verify rehearsal bytes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64 }}
-          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
-          APPLE_API_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_BASE64 }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - name: Revalidate source and green release gates before signing and notarization
         shell: bash
         run: |
           set -euo pipefail
@@ -141,7 +134,9 @@ jobs:
             echo "Rehearsal source checkout is not clean before signing and notarization." >&2
             exit 1
           fi
-          check_runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$commit/check-runs?per_page=100")"
+          check_runs="$(curl --fail --silent --show-error --location \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/$commit/check-runs?per_page=100")"
           while IFS= read -r check; do
             [[ -n "$check" ]] || continue
             matching_count="$(jq -r --arg name "$check" \
@@ -159,7 +154,16 @@ jobs:
               exit 1
             fi
           done <<<"$AIRWIKI_REQUIRED_RELEASE_CHECKS"
-
+      - name: Sign, notarize and verify rehearsal bytes
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_API_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_BASE64 }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
           required=(
             AIRWIKI_SIGNING_IDENTITY
             AIRWIKI_MACOS_TEAM_ID

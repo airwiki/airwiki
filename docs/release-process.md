@@ -129,8 +129,9 @@ evidence it again requires that the checkout and `origin/main` resolve to that S
 that the checkout is clean, and that every named release context has exactly one
 successful run from the GitHub Actions app: both Frontend and Rust platform
 checks, Advisories/licenses/sources, and Launch site checks. It repeats that
-same revalidation immediately before it creates a keychain, decodes a secret or
-submits anything for notarization. `Sign-off` is intentionally not queried on a
+same revalidation in a separate, credential-free step immediately before the
+step that creates a keychain, decodes a secret or submits anything for
+notarization. `Sign-off` is intentionally not queried on a
 `main` SHA: it is a pull-request-only DCO check, enforced by branch protection
 before the merge that created `main`. It never uploads the signed binaries:
 GitHub Actions artifacts are not a private package channel. The only retained

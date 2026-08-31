@@ -1,13 +1,9 @@
 # Code signing policy
 
-Free code signing provided by [SignPath.io](https://about.signpath.io),
-certificate by [SignPath Foundation](https://signpath.org).
-
-This policy applies to Windows release candidates signed for the
-[airwiki/airwiki](https://github.com/airwiki/airwiki) repository. AirWiki is
-Apache-2.0 software. Signing does not turn a development candidate into a
-supported public release; the release checklist and installed-platform gates
-remain authoritative.
+AirWiki has no operational Windows public-trust signing provider or stable
+updater channel. The only current public binary channel is the unsupported
+technical pre-release described below. AirWiki is Apache-2.0 software; build
+provenance does not turn a development candidate into a supported release.
 
 ## Unsigned technical pre-release boundary
 
@@ -19,20 +15,30 @@ or updater credentials and does not weaken any stable-release gate:
 - the source is the exact workflow commit in `airwiki/airwiki` and the MSI
   packages are built and validated on a GitHub-hosted Windows runner;
 - the workflow requires an unsigned Authenticode state, packages the complete
-  commit and workflow-run provenance, and includes SHA-256 values for both
-  localized installers;
+  commit and workflow-run provenance, includes SHA-256 values, and creates a
+  GitHub Artifact Attestation for every final release asset;
 - a public beta is built together with the ad-hoc, non-notarized macOS candidate
   and the Linux federation server, waits for protected human publication, uses
-  an immutable `v<version>-beta.<number>` tag, and is visibly marked as a
-  non-latest GitHub pre-release;
+  an immutable `v<version>-beta.<number>` tag, re-verifies the downloaded assets
+  against the official repository, workflow and commit, and is visibly marked
+  as a non-latest GitHub pre-release;
 - neither temporary nor public-beta assets contain `latest.json`, enter the
   updater, claim stable support or reuse the signed promotion path; and
 - testers keep Windows protections enabled and stop when a device or
   organization policy does not permit unsigned beta software.
 
-These controls establish source and transport provenance for a constrained beta
-but cannot provide a Windows publisher identity. Only the protected SignPath
-workflow below can produce a Windows candidate eligible for stable promotion.
+These controls establish build provenance for a constrained beta but do not
+establish software safety or a Windows publisher identity. Only a separately
+protected native-signing workflow can produce a Windows candidate eligible for
+stable promotion.
+
+## Deferred stable-signing design
+
+The SignPath controls below document a previously selected future stable design.
+They are not operational, are not used by technical pre-releases and must not be
+described as current distribution support. Activating or replacing that design,
+or enabling the updater, requires a new reviewed decision and every applicable
+installed-platform release gate.
 
 ## Roles
 

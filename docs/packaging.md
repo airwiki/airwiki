@@ -1,15 +1,17 @@
 # Candidate packaging
 
 AirWiki produces internal development candidates with the pinned Tauri v2 CLI
-and bundler. The protected public workflows add native signing, notarization,
-updater signatures, exact release metadata and a human promotion gate. Their
-existence does not make a candidate supported: every applicable item in the
-[public release checklist](release-checklist.md) must pass first. See the
-[release process](release-process.md) for repository configuration and operation.
+and bundler. The retained stable-release workflows describe future native
+signing, notarization, updater signatures, exact release metadata and human
+promotion gates; they are not an operational distribution channel. Every
+applicable item in the [public release checklist](release-checklist.md) must pass
+before activation. See the [release process](release-process.md) for that
+deferred design.
 
-A separate protected technical pre-release path may make unsigned test
-candidates publicly downloadable without claiming stable support or entering
-the updater channel. ADR 0012 defines that boundary.
+The protected technical pre-release path is the only current public binary
+channel. It may make unsigned test candidates publicly downloadable without
+claiming stable support or entering the updater channel. ADR 0012 and ADR 0014
+define that boundary.
 
 Installers contain the desktop application, local MCP bridge, platform runtime,
 licenses, and platform-specific integration assets. Model weights and future
@@ -224,14 +226,18 @@ escapes, invalid formats and output reuse, then emits a closed asset set:
 
 The publication job has the only `contents: write` token and waits at the
 protected `public-release` environment after all platform jobs pass. It creates
-or safely recovers only an exact private draft, uploads the closed set,
-re-downloads every asset and verifies it independently. Only then does it create
-or validate the immutable `v<version>-beta.<number>` tag at the workflow commit
-and publish the draft with GitHub pre-release enabled and Latest disabled. It
-never creates `latest.json`, enters signing environments, requests SignPath,
-reads updater keys, rewrites an already public beta or promotes those bytes into
-the stable workflow. A failed attempt can resume only an exact private draft at
-the same immutable tag and commit with no unexpected assets.
+or safely recovers only an exact private draft after GitHub has attested every
+final asset using the workflow's OIDC identity. It uploads the closed set,
+re-downloads every asset, verifies it independently, and verifies each
+downloaded file against the official repository, workflow, `main` ref and exact
+commit on a GitHub-hosted runner. Only then does it create or validate the
+immutable `v<version>-beta.<number>` tag at the workflow commit and publish the
+draft with GitHub pre-release enabled and Latest disabled. It never creates
+`latest.json`, enters signing environments, requests SignPath, reads updater
+keys, rewrites an already public beta or promotes those bytes into the stable
+workflow. A failed attempt can resume only an exact private draft at the same
+immutable tag and commit with no unexpected assets. The attestation proves
+build provenance, not software safety or an operating-system publisher identity.
 
 ### Repackage an already validated internal bundle
 

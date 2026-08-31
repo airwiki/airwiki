@@ -95,10 +95,20 @@ class TechnicalPrereleaseTests(unittest.TestCase):
         self.assertIn("intentionally unsigned", notice)
         self.assertIn("not notarized", notice)
         self.assertIn("not the AirWiki desktop application", notice)
+        self.assertIn("build-provenance attestation", notice)
         self.assertNotIn(
             "latest", MODULE.prerelease_tag(self.version, self.beta_number)
         )
         self.assertIn("not available for Linux", notes)
+        self.assertIn("gh attestation verify <asset>", notes)
+        self.assertIn(
+            "--signer-workflow airwiki/airwiki/.github/workflows/package-pilot.yml",
+            notes,
+        )
+        self.assertIn("--source-ref refs/heads/main", notes)
+        self.assertIn(f"--source-digest {self.commit}", notes)
+        self.assertIn("not safety or an operating-system", notes)
+        self.assertIn("publisher identity", notes)
 
     def test_symlinked_input_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -230,6 +240,24 @@ class TechnicalPrereleaseWorkflowTests(unittest.TestCase):
         self.assertIn("technical_prerelease.py prepare", publish)
         self.assertIn("gh release download", publish)
         self.assertIn("technical_prerelease.py verify", publish)
+        self.assertIn("gh attestation verify", publish)
+
+    def test_attestation_covers_final_assets_before_draft_creation(self) -> None:
+        publish = self.workflow.split("  publish-technical-prerelease:", 1)[1]
+        self.assertIn("attestations: write", publish)
+        self.assertIn("id-token: write", publish)
+        self.assertIn(
+            "uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6",
+            publish,
+        )
+        self.assertIn(
+            'subject-path: "target/technical-prerelease/assets/*"', publish
+        )
+        prepare_index = publish.index("technical_prerelease.py prepare")
+        attest_index = publish.index("uses: actions/attest@")
+        draft_index = publish.index("id: draft")
+        self.assertLess(prepare_index, attest_index)
+        self.assertLess(attest_index, draft_index)
 
     def test_tag_is_bound_after_draft_reverification_before_publication(self) -> None:
         publish = self.workflow.split("  publish-technical-prerelease:", 1)[1]
@@ -240,13 +268,15 @@ class TechnicalPrereleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn(premature_tag_check, publish)
 
         verify_index = publish.index("technical_prerelease.py verify")
+        attestation_verify_index = publish.index("gh attestation verify")
         tag_creation_index = publish.index(
             '"repos/$GITHUB_REPOSITORY/git/refs"'
         )
         release_publication_index = publish.index(
             '"repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"'
         )
-        self.assertLess(verify_index, tag_creation_index)
+        self.assertLess(verify_index, attestation_verify_index)
+        self.assertLess(attestation_verify_index, tag_creation_index)
         self.assertLess(tag_creation_index, release_publication_index)
         self.assertIn("published_commit=", publish[release_publication_index:])
 

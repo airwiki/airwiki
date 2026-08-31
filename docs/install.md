@@ -50,10 +50,21 @@ For each candidate:
    Get-FileHash -Algorithm SHA256 .\<installer>.msi
    ```
 
-4. Use a non-production test account or device. Do not disable or relax any
+4. Verify that the exact downloaded asset was produced by the official GitHub
+   workflow on a GitHub-hosted runner:
+
+   ```text
+   gh attestation verify <asset> --repo airwiki/airwiki --signer-workflow airwiki/airwiki/.github/workflows/package-pilot.yml --source-ref refs/heads/main --source-digest <commit> --deny-self-hosted-runners
+   ```
+
+   This establishes build provenance, not software safety or an
+   operating-system publisher identity. It does not replace Authenticode,
+   Developer ID or notarization. Use the complete commit shown in the release
+   notes and `PROVENANCE.json` for `<commit>`.
+5. Use a non-production test account or device. Do not disable or relax any
    platform or organization protection. If Windows or macOS blocks the
    candidate under current policy, stop.
-5. Choose the platform asset described below and report the candidate commit
+6. Choose the platform asset described below and report the candidate commit
    with reproducible PASS/FAIL facts. Do not attach documents, queries,
    identities, addresses, credentials, databases or raw logs.
 

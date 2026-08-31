@@ -136,7 +136,7 @@ Read the [threat model](docs/threat-model.md) for complete trust boundaries and 
 | Linux x64 | Federation index server | Maintainer service, not AirWiki Desktop |
 | Linux desktop, web, mobile | None | Not currently supported |
 
-Reviewed builds may appear on [GitHub Releases](https://github.com/airwiki/airwiki/releases) as clearly marked technical pre-releases. They are permanent manual downloads, but they are not `Latest`, are never selected by the updater, and do not establish a Windows or macOS publisher identity. Verify `SHA256SUMS.txt`, keep operating-system and organization protections enabled, and stop when local policy blocks the candidate.
+Reviewed builds may appear on [GitHub Releases](https://github.com/airwiki/airwiki/releases) as clearly marked technical pre-releases. They are permanent manual downloads, but they are not `Latest`, are never selected by the updater, and do not establish a Windows or macOS publisher identity. Verify `SHA256SUMS.txt` and the GitHub build-provenance attestation, keep operating-system and organization protections enabled, and stop when local policy blocks the candidate.
 
 After the complete acceptance checklist passes, signed installers will use the separate [stable download](https://github.com/airwiki/airwiki/releases/latest). See [Installing and running AirWiki](docs/install.md) for current candidate requirements and first-run behavior.
 
@@ -219,6 +219,6 @@ AirWiki does not currently provide OCR, DOCX ingestion, image/audio/video proces
 
 ## License
 
-AirWiki is open source under the [Apache License 2.0](LICENSE). The current public technical beta is unsigned or unnotarized. When signed Windows development candidates are produced, signing is provided by [SignPath.io](https://about.signpath.io), with a certificate from the [SignPath Foundation](https://signpath.org), under the project's [code signing policy](docs/code-signing-policy.md).
+AirWiki is open source under the [Apache License 2.0](LICENSE). The current public technical beta is unsigned or unnotarized and uses SHA-256 plus GitHub Artifact Attestations for build provenance. No native Windows public-signing provider or stable updater channel is currently operational. See the project's [code signing policy](docs/code-signing-policy.md).
 
 ChatGPT, Codex, Claude, and Gemini names and marks belong to OpenAI, Anthropic, and Google respectively. AirWiki uses their official artwork only to identify optional integrations; this does not imply sponsorship or endorsement. See [third-party notices](THIRD_PARTY_NOTICES.md).

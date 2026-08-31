@@ -4,6 +4,7 @@
 - Date: 2026-08-25
 - Refines: ADR 0003 (prerelease distribution) and ADR 0009 (unsigned Windows
   candidates)
+- Refined by: ADR 0014 (GitHub build-provenance attestations)
 
 ## Context
 

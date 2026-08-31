@@ -21,6 +21,7 @@ tests, operational runbooks or evaluation reports.
 | [0011](0011-portable-project-memory.md) | Store portable project memory in `.airwiki` | Accepted | 2026-08-23 | Supersedes ADR 0002 project selection and ADR 0010 private-only application memory |
 | [0012](0012-public-technical-prereleases.md) | Publish unsigned technical candidates as non-latest pre-releases | Accepted | 2026-08-25 | Refines ADR 0003 prerelease distribution and ADR 0009 unsigned Windows candidates |
 | [0013](0013-connected-app-federated-search.md) | Let connected applications search accessible federated knowledge | Accepted | 2026-08-29 | Refines ADR 0002, ADR 0005 and ADR 0008 |
+| [0014](0014-github-attested-technical-prereleases.md) | Attest public technical prerelease assets with GitHub | Accepted | 2026-08-31 | Refines ADR 0012; defers stable native signing and updater activation |
 
 ## Policy
 

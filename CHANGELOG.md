@@ -4,6 +4,12 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Added GitHub Artifact Attestations to the exact final assets of protected
+  public technical prereleases. Testers can bind a downloaded file to the
+  official repository, commit and release workflow without a project signing
+  key; the attestation is explicitly not Authenticode, Developer ID,
+  notarization, an updater channel or a guarantee of software safety.
+
 - Refined the desktop's cross-platform interaction system for macOS and Windows:
   compact controls now use platform-appropriate system text, layouts reflow at
   the supported minimum window and enlarged text sizes, keyboard focus and view

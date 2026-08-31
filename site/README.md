@@ -57,6 +57,11 @@ decision. Before enabling public access:
    nosniff`, a restrictive `Permissions-Policy`, and an appropriate
    `Referrer-Policy`. Test the exact deployed headers rather than relying only
    on the source declaration.
+   The HTML also carries an early CSP meta element and a referrer meta element
+   as limited defense in depth when a private preview layer omits response
+   headers. Those elements do not implement `frame-ancestors`, COOP, CORP,
+   `Permissions-Policy`, `X-Content-Type-Options`, or `X-Frame-Options`,
+   and never satisfy this production-header gate.
 5. Do not add a canonical URL, `og:url`, or social-card URL until a hosting
    owner and canonical domain have been explicitly approved. The HTML contains
    a reminder comment rather than an invented URL.

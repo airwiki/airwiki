@@ -97,19 +97,19 @@ Third-party packages: **702**. Unique legal texts: **389**.
 | cpubits | 0.1.1 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [003736bc9840](#sha256-003736bc98408b53511b9cc8ff5d1af3bf0a8f17d53841cc39d8ab1b96a195b0), [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5) |
 | cpufeatures | 0.2.17 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [ae9baa7beea9](#sha256-ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985) |
 | cpufeatures | 0.3.0 | MIT OR Apache-2.0 | [upstream](https://github.com/RustCrypto/utils) | [a9040321c371](#sha256-a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5), [ae9baa7beea9](#sha256-ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985) |
-| cranelift-assembler-x64 | 0.134.3 | Apache-2.0 WITH LLVM-exception | `registry+https://github.com/rust-lang/crates.io-index` | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| cranelift-assembler-x64-meta | 0.134.3 | Apache-2.0 WITH LLVM-exception | `registry+https://github.com/rust-lang/crates.io-index` | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| cranelift-bforest | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| cranelift-bitset | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| cranelift-codegen | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| cranelift-codegen-meta | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| cranelift-codegen-shared | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| cranelift-control | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| cranelift-entity | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| cranelift-frontend | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| cranelift-isle | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift/isle) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| cranelift-native | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| cranelift-srcgen | 0.134.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| cranelift-assembler-x64 | 0.134.4 | Apache-2.0 WITH LLVM-exception | `registry+https://github.com/rust-lang/crates.io-index` | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| cranelift-assembler-x64-meta | 0.134.4 | Apache-2.0 WITH LLVM-exception | `registry+https://github.com/rust-lang/crates.io-index` | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| cranelift-bforest | 0.134.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-bitset | 0.134.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| cranelift-codegen | 0.134.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-codegen-meta | 0.134.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-codegen-shared | 0.134.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-control | 0.134.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-entity | 0.134.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-frontend | 0.134.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-isle | 0.134.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime/tree/main/cranelift/isle) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| cranelift-native | 0.134.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| cranelift-srcgen | 0.134.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | crc32fast | 1.5.0 | MIT OR Apache-2.0 | [upstream](https://github.com/srijs/rust-crc32fast) | [61d383b05b87](#sha256-61d383b05b87d78f94d2937e2580cce47226d17823c0430fbcad09596537efcf), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | critical-section | 1.2.0 | MIT OR Apache-2.0 | [upstream](https://github.com/rust-embedded/critical-section) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [fee6bdac4b91](#sha256-fee6bdac4b917351332567b9fd5013c2ef3c847dd113fd6216cf28e96637a157) |
 | crossbeam-channel | 0.5.16 | MIT OR Apache-2.0 | [upstream](https://github.com/crossbeam-rs/crossbeam) | [5734ed989dfc](#sha256-5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [b16db96b93b1](#sha256-b16db96b93b1d7cf7bea533f572091ec6bca3234fbe0a83038be772ff391a44c) |
@@ -414,8 +414,8 @@ Third-party packages: **702**. Unique legal texts: **389**.
 | prost | 0.14.4 | Apache-2.0 | [upstream](https://github.com/tokio-rs/prost) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | prost-derive | 0.14.4 | Apache-2.0 | [upstream](https://github.com/tokio-rs/prost) | [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | pulldown-cmark | 0.13.4 | MIT | [upstream](https://github.com/raphlinus/pulldown-cmark) | [c4f10f55904b](#sha256-c4f10f55904bdb9f27d3fbf94c354926d6cfe8b982276e556238c258941b243b) |
-| pulley-interpreter | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime/tree/main/pulley) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| pulley-macros | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime/tree/main/pulley/macros) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| pulley-interpreter | 47.0.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime/tree/main/pulley) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| pulley-macros | 47.0.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime/tree/main/pulley/macros) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | quick-protobuf | 0.8.1 | MIT | [upstream](https://github.com/tafia/quick-protobuf) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | quick-protobuf-codec | 0.3.1 | MIT | [upstream](https://github.com/libp2p/rust-libp2p) | [508a77d2e7b5](#sha256-508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1) |
 | quick-xml | 0.41.0 | MIT | [upstream](https://github.com/tafia/quick-xml) | [f0cf9b1c62bb](#sha256-f0cf9b1c62bbe3bd3a69f5f79c7158f513f612b4940a0a812d1db39d605318bc) |
@@ -628,18 +628,18 @@ Third-party packages: **702**. Unique legal texts: **389**.
 | wasm-encoder | 0.252.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | [upstream](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasm-encoder) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
 | wasmparser | 0.252.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | [upstream](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmparser) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
 | wasmprinter | 0.252.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | [upstream](https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wasmprinter) | [23f18e03dc49](#sha256-23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2), [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| wasmtime | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| wasmtime-environ | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| wasmtime-internal-component-macro | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| wasmtime-internal-component-util | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| wasmtime-internal-core | 47.0.3 | Apache-2.0 WITH LLVM-exception | `registry+https://github.com/rust-lang/crates.io-index` | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| wasmtime-internal-cranelift | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| wasmtime-internal-fiber | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| wasmtime-internal-jit-debug | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| wasmtime-internal-jit-icache-coherence | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| wasmtime-internal-unwinder | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
-| wasmtime-internal-versioned-export-macros | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
-| wasmtime-internal-wit-bindgen | 47.0.3 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime | 47.0.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-environ | 47.0.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-internal-component-macro | 47.0.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-component-util | 47.0.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-core | 47.0.4 | Apache-2.0 WITH LLVM-exception | `registry+https://github.com/rust-lang/crates.io-index` | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-cranelift | 47.0.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-internal-fiber | 47.0.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-internal-jit-debug | 47.0.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-jit-icache-coherence | 47.0.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-unwinder | 47.0.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [a6c48161a09a](#sha256-a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a) |
+| wasmtime-internal-versioned-export-macros | 47.0.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
+| wasmtime-internal-wit-bindgen | 47.0.4 | Apache-2.0 WITH LLVM-exception | [upstream](https://github.com/bytecodealliance/wasmtime) | [c71d239df917](#sha256-c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4) |
 | web-time | 1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/daxpedda/web-time) | [54a744942eb3](#sha256-54a744942eb3fa63a74d8d359989ed6962c04f3f10ff20cfa08ff8aa7efbe4e6), [f428305bbf2e](#sha256-f428305bbf2e70fbd807af0f3c7ac1b7acfb95311640f451e9d2e48db6d7e96b) |
 | web_atoms | 0.2.5 | MIT OR Apache-2.0 | [upstream](https://github.com/servo/html5ever) | [86dd7f026f91](#sha256-86dd7f026f916daf7511e39951ad8ea8cf55a8db67ae64060dacf829761c18f3), [a60eea817514](#sha256-a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2) |
 | webpki-root-certs | 1.0.8 | CDLA-Permissive-2.0 | [upstream](https://github.com/rustls/webpki-roots) | [e271993808fe](#sha256-e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8) |
@@ -18371,25 +18371,25 @@ limitations under the License.
 
 Used by:
 
-- `cranelift-bforest 0.134.3 / LICENSE`
-- `cranelift-codegen 0.134.3 / LICENSE`
-- `cranelift-codegen-meta 0.134.3 / LICENSE`
-- `cranelift-codegen-shared 0.134.3 / LICENSE`
-- `cranelift-control 0.134.3 / LICENSE`
-- `cranelift-entity 0.134.3 / LICENSE`
-- `cranelift-frontend 0.134.3 / LICENSE`
-- `cranelift-native 0.134.3 / LICENSE`
+- `cranelift-bforest 0.134.4 / LICENSE`
+- `cranelift-codegen 0.134.4 / LICENSE`
+- `cranelift-codegen-meta 0.134.4 / LICENSE`
+- `cranelift-codegen-shared 0.134.4 / LICENSE`
+- `cranelift-control 0.134.4 / LICENSE`
+- `cranelift-entity 0.134.4 / LICENSE`
+- `cranelift-frontend 0.134.4 / LICENSE`
+- `cranelift-native 0.134.4 / LICENSE`
 - `regalloc2 0.15.2 / LICENSE`
 - `rustix 1.1.4 / LICENSE-Apache-2.0_WITH_LLVM-exception`
 - `target-lexicon 0.13.5 / LICENSE`
 - `wasm-encoder 0.252.0 / LICENSE-Apache-2.0_WITH_LLVM-exception`
 - `wasmparser 0.252.0 / LICENSE-Apache-2.0_WITH_LLVM-exception`
 - `wasmprinter 0.252.0 / LICENSE-Apache-2.0_WITH_LLVM-exception`
-- `wasmtime 47.0.3 / LICENSE`
-- `wasmtime-environ 47.0.3 / LICENSE`
-- `wasmtime-internal-cranelift 47.0.3 / LICENSE`
-- `wasmtime-internal-fiber 47.0.3 / LICENSE`
-- `wasmtime-internal-unwinder 47.0.3 / LICENSE`
+- `wasmtime 47.0.4 / LICENSE`
+- `wasmtime-environ 47.0.4 / LICENSE`
+- `wasmtime-internal-cranelift 47.0.4 / LICENSE`
+- `wasmtime-internal-fiber 47.0.4 / LICENSE`
+- `wasmtime-internal-unwinder 47.0.4 / LICENSE`
 - `wit-parser 0.252.0 / LICENSE-Apache-2.0_WITH_LLVM-exception`
 
 ```text
@@ -21934,17 +21934,17 @@ Used by:
 - `ciborium 0.2.2 / LICENSE`
 - `ciborium-io 0.2.2 / LICENSE`
 - `ciborium-ll 0.2.2 / LICENSE`
-- `cranelift-assembler-x64 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
-- `cranelift-assembler-x64-meta 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
-- `cranelift-bitset 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
-- `cranelift-isle 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
-- `cranelift-srcgen 0.134.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `cranelift-assembler-x64 0.134.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `cranelift-assembler-x64-meta 0.134.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `cranelift-bitset 0.134.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `cranelift-isle 0.134.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `cranelift-srcgen 0.134.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
 - `esaxx-rs 0.1.10 / LICENSE`
 - `fastembed 5.17.2 / LICENSE`
 - `lzma-rust2 0.15.8 / LICENSE`
 - `ntapi 0.4.3 / LICENSE-APACHE`
-- `pulley-interpreter 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
-- `pulley-macros 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `pulley-interpreter 47.0.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `pulley-macros 47.0.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
 - `quinn 0.11.11 / LICENSE-APACHE`
 - `quinn-proto 0.11.16 / LICENSE-APACHE`
 - `quinn-udp 0.5.15 / LICENSE-APACHE`
@@ -21959,13 +21959,13 @@ Used by:
 - `sys-locale 0.3.2 / LICENSE-APACHE`
 - `tokenizers 0.22.2 / LICENSE`
 - `ureq 3.3.0 / LICENSE-APACHE`
-- `wasmtime-internal-component-macro 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
-- `wasmtime-internal-component-util 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
-- `wasmtime-internal-core 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
-- `wasmtime-internal-jit-debug 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
-- `wasmtime-internal-jit-icache-coherence 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
-- `wasmtime-internal-versioned-export-macros 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
-- `wasmtime-internal-wit-bindgen 47.0.3 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-component-macro 47.0.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-component-util 47.0.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-core 47.0.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-jit-debug 47.0.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-jit-icache-coherence 47.0.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-versioned-export-macros 47.0.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
+- `wasmtime-internal-wit-bindgen 47.0.4 / standard text for Apache-2.0 WITH LLVM-exception (the crate includes no separate file)`
 
 ```text
                                  Apache License

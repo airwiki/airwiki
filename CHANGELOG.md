@@ -4,6 +4,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Updated Wasmtime from 47.0.3 to 47.0.4 before packaging to address
+  RUSTSEC-2026-0268 and RUSTSEC-2026-0269.
+
 - Added GitHub Artifact Attestations to the exact final assets of protected
   public technical prereleases. Testers can bind a downloaded file to the
   official repository, commit and release workflow without a project signing

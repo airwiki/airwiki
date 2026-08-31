@@ -101,19 +101,34 @@ writeFileSync(join(okfFixture, 'architecture', 'verified.md'), [
 
 async function waitForWebDriver(child) {
   const deadline = Date.now() + 30_000;
+  let lastError;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error(`AirWiki exited before WebDriver became ready (${child.exitCode})`);
     }
     try {
       const response = await fetch('http://127.0.0.1:4445/status');
-      if (response.ok) return;
-    } catch {
-      // Startup races are expected until the local server binds.
+      if (response.ok) {
+        const sessionId = await createWebDriverSession();
+        try {
+          return;
+        } finally {
+          await deleteWebDriverSession(sessionId);
+        }
+      }
+    } catch (error) {
+      lastError = error;
+      // Startup races are expected until the local server can attach to a window.
     }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
   }
-  throw new Error('AirWiki WebDriver did not become ready within 30 seconds');
+  const detail = lastError instanceof Error ? ` (${lastError.message})` : '';
+  const appState = child.exitCode === null
+    ? 'AirWiki is still running'
+    : `AirWiki exited with ${child.exitCode}`;
+  throw new Error(
+    `AirWiki WebDriver did not become ready with main window within 30 seconds; ${appState}${detail}`
+  );
 }
 
 async function stopApp(child) {
@@ -131,7 +146,12 @@ async function createWebDriverSession() {
   const response = await fetch('http://127.0.0.1:4445/session', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ capabilities: { alwaysMatch: {}, firstMatch: [{}] } })
+    body: JSON.stringify({
+      capabilities: {
+        alwaysMatch: { 'wdio:tauriServiceOptions': { windowLabel: 'main' } },
+        firstMatch: [{}]
+      }
+    })
   });
   if (!response.ok) {
     throw new Error(`could not create shutdown WebDriver session (${response.status})`);
@@ -142,6 +162,15 @@ async function createWebDriverSession() {
     throw new Error('shutdown WebDriver session returned no session ID');
   }
   return sessionId;
+}
+
+async function deleteWebDriverSession(sessionId) {
+  const response = await fetch(`http://127.0.0.1:4445/session/${sessionId}`, {
+    method: 'DELETE'
+  });
+  if (!response.ok) {
+    throw new Error(`could not close readiness WebDriver session (${response.status})`);
+  }
 }
 
 async function requestGracefulShutdown(child) {

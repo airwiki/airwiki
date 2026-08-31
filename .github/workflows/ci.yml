@@ -16,6 +16,28 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  launch-site:
+    name: Launch site checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - name: Activate pinned pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.18.3 --activate
+      - name: Install pinned launch-site dependencies
+        shell: bash
+        run: pnpm --dir site install --frozen-lockfile
+      - name: Build and verify launch site
+        shell: bash
+        run: pnpm --dir site check
+
   frontend:
     name: Frontend checks (${{ matrix.target }})
     strategy:

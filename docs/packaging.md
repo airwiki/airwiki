@@ -302,6 +302,9 @@ any pre-existing registration for either requested product code, and reparse
 points or paths outside the canonical Windows known-folder roots. The smoke
 revalidates the exact AirWiki identity, location and payload immediately before
 uninstalling; an incomplete or ambiguous state is preserved for manual cleanup.
+ARP is not the sole source of truth: the smoke also asks Windows Installer for
+the product state and rejects advertised, installed or otherwise non-absent
+product codes before installation.
 
 For a controlled Windows client, invoke it only with explicit authorization:
 
@@ -319,6 +322,14 @@ never uses `Win32_Product` and never removes user data roots. If an MSI client
 times out or returns a partial state, the smoke rechecks registration, payload,
 shortcut and installer-process state; it does not assume terminating the client
 has stopped Windows Installer, and leaves affected state for a human to inspect.
+It records only marker-parent directories created by that invocation, then
+removes those directories leaf-to-root only when they remain empty; existing
+roots and directories are never deleted.
+
+This manual smoke is for a trusted, independently verified artifact from the
+reviewed build path. It validates installation behavior, not the provenance or
+intent of an arbitrary local MSI, and does not claim to defend a hostile local
+installer or compromised host.
 
 The release scripts generate a deterministic WiX fragment for the exact
 runtime, helper, bridge, MCPB and legal-resource payload. Every component below

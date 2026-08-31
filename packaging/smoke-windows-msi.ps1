@@ -25,6 +25,7 @@ $RoamingMarkerPath = Join-Path $RoamingDataRoot "airwiki\AirWiki\msi-smoke-marke
 $script:InstalledProduct = $null
 $script:ManualCleanupRequired = $false
 $script:Markers = [Collections.Generic.List[object]]::new()
+$script:MarkerDirectories = [Collections.Generic.List[object]]::new()
 
 function Assert-RegularFile([string] $Path, [string] $Label) {
     $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
@@ -76,6 +77,44 @@ function ConvertTo-MsiGuid([string] $Value, [string] $Label) {
     $Parsed = [guid]::Empty
     if (-not [guid]::TryParse($Value, [ref]$Parsed)) { throw "$Label is not a GUID" }
     return "{$($Parsed.ToString().ToUpperInvariant())}"
+}
+
+function New-OwnedMarkerDirectories([string] $Parent, [string] $Root) {
+    $SafeParent = Assert-PathInsideRoot $Parent $Root "MSI smoke marker parent"
+    $CanonicalRoot = Get-CanonicalPath $Root "MSI smoke marker root"
+    $Relative = $SafeParent.Substring($CanonicalRoot.Length).TrimStart('\')
+    $Current = $CanonicalRoot
+    foreach ($Segment in $Relative.Split('\', [StringSplitOptions]::RemoveEmptyEntries)) {
+        $Current = Join-Path $Current $Segment
+        if (Test-Path -LiteralPath $Current) {
+            $Item = Get-Item -LiteralPath $Current -Force -ErrorAction Stop
+            if (-not $Item.PSIsContainer) { throw "MSI smoke marker parent is not a directory" }
+            continue
+        }
+        New-Item -ItemType Directory -Path $Current -ErrorAction Stop | Out-Null
+        $SafeCurrent = Assert-PathInsideRoot $Current $Root "MSI smoke marker directory"
+        $script:MarkerDirectories.Add([pscustomobject]@{ Path = $SafeCurrent; Root = $CanonicalRoot }) | Out-Null
+    }
+}
+
+function Remove-EmptyOwnedMarkerDirectories {
+    for ($Index = $script:MarkerDirectories.Count - 1; $Index -ge 0; $Index--) {
+        $Directory = $script:MarkerDirectories[$Index]
+        $null = Assert-PathInsideRoot $Directory.Path $Directory.Root "owned MSI smoke marker directory"
+        if (-not (Test-Path -LiteralPath $Directory.Path -PathType Container)) {
+            $script:MarkerDirectories.RemoveAt($Index)
+            continue
+        }
+        $Item = Get-Item -LiteralPath $Directory.Path -Force -ErrorAction Stop
+        if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "owned MSI smoke marker directory became a reparse point"
+        }
+        if (@(Get-ChildItem -LiteralPath $Directory.Path -Force -ErrorAction Stop).Count -ne 0) {
+            continue
+        }
+        Remove-Item -LiteralPath $Directory.Path -Force
+        $script:MarkerDirectories.RemoveAt($Index)
+    }
 }
 
 function Assert-WindowsMsiSmokeHost {
@@ -167,6 +206,19 @@ function Assert-NoProductCodeRegistration($Metadata) {
     }
 }
 
+function Assert-MsiProductNotInstalled($Metadata) {
+    $InstallerCom = $null
+    try {
+        $InstallerCom = New-Object -ComObject WindowsInstaller.Installer
+        $State = [int]$InstallerCom.ProductState($Metadata.ProductCode)
+    } finally {
+        if ($null -ne $InstallerCom) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($InstallerCom) }
+    }
+    if ($State -ne -1 -and $State -ne 2) {
+        throw "the MSI ProductCode is already known to Windows Installer (state $State); resolve it manually"
+    }
+}
+
 function Test-WebView2Present {
     $Paths = @(
         "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
@@ -207,6 +259,7 @@ function Assert-CleanPreflight($Metadata) {
         throw "the MSI smoke test requires no existing AirWiki installer, payload, or shortcut collision"
     }
     Assert-NoProductCodeRegistration $Metadata
+    Assert-MsiProductNotInstalled $Metadata
     if (@(Get-CimInstance Win32_Process -Filter "Name = 'airwiki.exe'").Count -ne 0) {
         throw "close AirWiki before the MSI smoke test"
     }
@@ -307,7 +360,7 @@ function New-Marker([string] $Path, $Metadata) {
     $SafePath = Assert-PathInsideRoot $Path $Root "MSI smoke marker"
     if (Test-Path -LiteralPath $SafePath) { throw "MSI smoke marker path already exists" }
     $Parent = Split-Path -Parent $SafePath
-    New-Item -ItemType Directory -Path $Parent -Force | Out-Null
+    New-OwnedMarkerDirectories $Parent $Root
     $SafePath = Assert-PathInsideRoot $SafePath $Root "MSI smoke marker"
     $Record = [ordered]@{
         schema = 1
@@ -343,6 +396,7 @@ function Remove-ExactMarkers {
         Remove-Item -LiteralPath $Marker.Path -Force
         $script:Markers.Remove($Marker) | Out-Null
     }
+    Remove-EmptyOwnedMarkerDirectories
 }
 
 function Remove-InstalledProduct($Metadata) {
@@ -378,6 +432,7 @@ try {
     Assert-CleanPreflight $Base
     if ($null -ne $Upgrade -and $Upgrade.ProductCode -cne $Base.ProductCode) {
         Assert-NoProductCodeRegistration $Upgrade
+        Assert-MsiProductNotInstalled $Upgrade
     }
     New-Marker $LocalMarkerPath $Base
     New-Marker $RoamingMarkerPath $Base
@@ -392,6 +447,10 @@ try {
         try { $null = Assert-InstalledProduct $Base } catch {
             $script:ManualCleanupRequired = $true
             throw
+        }
+        if ($Upgrade.ProductCode -cne $Base.ProductCode) {
+            Assert-NoProductCodeRegistration $Upgrade
+            Assert-MsiProductNotInstalled $Upgrade
         }
         Invoke-MsiExec @("/i", $Upgrade.Path, "/qn", "/norestart", "AUTOLAUNCHAPP=0") "MSI upgrade" $Upgrade.ProductCode
         if ($Upgrade.ProductCode -cne $Base.ProductCode) {
@@ -419,6 +478,11 @@ try {
     if ($script:Markers.Count -ne 0 -and $null -eq $script:InstalledProduct -and -not $script:ManualCleanupRequired) {
         try { Remove-ExactMarkers } catch {
             [Console]::Error.WriteLine("MSI smoke cleanup preserved changed or missing marker state: $($_.Exception.Message)")
+        }
+    }
+    if ($script:MarkerDirectories.Count -ne 0 -and -not $script:ManualCleanupRequired) {
+        try { Remove-EmptyOwnedMarkerDirectories } catch {
+            [Console]::Error.WriteLine("MSI smoke cleanup preserved marker-directory state: $($_.Exception.Message)")
         }
     }
 }

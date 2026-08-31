@@ -19,6 +19,7 @@
   export let onpickfolder: () => Promise<FolderSelection | null>;
   export let oncreatewiki: (name: string, token: string, continuous: boolean) => Promise<void>;
   export let onprepare: () => void;
+  export let onopenmodelsettings: () => void | Promise<void>;
   export let onfinish: () => void;
 
   const existingFolderWiki = snapshot.wikis.find((wiki) => wiki.origin === 'folder');
@@ -33,12 +34,15 @@
   let folderSkipped = false;
   let folderError = '';
   $: hasModelStep = Boolean(snapshot.model && !snapshot.model.active);
+  $: modelPreparing = snapshot.modelInstall !== null;
+  $: modelUnavailable = !snapshot.model?.active && snapshot.hardware?.canInstall === false;
+  $: modelSetupNeeded = !snapshot.model?.active && !modelUnavailable;
   $: reviewStep = hasModelStep ? 3 : 2;
   $: totalSteps = reviewStep + 1;
   $: stepIndexes = Array.from({ length: totalSteps }, (_, index) => index);
 
-  function t(id: string): string {
-    return message(locale, id);
+  function t(id: string, args?: Record<string, string>): string {
+    return message(locale, id, args);
   }
 
   async function moveTo(nextStep: number) {
@@ -90,6 +94,17 @@
     folderSelection = null;
     folderSkipped = true;
     folderError = '';
+  }
+
+  function modelInstallLabel(): string {
+    const labels: Record<string, string> = {
+      queued: 'models-install-queued',
+      downloading: 'models-install-downloading',
+      verifying: 'models-install-verifying',
+      extracting: 'models-install-extracting',
+      activating: 'models-install-activating'
+    };
+    return t(labels[snapshot.modelInstall?.status ?? ''] ?? 'models-install-activating');
   }
 </script>
 
@@ -149,7 +164,20 @@
           <p class="lede">{t('onboarding-model-body')}</p>
           <p class="onboarding-model-summary"><strong>{snapshot.model.displayName ?? t('onboarding-model-recommended')}</strong><span>{(snapshot.model.downloadBytes / 1073741824).toFixed(1)} GiB</span></p>
           <div class="license-choice"><Checkbox label={t('models-accept-licenses')} description={snapshot.model.license ?? t('models-license')} bind:checked={modelLicensesConfirmed} /></div>
-          <div class="row-actions"><button class="secondary onboarding-model" onclick={onprepare} disabled={actionBusy || (!modelLicensesConfirmed && !snapshot.model.licenseAccepted) || !snapshot.model.fitsAvailableDisk}>{t('primary-button-prepare')}</button><small>{t('onboarding-model-change-later')}</small></div>
+          {#if snapshot.modelInstall}
+            <div class="onboarding-model-install" role="status" aria-live="polite">
+              <strong>{modelInstallLabel()}</strong>
+              {#if snapshot.modelInstall.status === 'downloading' && snapshot.modelInstall.totalBytes > 0}
+                <progress aria-label={modelInstallLabel()} max={snapshot.modelInstall.totalBytes} value={snapshot.modelInstall.downloaded}></progress>
+                <small>{t('models-install-progress', { downloaded: `${(snapshot.modelInstall.downloaded / 1073741824).toFixed(1)} GiB`, total: `${(snapshot.modelInstall.totalBytes / 1073741824).toFixed(1)} GiB` })}</small>
+              {:else}
+                <small>{t(snapshot.modelInstall.status === 'queued' ? 'models-install-queued-detail' : 'models-install-phase-detail')}</small>
+              {/if}
+            </div>
+          {:else}
+            <div class="row-actions"><button class="secondary onboarding-model" onclick={onprepare} disabled={actionBusy || (!modelLicensesConfirmed && !snapshot.model.licenseAccepted) || !snapshot.model.fitsAvailableDisk}>{t(actionMessage ? 'onboarding-model-retry' : 'primary-button-prepare')}</button><small>{t('onboarding-model-change-later')}</small></div>
+          {/if}
+          {#if actionMessage}<p class="onboarding-inline-error" role="alert">{actionMessage}</p>{/if}
         {:else}
           <p class="eyebrow">{t('onboarding-review-title')}</p>
           <h1 id={`onboarding-step-${step}`} tabindex="-1" bind:this={heading}>{t('onboarding-complete-title')}</h1>
@@ -157,8 +185,16 @@
           <dl class="onboarding-summary">
             <div><dt>{t('settings-language')}</dt><dd><Check size={16} aria-hidden="true" />{locale === 'system' ? t('language-system') : locale === 'es' ? t('language-spanish') : t('language-english')}</dd></div>
             <div><dt>{t('desktop-page-wikis-title')}</dt><dd><Check size={16} aria-hidden="true" />{folderCreated ? folderName : t('onboarding-summary-wiki-later')}</dd></div>
-            <div><dt>{t('component-local-ai')}</dt><dd><Check size={16} aria-hidden="true" />{snapshot.model?.active ? t('status-ready') : t('onboarding-summary-ai-later')}</dd></div>
+            <div><dt>{t('component-local-ai')}</dt><dd class:needs-action={modelSetupNeeded}><Check size={16} aria-hidden="true" />{snapshot.model?.active ? t('status-ready') : modelUnavailable ? t('onboarding-summary-ai-unavailable') : modelPreparing ? t('onboarding-summary-ai-preparing') : t('onboarding-summary-ai-setup-needed')}</dd></div>
           </dl>
+          {#if modelSetupNeeded || modelUnavailable}
+            <aside class="onboarding-next-step" aria-labelledby="onboarding-next-step-title">
+              <strong id="onboarding-next-step-title">{t(modelUnavailable ? 'onboarding-model-unavailable-title' : 'onboarding-next-step-title')}</strong>
+              <p>{t(modelUnavailable ? 'onboarding-model-unavailable-body' : modelPreparing ? 'onboarding-next-step-preparing' : 'onboarding-next-step-search')}</p>
+              {#if modelSetupNeeded}<button class="secondary" onclick={onopenmodelsettings} disabled={actionBusy}>{t('onboarding-open-local-ai')}</button>{/if}
+            </aside>
+          {/if}
+          {#if actionMessage}<p class="onboarding-inline-error" role="alert">{actionMessage}</p>{/if}
           <p class="privacy-note">{t('onboarding-complete-body')}</p>
         {/if}
       </section>
@@ -173,5 +209,4 @@
       <button class="primary onboarding-action" onclick={onfinish} disabled={actionBusy}>{t('onboarding-finish')}<Check size={16} aria-hidden="true" /></button>
     {/if}
   </footer>
-  {#if actionMessage}<p class="action-message" aria-live="polite">{actionMessage}</p>{/if}
 </main>

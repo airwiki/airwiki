@@ -90,7 +90,9 @@ no desktop UI.
    Local-network collaboration remains disabled until you choose it later in
    **Settings**; grant the system permission only when LAN search is desired.
 5. Review the optional hardware recommendation, licenses, and remaining
-   download size. You can finish onboarding and prepare local AI later.
+   download size. You can finish onboarding and prepare local AI later; when
+   search is unavailable, AirWiki keeps a visible **Open local AI settings**
+   path in setup and a **View local AI status** action beside the search field.
 6. Allow the application to prepare only the selected local model assets.
 
 No daemon, system service, or Internet-facing port is installed. Optional

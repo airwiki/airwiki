@@ -942,6 +942,11 @@ describe('AirWiki real IPC journey', () => {
     expect(skippedFolder).toBe('Continue without a folder');
     await $('button.onboarding-next').click();
     while (await $('button.onboarding-next').isExisting()) await $('button.onboarding-next').click();
+    const localSearchNeedsSetup = await browser.execute(() => document.querySelector('.onboarding-next-step') !== null);
+    if (localSearchNeedsSetup) {
+      await expect($('.onboarding-next-step')).toHaveText(expect.stringContaining('Next step: prepare local search'));
+      await expect($('.onboarding-next-step').$('button')).toHaveText(expect.stringContaining('Open local AI settings'));
+    }
     const finishOnboarding = await $('main.onboarding:not(.startup) button.onboarding-action');
     await expect(finishOnboarding).toBeEnabled();
     await finishOnboarding.click();
@@ -963,6 +968,10 @@ describe('AirWiki real IPC journey', () => {
     expect(await measureNavigationPaintP95()).toBeLessThanOrEqual(100);
 
     const globalSearch = await $('#global-search');
+    const searchUnavailable = await browser.execute(() => document.querySelector<HTMLButtonElement>('.global-search button[type="submit"]')?.disabled === true);
+    if (searchUnavailable) {
+      await expect($('.search-preparing-action')).toHaveText(expect.stringContaining('View local AI status'));
+    }
     await globalSearch.click();
     expect(await browser.execute(() => document.activeElement?.id)).toBe('global-search');
     await globalSearch.setValue('focus regression');

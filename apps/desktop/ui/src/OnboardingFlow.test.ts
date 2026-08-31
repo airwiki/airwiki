@@ -16,6 +16,7 @@ function onboardingProps() {
     onpickfolder: vi.fn(async () => ({ token: 'synthetic-folder-token', displayName: 'Apuntes' })),
     oncreatewiki: vi.fn(async () => undefined),
     onprepare: vi.fn(),
+    onopenmodelsettings: vi.fn(),
     onfinish: vi.fn()
   };
 }
@@ -36,9 +37,83 @@ describe('OnboardingFlow', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
     await waitFor(() => expect(screen.getByRole('heading', { name: 'AirWiki está listo' })).toHaveFocus());
     expect(screen.getByText(/Agrega una carpeta desde el estado vacío/)).toBeInTheDocument();
+    expect(screen.getByText('Siguiente paso: preparar la búsqueda local')).toBeInTheDocument();
 
     const report = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } });
     expect(report.violations.filter((violation) => ['critical', 'serious'].includes(violation.impact ?? ''))).toEqual([]);
+  });
+
+  it('opens local AI settings from the recovery action when setup was deferred', async () => {
+    const props = onboardingProps();
+    render(OnboardingFlow, props);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar sin una carpeta' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Abrir configuración de IA local' }));
+
+    expect(props.onopenmodelsettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a retryable local AI failure without claiming search is ready', async () => {
+    const props = onboardingProps();
+    props.snapshot.model = {
+      stateSequence: 1,
+      profile: 'automatic',
+      recommendedModelId: 'synthetic-model',
+      displayName: 'Synthetic local model',
+      recommendationReason: null,
+      active: false,
+      activeModelId: null,
+      installed: false,
+      degraded: false,
+      issues: [],
+      pendingModelId: null,
+      downloadBytes: 1073741824,
+      requiredFreeBytes: 2147483648,
+      fitsAvailableDisk: true,
+      licenseAccepted: true,
+      license: null,
+      licenseUrl: null,
+      revision: null
+    };
+    props.actionMessage = 'No se pudo preparar la IA local.';
+    render(OnboardingFlow, props);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar sin una carpeta' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('No se pudo preparar la IA local.');
+    expect(screen.getAllByText('No se pudo preparar la IA local.')).toHaveLength(1);
+    await fireEvent.click(screen.getByRole('button', { name: 'Reintentar la preparación de la IA local' }));
+    expect(props.onprepare).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not promise local AI setup when the device cannot install a supported model', async () => {
+    const props = onboardingProps();
+    props.snapshot.hardware = { ...props.snapshot.hardware!, canInstall: false, issues: ['unsupported_hardware'] };
+    render(OnboardingFlow, props);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar sin una carpeta' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+
+    expect(screen.getByText('La búsqueda local no está disponible en este equipo')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Abrir configuración de IA local' })).not.toBeInTheDocument();
+    expect(screen.getByText('No disponible en este equipo')).toBeInTheDocument();
+  });
+
+  it('disables the recovery action while onboarding completion is saving', async () => {
+    const props = onboardingProps();
+    props.actionBusy = true;
+    render(OnboardingFlow, props);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar sin una carpeta' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+
+    expect(screen.getByRole('button', { name: 'Abrir configuración de IA local' })).toBeDisabled();
   });
 
   it('creates the first folder Wiki from the setup flow', async () => {

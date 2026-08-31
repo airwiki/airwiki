@@ -2390,7 +2390,7 @@
     await openKnowledgePage(page, expectedFingerprint);
   }
 
-  async function savePreferences(completeOnboarding = false) {
+  async function savePreferences(completeOnboarding = false): Promise<boolean> {
     actionBusy = true;
     try {
       await updatePreferences({ locale, theme, lanPreference, closeBehavior, automaticUpdateChecks, completeOnboarding });
@@ -2407,12 +2407,34 @@
             : syncedPreferences.completedOnboardingVersion
         };
       }
+      if (snapshot?.preferences) {
+        snapshot = {
+          ...snapshot,
+          preferences: {
+            ...snapshot.preferences,
+            locale,
+            theme,
+            lanPreference,
+            closeBehavior,
+            automaticUpdateChecks,
+            completedOnboardingVersion: completeOnboarding
+              ? (snapshot.preferences.completedOnboardingVersion ?? 1)
+              : snapshot.preferences.completedOnboardingVersion
+          }
+        };
+      }
       showOperationComplete();
+      return true;
     } catch {
       actionMessage = t('error-generic');
+      return false;
     } finally {
       actionBusy = false;
     }
+  }
+
+  async function finishOnboardingAndOpenModelSettings() {
+    if (await savePreferences(true)) openSettings('general');
   }
 
   async function applyCloseChoice(choice: 'hide' | 'quit' | 'cancel') {
@@ -2479,7 +2501,7 @@
     <p class="lede" aria-live="polite">{t(runtimeMessageId)}</p>
   </main>
 {:else if snapshot.preferences.completedOnboardingVersion == null}
-  <OnboardingFlow {snapshot} bind:locale bind:modelLicensesConfirmed {actionBusy} {actionMessage} onpickfolder={pickOnboardingFolder} oncreatewiki={createOnboardingWiki} onprepare={prepareLocalModel} onfinish={() => savePreferences(true)} />
+  <OnboardingFlow {snapshot} bind:locale bind:modelLicensesConfirmed {actionBusy} {actionMessage} onpickfolder={pickOnboardingFolder} oncreatewiki={createOnboardingWiki} onprepare={prepareLocalModel} onopenmodelsettings={finishOnboardingAndOpenModelSettings} onfinish={() => savePreferences(true)} />
 {:else}
 <div class="shell drive-shell" inert={activeDialogId !== null} aria-hidden={activeDialogId !== null ? 'true' : undefined}>
   <main class="drive-main">
@@ -2505,6 +2527,7 @@
           onpublic={updatePublicSearch}
           onsearch={submitGlobalSearch}
           onopen={openGlobalSearch}
+          onopenmodelsettings={() => openSettings('general')}
         />
         <div class="top-actions"><button class="secondary new-wiki-command" aria-label={t('desktop-new-wiki')} title={t('desktop-new-wiki')} aria-haspopup="dialog" aria-expanded={newWikiMenuOpen} onclick={() => { newWikiMenuOpen = !newWikiMenuOpen; }}><Plus size={17} aria-hidden="true" />{t('desktop-new-wiki')}</button><SystemStatusButton {snapshot} {t} onclick={() => openSettings(lastSettingsSection)} /></div>
       </header>
@@ -2561,7 +2584,7 @@
             {/if}
             {#if question.trim()}
               {#if !snapshot.model?.active}
-                <div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t('desktop-search-preparing-title')}</h2><p>{t('desktop-search-preparing-body')}</p><button class="secondary" onclick={() => openServiceStatus('general')}>{t('desktop-search-preparing-action')}</button></div>
+                <div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t('desktop-search-preparing-title')}</h2><p>{t('desktop-search-preparing-body')}</p></div>
               {:else if searchBusy && (!snapshot.search || snapshot.search.requestId !== activeSearchRequestId)}
                 <div class="search-results" aria-busy="true"><LoadingState label={t('search-running')} detail={t('desktop-search-loading-detail')} tone="ai" /><LoadingSkeleton variant="results" rows={3} /></div>
               {:else if snapshot.search && snapshot.search.requestId === activeSearchRequestId}

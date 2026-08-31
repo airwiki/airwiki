@@ -2600,6 +2600,32 @@ describe('AirWiki wiki workspace', () => {
     expect(window.location.hash).toBe('#settings/general');
   });
 
+  it('completes onboarding before opening local AI Settings from its recovery action', async () => {
+    snapshot.preferences = { ...snapshot.preferences!, completedOnboardingVersion: null };
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Continuar' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Abrir configuración de IA local' }));
+
+    await waitFor(() => expect(updatePreferences).toHaveBeenCalledWith(expect.objectContaining({ completeOnboarding: true })));
+    expect(await screen.findByRole('heading', { name: 'General' })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#settings/general');
+  });
+
+  it('keeps an onboarding recovery error visible when saving completion fails', async () => {
+    snapshot.preferences = { ...snapshot.preferences!, completedOnboardingVersion: null };
+    vi.mocked(updatePreferences).mockRejectedValueOnce(new Error('synthetic save failure'));
+    render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Continuar' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Abrir configuración de IA local' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('AirWiki necesita atención.');
+    expect(screen.queryByRole('heading', { name: 'General' })).not.toBeInTheDocument();
+  });
+
   it('describes a queued model preparation without presenting false download progress', async () => {
     window.location.hash = '#settings/general';
     snapshot.modelInstall = { status: 'queued', downloaded: 0, totalBytes: 0 };

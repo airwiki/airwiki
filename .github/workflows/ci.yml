@@ -104,6 +104,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: ./packaging/test-unsigned-windows-beta.ps1
+      - name: Windows Authenticode source contract
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./packaging/test-windows-authenticode-source-contract.ps1
       - name: macOS beta bootstrap packaging policy
         if: runner.os == 'macOS'
         shell: bash

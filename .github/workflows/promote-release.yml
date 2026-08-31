@@ -151,6 +151,7 @@ jobs:
     env:
       AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
       AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}
+      AIRWIKI_WINDOWS_SDK_SIGNTOOL_VERSION: 10.0.26100.0
       AIRWIKI_RELEASE_SET_SHA256: ${{ needs.inspect-draft.outputs.release-set-sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -192,7 +193,7 @@ jobs:
             --asset "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_es-ES.msi" `
             --asset "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_es-ES.msi.sig"
           if ($LASTEXITCODE -ne 0) { throw "Windows release set changed after inspection" }
-          ./packaging/verify-signpath-windows-msi.ps1 -PackageRoot target\public-release
+          ./packaging/verify-signed-windows-msi.ps1 -PackageRoot target\public-release
 
   publish:
     name: Human-approved stable publication

@@ -91,7 +91,7 @@ jobs:
   windows-release:
     name: Windows public-trust packages
     needs: validate-source
-    uses: ./.github/workflows/windows-signpath.yml
+    uses: ./.github/workflows/windows-esigner.yml
     with:
       version: ${{ inputs.version }}
       commit_sha: ${{ inputs.commit_sha }}

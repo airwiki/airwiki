@@ -6,6 +6,10 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+if ($env:AIRWIKI_ENABLE_LEGACY_ARTIFACT_SIGNING -cne "true") {
+    throw "the retired Artifact Signing/NSIS experiment is disabled; use windows-esigner.yml"
+}
+
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 . (Join-Path $PSScriptRoot "windows-signing.ps1")
 . (Join-Path $PSScriptRoot "windows-release-version.ps1")

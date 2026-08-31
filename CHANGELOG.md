@@ -4,6 +4,11 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Added public technical-beta support, privacy, FAQ, roadmap, and GitHub issue
+  forms. They distinguish ordinary feedback from private vulnerability reports,
+  require synthetic reproductions, and document current unsupported-release
+  limits without inventing a Code of Conduct enforcement contact.
+
 - Updated Wasmtime from 47.0.3 to 47.0.4 before packaging to address
   RUSTSEC-2026-0268 and RUSTSEC-2026-0269.
 

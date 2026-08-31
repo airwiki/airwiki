@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a reproducible problem using only synthetic data.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is public. Do not include real documents, query text, snippets,
+        screenshots, logs, databases, credentials, device names, network addresses,
+        or local paths. Use a minimal synthetic reproduction. For a security or data
+        exposure concern, use the [private vulnerability report](https://github.com/airwiki/airwiki/security/advisories/new) described in [SECURITY.md](https://github.com/airwiki/airwiki/blob/main/SECURITY.md) instead.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safe report
+      options:
+        - label: I used only synthetic, non-sensitive material and removed identifiers.
+          required: true
+        - label: This is not a suspected vulnerability or data exposure.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: AirWiki version or commit
+      placeholder: v0.x.x-beta.y or a public commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS Apple silicon
+        - Windows 10 x64
+        - Windows 11 x64
+        - Source build
+        - Other supported evaluation environment
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Minimal synthetic steps
+      description: Numbered steps that another person can reproduce without private data.
+      placeholder: |
+        1. Create a Wiki from a folder containing only synthetic text files.
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Describe the visible outcome without pasting private output.
+    validations:
+      required: true

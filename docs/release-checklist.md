@@ -17,6 +17,8 @@ constitute a supported public release.
   self-review disabled, and administrator bypass disabled.
 - [x] Enable GitHub private vulnerability reporting and link it from the security
   policy.
+- [x] Publish public beta support, privacy, FAQ, roadmap, and synthetic-data
+  issue-reporting guidance that routes suspected security issues privately.
 - [ ] Publish a monitored Code of Conduct enforcement contact.
 - [x] Document proportional review and add read-only DCO validation for pull
   requests.

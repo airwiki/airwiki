@@ -1,0 +1,43 @@
+name: Question
+description: Ask a setup or usage question about the current beta.
+title: "question: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is public. Search SUPPORT.md and FAQ.md first. Do not include real
+        documents, query text, snippets, screenshots, logs, databases, credentials,
+        device names, network addresses, or local paths. Use the [private vulnerability report](https://github.com/airwiki/airwiki/security/advisories/new) described in [SECURITY.md](https://github.com/airwiki/airwiki/blob/main/SECURITY.md) for any security or data-exposure concern.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safe question
+      options:
+        - label: I searched the FAQ and open issues.
+          required: true
+        - label: I removed personal, confidential, and environment-specific data.
+          required: true
+        - label: This is not a suspected vulnerability or data exposure.
+          required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and beta version or source commit
+      placeholder: macOS Apple silicon, v0.x.x-beta.y
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      description: Use a synthetic example and state the expected result.
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: Include only sanitized steps and observations.
+    validations:
+      required: true

@@ -1,0 +1,39 @@
+name: Feature request
+description: Describe a user outcome or workflow improvement for the beta.
+title: "feature: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is public. Do not include real documents, query text, snippets,
+        screenshots, logs, credentials, device names, network addresses, or local
+        paths. Report security or exposure concerns through the [private vulnerability report](https://github.com/airwiki/airwiki/security/advisories/new) described in [SECURITY.md](https://github.com/airwiki/airwiki/blob/main/SECURITY.md).
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safe report
+      options:
+        - label: I removed personal, confidential, and environment-specific data.
+          required: true
+        - label: This is not a suspected vulnerability or data exposure.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the outcome that is difficult today, using a synthetic example.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Explain how a person would know the workflow improved.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Include only safe, public information.

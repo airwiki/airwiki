@@ -85,4 +85,11 @@ Create it with `git commit -s`. The read-only DCO workflow checks every non-merg
 
 Review depth is proportional: documentation-only changes receive a documentation review, ordinary code receives a fresh code-review pass, and trust-boundary changes receive dedicated security review plus applicable negative and installed-platform tests. The complete reviewer contract is in [CODE_REVIEW.md](CODE_REVIEW.md).
 
-By participating, you agree to the [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately according to [SECURITY.md](SECURITY.md), never in a public issue.
+By participating, you agree to the [Code of Conduct](CODE_OF_CONDUCT.md). For
+product feedback and non-security questions, use the public channels in
+[SUPPORT.md](SUPPORT.md) with synthetic material only. Report security issues
+privately according to [SECURITY.md](SECURITY.md), never in a public issue.
+
+The Code of Conduct does not yet list a monitored enforcement contact; this is
+a documented release blocker. Do not use public issues to report conduct
+incidents or private information.

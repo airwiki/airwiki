@@ -149,6 +149,7 @@ async fn main() -> ExitCode {
         Err(_) => return operational_failure("identity_store_failed"),
     };
     if print_peer_id {
+        // A PeerId derives from the public key; this explicit flag never writes the private key.
         println!("{}", identity.peer_id());
         return ExitCode::SUCCESS;
     }

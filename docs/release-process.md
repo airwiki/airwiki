@@ -1,12 +1,13 @@
-# Future stable release process
+# Public release process
 
-AirWiki has no supported stable binary release or operational updater channel.
-The retained two-phase GitHub Actions design is a future stable path:
-preparation creates a private draft tied to one reviewed commit, and promotion
-re-downloads and verifies that draft on macOS and Windows before protected
-human approval. It must not be activated until its signing, installed-platform
-and release gates are complete. A workflow run never moves or overwrites an
-existing release tag.
+This is AirWiki's planned supported-release process; it is not currently
+operational. Stable release remains blocked until SSL.com entity onboarding,
+eSigner credentials, a protected signing run, updater-key custody, and an
+installed update acceptance pass. Once those gates pass, a two-phase GitHub
+Actions process prepares a private draft tied to one reviewed commit, then
+re-downloads and verifies it on macOS and Windows before protected human
+approval makes it public. A workflow run never moves or overwrites an existing
+release tag.
 
 Unsigned candidates from **Package technical candidates** are a separate
 technical-testing channel. A protected run may publish them as a clearly marked
@@ -18,8 +19,8 @@ Users obtain the current stable version from
 
 - Apple silicon Macs use `AirWiki_<version>_aarch64.dmg`;
 - Windows users select the `en-US` or `es-ES` per-user MSI; and
-- the application updater reads only the signed `latest.json` attached to the
-  latest stable release.
+- the application updater reads only the stable `latest.json`, whose artifact
+  entries carry detached Tauri signatures, attached to the latest release.
 
 Drafts and prereleases are not updater channels. The Windows updater uses the
 `en-US` MSI because both localized packages contain byte-identical product
@@ -27,20 +28,26 @@ payloads and updates run without the installer UI. Both MSI files remain
 available for first installation.
 
 The technical pre-release path has its own closed provenance, cross-platform
-checksums, GitHub Artifact Attestations and bilingual warning. It fixes GitHub
-Latest and updater eligibility to false, labels the macOS DMG as ad-hoc and
-non-notarized, labels both Windows MSI files as unsigned, and describes the
-Linux x64 artifact only as the federation index server. Its protected
-publication approval grants visibility and build provenance, not stable
-support, software safety or native publisher identity.
+checksums, GitHub Artifact Attestation and bilingual warning. After assembling
+the final closed asset directory and before creating a draft, the protected job
+uses GitHub Actions OIDC to attest those exact bytes. A failure stops
+publication. The path fixes GitHub Latest and updater eligibility to false,
+labels the macOS DMG as ad-hoc and non-notarized, labels both Windows MSI files
+as unsigned, and describes the Linux x64 artifact only as the federation index
+server. Its attestation and protected publication approval establish build
+provenance and visibility, not stable support, software safety or native
+publisher identity.
 
 GitHub Releases may redirect manifest and artifact requests to GitHub-managed
 object storage. A redirect is transport, never authority: the client still
 accepts only a strictly newer stable version and verifies the downloaded bytes
-with the embedded Tauri updater key before native package verification and an
-explicit installation confirmation. Release verification binds the manifest
-URLs and signatures to the exact allowlisted assets; no redirect or hosting URL
-can substitute unsigned bytes.
+with the embedded Tauri updater key before an explicit installation
+confirmation. Windows also rechecks the downloaded MSI's Authenticode identity;
+native signatures for Windows and Developer ID signing plus notarization for
+macOS are checked before
+publication. Release verification binds the manifest URLs and signatures to the
+exact allowlisted assets; no redirect or hosting URL can substitute unsigned
+bytes.
 
 ## One-time repository configuration
 
@@ -68,7 +75,14 @@ them without entering a signing environment:
 | --- | --- |
 | `AIRWIKI_UPDATER_PUBLIC_KEY` | Tauri updater public key embedded in release builds |
 | `AIRWIKI_MACOS_TEAM_ID` | Expected Apple Developer team identifier |
-| `AIRWIKI_WINDOWS_SIGNER_SHA256` | Expected SignPath leaf-certificate fingerprint |
+| `AIRWIKI_WINDOWS_SIGNER_SHA256` | Expected SSL.com eSigner leaf-certificate fingerprint |
+| `AIRWIKI_ESIGNER_SECRET_TRANSPORT_APPROVED` | Exact protected-environment gate for SSL.com-confirmed secret transport |
+
+Set `AIRWIKI_ESIGNER_SECRET_TRANSPORT_APPROVED` only in the protected
+`windows-signing` environment and only to `sslcom-esigner-secret-transport-v1`
+after SSL.com has confirmed the secret transport in writing or the approvers have
+explicitly accepted the residual risk. Any other value keeps stable signing
+closed.
 
 Set `AIRWIKI_MACOS_SIGNING_IDENTITY` in `macos-signing` to the complete
 `Developer ID Application: ... (TEAMID)` identity. Add these protected secrets:
@@ -80,21 +94,37 @@ Set `AIRWIKI_MACOS_SIGNING_IDENTITY` in `macos-signing` to the complete
 | `macos-signing` | `APPLE_API_PRIVATE_KEY_BASE64` |
 | `macos-signing` | `TAURI_SIGNING_PRIVATE_KEY` |
 | `macos-signing` | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
-| `windows-signing` | `SIGNPATH_API_TOKEN` |
+| `windows-signing` | `SSL_COM_ESIGNER_USERNAME` |
+| `windows-signing` | `SSL_COM_ESIGNER_PASSWORD` |
+| `windows-signing` | `SSL_COM_ESIGNER_TOTP_SECRET` |
+| `windows-signing` | `SSL_COM_ESIGNER_CREDENTIAL_ID` |
 | `windows-signing` | `TAURI_SIGNING_PRIVATE_KEY` |
 | `windows-signing` | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
 
 `APPLE_API_KEY_ID` and `APPLE_API_ISSUER_ID` are non-secret variables in
 `macos-signing`. The API key must be an App Store Connect **team** key accepted
-by `notarytool`, not an individual API key. Encode the downloaded `.p8` and the
+by `notarytool`, not an individual API key. The `.p8` authorizes notarization
+API access; it is not a code-signing certificate. Generate the Developer ID
+Application certificate from a Certificate Signing Request, then export that
+identity and its private key as a `.p12`. Encode the downloaded `.p8` and the
 exported Developer ID `.p12` as single-line base64 values before storing them.
 The workflow decodes them only inside an ephemeral directory and deletes its
 temporary keychain at the end of the signing step.
 
-Keep the SignPath organization, project, signing policy, binary configuration
-and MSI configuration variables in the `windows-signing` environment as described by the
-[code-signing policy](code-signing-policy.md). SignPath approval remains
-independent from GitHub environment approval.
+Creating or rotating the App Store Connect API key, assigning its minimal
+notarization role, and approving protected environments are human account
+administration gates. Do not run the stable workflow until the account owner has
+confirmed those approvals; no CI setting substitutes for them.
+
+Before enabling the protected job, prevalidate the project entity with SSL.com
+and purchase the OV code-signing certificate plus required eSigner tier. Keep
+the CKA installer from the reviewed `SSLcom/eSignerCKA` release and CodeSignTool
+archive versions and hashes in reviewed configuration; the build fails if either
+hash differs. The workflow selects only the explicit `10.0.26100.0/x64`
+`signtool` from the Windows SDK and requires a valid native signature and
+matching file-version prefix. The `windows-signing` approval is independent from authoring the
+build, and the certificate key remains non-exportable in SSL.com's cloud HSM.
+See the [code-signing policy](code-signing-policy.md).
 
 Generate the Tauri updater key once on a trusted administrative Mac with the
 pinned repository CLI:
@@ -149,7 +179,8 @@ From the Actions page, run **Prepare signed public release** on `main` with:
 The workflow fails closed if the commit moved, a tag or release already exists,
 the manifests differ, or the required checks are not green. It then:
 
-1. builds origin-verified Windows binaries and obtains SignPath signatures;
+1. builds secret-free Windows binaries, then the protected eSigner job scans and
+   signs AirWiki-owned files with CKA plus `signtool`;
 2. builds two localized MSI packages, obtains their outer signatures and signs
    their final bytes for the Tauri updater;
 3. imports the ephemeral Developer ID identity, builds the macOS app, notarizes
@@ -189,7 +220,7 @@ same version. The workflow:
 3. independently re-verifies Developer ID, notarization, stapling and the macOS
    updater signature, explicitly accepts the bundled Apache-2.0 agreement for
    the noninteractive mount, and compares its application bytes with the updater;
-4. independently re-verifies SignPath identity, nested Windows payload and both
+4. independently re-verifies SSL.com certificate fingerprint, nested Windows payload and both
    MSI updater signatures; and
 5. waits at the protected `public-release` environment.
 

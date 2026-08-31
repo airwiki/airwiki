@@ -18,6 +18,14 @@ All notable user-visible changes to AirWiki will be documented here. The project
   key; the attestation is explicitly not Authenticode, Developer ID,
   notarization, an updater channel or a guarantee of software safety.
 
+- Replaced the incomplete SignPath release path with a protected SSL.com eSigner
+  workflow using a non-exportable cloud-HSM key, malware scans, pinned
+  certificate identity, separate Tauri updater signatures, and GitHub Releases
+  as signed-update transport. The retired Artifact Signing/NSIS experiment now
+  fails closed by default. The stable path remains blocked until entity
+  onboarding, credentials, protected signing, and installed update acceptance
+  complete.
+
 - Refined the desktop's cross-platform interaction system for macOS and Windows:
   compact controls now use platform-appropriate system text, layouts reflow at
   the supported minimum window and enlarged text sizes, keyboard focus and view

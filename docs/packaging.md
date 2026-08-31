@@ -1,17 +1,17 @@
 # Candidate packaging
 
 AirWiki produces internal development candidates with the pinned Tauri v2 CLI
-and bundler. The retained stable-release workflows describe future native
-signing, notarization, updater signatures, exact release metadata and human
-promotion gates; they are not an operational distribution channel. Every
-applicable item in the [public release checklist](release-checklist.md) must pass
-before activation. See the [release process](release-process.md) for that
-deferred design.
+and bundler. The protected public workflows add native signing, notarization,
+updater signatures, exact release metadata and a human promotion gate. Their
+existence does not make a candidate supported: every applicable item in the
+[public release checklist](release-checklist.md) must pass first. See the
+[release process](release-process.md) for repository configuration and operation.
 
-The protected technical pre-release path is the only current public binary
-channel. It may make unsigned test candidates publicly downloadable without
-claiming stable support or entering the updater channel. ADR 0012 and ADR 0014
-define that boundary.
+A separate protected technical pre-release path may make unsigned test
+candidates publicly downloadable without claiming stable support or entering
+the updater channel. ADR 0012 defines that boundary, and ADR 0014 adds
+GitHub-hosted build-provenance attestations for the exact final assets without
+claiming native publisher identity.
 
 Installers contain the desktop application, local MCP bridge, platform runtime,
 licenses, and platform-specific integration assets. Model weights and future
@@ -184,7 +184,7 @@ their Authenticode state is `NotSigned`, and stages only:
 
 The uploaded artifact is named
 `airwiki-windows-x64-unsigned-beta-<commit>` and expires after 30 days. It uses
-no SignPath or updater credentials and is never attached to a release, exposed
+no SSL.com eSigner or updater credentials and is never attached to a release, exposed
 through `latest.json`, or accepted by the signed promotion workflow. Select
 `all-internal-candidates` only when the Linux federation index and macOS
 candidate are also required. Select `public-prerelease` only for the separately
@@ -225,19 +225,20 @@ escapes, invalid formats and output reuse, then emits a closed asset set:
   `latest` to false and records each platform's actual trust state.
 
 The publication job has the only `contents: write` token and waits at the
-protected `public-release` environment after all platform jobs pass. It creates
-or safely recovers only an exact private draft after GitHub has attested every
-final asset using the workflow's OIDC identity. It uploads the closed set,
-re-downloads every asset, verifies it independently, and verifies each
-downloaded file against the official repository, workflow, `main` ref and exact
-commit on a GitHub-hosted runner. Only then does it create or validate the
+protected `public-release` environment after all platform jobs pass. Once the
+closed set exists, a commit-pinned GitHub Action uses the job's short-lived OIDC
+identity to attest every final asset; no project attestation key is stored, and
+failure stops before draft creation. The job then creates or safely recovers
+only an exact private draft, uploads the closed set, re-downloads every asset
+and verifies it independently. Only then does it create or validate the
 immutable `v<version>-beta.<number>` tag at the workflow commit and publish the
 draft with GitHub pre-release enabled and Latest disabled. It never creates
-`latest.json`, enters signing environments, requests SignPath, reads updater
-keys, rewrites an already public beta or promotes those bytes into the stable
-workflow. A failed attempt can resume only an exact private draft at the same
-immutable tag and commit with no unexpected assets. The attestation proves
-build provenance, not software safety or an operating-system publisher identity.
+`latest.json`, enters signing environments, requests SSL.com signing, reads
+updater keys, rewrites an already public beta or promotes those bytes into the
+stable workflow. A failed attempt can resume only an exact private draft at the
+same immutable tag and commit with no unexpected assets. The GitHub attestation
+proves build provenance, not software safety or operating-system publisher
+identity.
 
 ### Repackage an already validated internal bundle
 
@@ -315,26 +316,26 @@ then install the new candidate; the two data roots remain intact by default.
 
 ### Windows open-source signing
 
-The reusable `Windows signed MSI candidate` workflow uses two origin-verified
-SignPath requests. It may run manually for a candidate or as the Windows stage
-of `Prepare signed public release`. The first request signs the MSI-tagged desktop, MCP bridge and
-firewall helper produced by the reviewed GitHub-hosted build. The second accepts
-only MSI packages containing those valid nested signatures—including the exact
-bridge bytes inside the MCPB—and signs the two localized MSI containers.
+The `Windows eSigner MSI candidate` workflow implements the protected signing
+path but is not evidence that onboarding or an installed release has passed.
+After a secret-free build, it verifies hash-pinned CKA from the reviewed
+`SSLcom/eSignerCKA` release and separately hash-pinned CodeSignTool input,
+selects only the explicit `10.0.26100.0/x64` Windows SDK `signtool` with a
+valid native signature and matching file-version prefix,
+scans the exact AirWiki-owned PE and MSI set for malware, signs the desktop, MCP
+bridge, firewall helper, and localized MSI containers using the non-exportable
+eSigner cloud-HSM credential, and independently verifies the payload and
+`AIRWIKI_WINDOWS_SIGNER_SHA256`. Tauri updater signing is a separate final
+operation. Normal pull-request CI and `package-pilot.yml` remain unsigned and
+consume no signing secret. See the [code signing policy](code-signing-policy.md)
+and [ADR 0015](adr/0015-sslcom-esigner-and-github-releases-updates.md).
 
-The workflow is pinned to SignPath action v2.2 by commit, requires the protected
-`windows-signing` environment and uses the committed artifact configurations
-under `.signpath/`. Configure the organization, project, signing-policy and two
-artifact-configuration slugs as repository or environment variables; keep only
-`SIGNPATH_API_TOKEN` as an environment secret. The expected leaf-certificate
-SHA-256 fingerprint is `AIRWIKI_WINDOWS_SIGNER_SHA256`; it is compiled into the
-AirWiki trust boundary and checked again on the MSI and every AirWiki
-executable. A comma-separated second fingerprint is permitted only for a
-reviewed certificate rotation and must be removed after the transition.
-
-Normal pull-request CI and `package-pilot.yml` remain unsigned and consume no
-signing secret. See the [code signing policy](code-signing-policy.md) and
-[ADR 0009](adr/0009-windows-msi-signpath.md).
+The older `package-signed-windows.ps1` and `sign-windows-artifact.ps1` NSIS
+experiment targets Microsoft Artifact Signing and is not a release path. Both
+entry points fail closed unless a developer deliberately enables the legacy
+experiment; no active workflow does so. Its read-only verifier and destructive
+fixtures remain temporarily for transition coverage and are removed only after
+the installed MSI matrix passes.
 
 Detailed public-signing experiments are preserved only as inert historical
 references in the [workflow archive](archive/release-workflows/README.md). They

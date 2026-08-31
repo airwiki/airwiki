@@ -32,7 +32,7 @@ const ACTIVE_WORKFLOWS: [&str; 6] = [
     "package-pilot.yml",
     "prepare-release.yml",
     "promote-release.yml",
-    "windows-signpath.yml",
+    "windows-esigner.yml",
 ];
 const ARCHIVED_WORKFLOWS: [&str; 2] = ["README.md", "promote-stable.yml.disabled"];
 const STALE_CARGO_DENY_COMMAND: &str = "cargo deny check --locked";

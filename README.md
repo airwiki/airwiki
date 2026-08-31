@@ -230,6 +230,6 @@ AirWiki does not currently provide OCR, DOCX ingestion, image/audio/video proces
 
 ## License
 
-AirWiki is open source under the [Apache License 2.0](LICENSE). The current public technical beta is unsigned or unnotarized and uses SHA-256 plus GitHub Artifact Attestations for build provenance. No native Windows public-signing provider or stable updater channel is currently operational. See the project's [code signing policy](docs/code-signing-policy.md).
+AirWiki is open source under the [Apache License 2.0](LICENSE). The current public technical beta is unsigned or unnotarized. Future Windows stable signing is planned through [SSL.com eSigner](https://www.ssl.com/esigner/) with a non-exportable cloud-HSM key; it is not operational until entity onboarding, credentials, and installed acceptance pass. The stable Tauri updater will use one confirmed channel hosted on GitHub Releases, whose assets remain independently signed and verified. See the [code signing policy](docs/code-signing-policy.md).
 
 ChatGPT, Codex, Claude, and Gemini names and marks belong to OpenAI, Anthropic, and Google respectively. AirWiki uses their official artwork only to identify optional integrations; this does not imply sponsorship or endorsement. See [third-party notices](THIRD_PARTY_NOTICES.md).

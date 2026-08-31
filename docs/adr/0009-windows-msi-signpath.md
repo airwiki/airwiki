@@ -1,8 +1,13 @@
 # ADR 0009: Use per-user MSI and origin-verified open-source signing on Windows
 
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-08-10
 - Refined by: ADR 0012 (public unsigned technical pre-releases)
+- Superseded by: ADR 0015 (SSL.com eSigner cloud-HSM signing and GitHub Releases updates)
+
+> Superseded on 2026-08-30. This record remains historical. Its SignPath
+> provider decision is replaced by ADR 0015; the MSI, per-user installation and
+> data-boundary decisions remain in force unless ADR 0015 says otherwise.
 
 ## Context
 

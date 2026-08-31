@@ -32,7 +32,7 @@ One manually dispatched workflow builds macOS arm64, Windows x64 and the Linux
 x64 federation index from the same commit. Publication depends on all three
 jobs and waits at the protected `public-release` environment. The initiating
 user must also enter the exact derived tag as a bounded confirmation. Signing
-environments, SignPath and updater credentials are not available to this path.
+environments, SSL.com eSigner and updater credentials are not available to this path.
 
 Before publication, a platform-neutral verifier accepts only the expected DMG,
 two MSI files and x86-64 ELF server. It rejects symlinks, escapes, unexpected

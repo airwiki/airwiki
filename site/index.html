@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta name="referrer" content="no-referrer">
+    <meta name="description" content="AirWiki turns folders into private, reviewable wikis without centralizing the source material.">
+    <!-- Set canonical and social metadata only after a hosting owner and canonical URL are approved. -->
+    <title>AirWiki — private, reviewable knowledge</title>
+    <link rel="icon" href="assets/airwiki-mark.png" type="image/png">
+    <link rel="stylesheet" href="styles.css">
+    <script src="launch-config.js" type="module"></script>
+    <script src="app.js" type="module"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="AirWiki home">
+        <img src="assets/airwiki-mark.png" width="42" height="42" alt="">
+        <span>AirWiki</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#how-it-works">How it works</a>
+        <a href="#boundaries">Privacy</a>
+        <a href="#limits">Limits</a>
+        <a href="#questions">FAQ</a>
+      </nav>
+      <a class="header-source" href="https://github.com/airwiki/airwiki">View source <span aria-hidden="true">↗</span></a>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Local-first knowledge, under your control</p>
+          <h1 id="hero-title">Turn folders into a <em>private, reviewable</em> wiki.</h1>
+          <p class="lede">AirWiki turns the knowledge you already keep into a portable wiki. Evidence stays close to each proposal; you decide what becomes searchable or shared.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" data-primary-cta href="https://github.com/airwiki/airwiki">View source</a>
+            <a class="button button-secondary" data-secondary-cta href="https://github.com/airwiki/airwiki/releases">Technical beta for evaluators</a>
+          </div>
+          <p class="release-notice" data-release-notice>Unsupported manual test candidates only: Windows packages are unsigned and macOS packages are not notarized. Keep platform protections enabled.</p>
+          <p class="docs-link"><a href="https://github.com/airwiki/airwiki/blob/main/docs/install.md">Read installation and evaluation guidance</a> before trying a technical beta.</p>
+        </div>
+        <figure class="knowledge-route" aria-labelledby="route-caption">
+          <div class="route-grid" aria-hidden="true">
+            <div class="route-node folder-node"><span>01</span><strong>Folder</strong><small>Your files remain yours</small></div>
+            <div class="route-line line-one"></div>
+            <div class="route-node evidence-node"><span>02</span><strong>Evidence</strong><small>Source beside proposal</small></div>
+            <div class="route-line line-two"></div>
+            <div class="route-node review-node"><span>03</span><strong>Review</strong><small>You decide what is stable</small></div>
+            <div class="route-line line-three"></div>
+            <div class="route-node search-node"><span>04</span><strong>Search</strong><small>Only stable knowledge</small></div>
+          </div>
+          <figcaption id="route-caption">The knowledge route: automation proposes, people decide.</figcaption>
+        </figure>
+      </section>
+
+      <section class="proof-band" aria-label="Product facts">
+        <p><strong>Apache-2.0</strong><span>Open source</span></p>
+        <p><strong>OKF v0.2</strong><span>Portable knowledge</span></p>
+        <p><strong>Local by default</strong><span>No account required</span></p>
+        <p><strong>Human review</strong><span>Before search or sharing</span></p>
+      </section>
+
+      <section class="section workflow" id="how-it-works" aria-labelledby="workflow-title">
+        <div class="section-heading">
+          <p class="eyebrow">A calm path from files to knowledge</p>
+          <h2 id="workflow-title">Keep the source. Make the reasoning inspectable.</h2>
+          <p>AirWiki is designed for people who want useful local AI without letting it silently decide what is true, searchable, or public.</p>
+        </div>
+        <div class="workflow-grid">
+          <article class="workflow-card folder-card">
+            <div class="card-number" aria-hidden="true">01</div>
+            <h3>Start from a folder</h3>
+            <p>Create a wiki from a folder, an OKF bundle, or explicitly initialized personal or project memory.</p>
+            <a href="https://github.com/airwiki/airwiki/blob/main/README.md#how-airwiki-works">See supported starting points <span aria-hidden="true">→</span></a>
+          </article>
+          <article class="workflow-card evidence-card">
+            <div class="card-number" aria-hidden="true">02</div>
+            <h3>Review with evidence</h3>
+            <p>Automation prepares draft knowledge. Source evidence stays visible while you approve, leave for later, or exclude it.</p>
+            <figure>
+              <img src="assets/airwiki-review-flow.png" width="1440" height="900" alt="AirWiki review panel with source evidence beside a draft proposal and review controls.">
+              <figcaption>Synthetic example: reviewing a proposal does not publish it.</figcaption>
+            </figure>
+          </article>
+          <article class="workflow-card search-card">
+            <div class="card-number" aria-hidden="true">03</div>
+            <h3>Search what you permit</h3>
+            <p>Search stable local knowledge first. Nearby or public sources require their own separate, explicit permissions.</p>
+            <a href="https://github.com/airwiki/airwiki/blob/main/docs/search-and-federation.md">Read the search and federation guide <span aria-hidden="true">→</span></a>
+          </article>
+        </div>
+      </section>
+
+      <section class="section product-tour" aria-labelledby="tour-title">
+        <div class="section-heading compact">
+          <p class="eyebrow">A short, synthetic-data tour</p>
+          <h2 id="tour-title">A wiki is more than a generated summary.</h2>
+        </div>
+        <figure class="demo-frame">
+          <video controls preload="metadata" poster="assets/airwiki-demo-poster.png" width="1200" height="750" aria-describedby="tour-caption">
+            <source src="assets/airwiki-demo.mp4" type="video/mp4">
+            Your browser cannot play this video. Read the transcript below instead.
+          </video>
+          <figcaption id="tour-caption">Ten-second product tour using synthetic data. Playback is always initiated by the visitor.</figcaption>
+        </figure>
+        <details class="transcript">
+          <summary>Read the product-tour transcript</summary>
+          <ol>
+            <li>A library lists a private wiki and its knowledge state.</li>
+            <li>A review view puts source evidence alongside a proposed draft so the reviewer can decide its state.</li>
+            <li>A search view labels the origin of each result and makes partial coverage visible.</li>
+            <li>An AI-app setting keeps public-search consent separate from sharing a wiki.</li>
+          </ol>
+        </details>
+      </section>
+
+      <section class="section boundaries" id="boundaries" aria-labelledby="boundaries-title">
+        <div class="boundary-stamp" aria-hidden="true">Private<br>by default</div>
+        <div class="boundary-copy">
+          <p class="eyebrow">The useful boundary is a visible one</p>
+          <h2 id="boundaries-title">Connecting an assistant is not the same as publishing a wiki.</h2>
+          <ul>
+            <li>New wikis are private from LAN and the Internet.</li>
+            <li>Original files remain on the source device and AirWiki does not delete them.</li>
+            <li>Sharing, connecting an AI app, and public-query egress are separate human decisions.</li>
+            <li>Only stable knowledge enters search or external disclosure.</li>
+          </ul>
+          <p><a href="https://github.com/airwiki/airwiki/blob/main/PRIVACY.md">Read the privacy policy</a> · <a href="https://github.com/airwiki/airwiki/blob/main/docs/threat-model.md">Read the threat model</a> · <a href="https://github.com/airwiki/airwiki/blob/main/SECURITY.md">Report a security issue privately</a></p>
+        </div>
+      </section>
+
+      <section class="section limits" id="limits" aria-labelledby="limits-title">
+        <div class="section-heading compact">
+          <p class="eyebrow">Clear limits are part of the product</p>
+          <h2 id="limits-title">What AirWiki does not promise.</h2>
+        </div>
+        <div class="limit-grid">
+          <p><strong>No stable desktop download today.</strong> The public technical beta is for evaluators and is never selected by the updater.</p>
+          <p><strong>No cloud sync, accounts, SSO, or web/mobile apps.</strong> AirWiki is a local desktop application.</p>
+          <p><strong>No automatic publishing or access grants.</strong> A local model can propose metadata, not make trust decisions.</p>
+          <p><strong>No arbitrary remote editing.</strong> MCP mutation is limited to explicitly authorized personal or project memory wikis.</p>
+        </div>
+        <p class="read-more"><a href="https://github.com/airwiki/airwiki/blob/main/README.md#deliberate-limits">Read the complete list of deliberate limits</a></p>
+      </section>
+
+      <section class="section questions" id="questions" aria-labelledby="questions-title">
+        <div class="section-heading compact">
+          <p class="eyebrow">Questions before evaluation</p>
+          <h2 id="questions-title">FAQ</h2>
+        </div>
+        <div class="faq-list">
+          <details>
+            <summary>Can I use AirWiki as a stable product today?</summary>
+            <p>No. AirWiki has no supported stable public release. The available technical pre-releases are manual test candidates only.</p>
+          </details>
+          <details>
+            <summary>Do I need to upload my documents?</summary>
+            <p>No. AirWiki is local-first. Original source documents stay on the device that owns them unless you separately choose an authorized sharing path.</p>
+          </details>
+          <details>
+            <summary>Does using an AI app publish my knowledge?</summary>
+            <p>No. AI-app access, LAN sharing, Internet exposure, and public-query search are separate decisions with their own controls.</p>
+          </details>
+          <details>
+            <summary>Where can I ask for help or contribute?</summary>
+            <p>Read <a href="https://github.com/airwiki/airwiki/blob/main/SUPPORT.md">the support guide</a>, inspect <a href="https://github.com/airwiki/airwiki/issues">open issues</a>, or consult <a href="https://github.com/airwiki/airwiki/blob/main/docs/install.md">the evaluation guide</a>.</p>
+          </details>
+        </div>
+      </section>
+
+      <section class="closing" aria-labelledby="closing-title">
+        <p class="eyebrow">Inspect it before you trust it</p>
+        <h2 id="closing-title">Your knowledge should not need a black box.</h2>
+        <p>Read the source, inspect the evidence path, and evaluate a technical beta only if its current platform constraints work for you.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" data-primary-cta href="https://github.com/airwiki/airwiki">View source</a>
+          <a class="button button-secondary" data-secondary-cta href="https://github.com/airwiki/airwiki/releases">Technical beta for evaluators</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand" href="#top"><img src="assets/airwiki-mark.png" width="32" height="32" alt=""><span>AirWiki</span></a>
+      <p>Open source under <a href="https://github.com/airwiki/airwiki/blob/main/LICENSE">Apache-2.0</a>.</p>
+      <nav aria-label="Footer links">
+        <a href="https://github.com/airwiki/airwiki/blob/main/PRIVACY.md">Privacy</a>
+        <a href="https://github.com/airwiki/airwiki/blob/main/SECURITY.md">Security</a>
+        <a href="https://github.com/airwiki/airwiki/blob/main/FAQ.md">FAQ</a>
+        <a href="https://github.com/airwiki/airwiki/blob/main/SUPPORT.md">Support</a>
+        <a href="https://github.com/airwiki/airwiki/blob/main/ROADMAP.md">Roadmap</a>
+      </nav>
+    </footer>
+  </body>
+</html>

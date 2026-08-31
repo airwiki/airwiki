@@ -3014,6 +3014,60 @@ describe('AirWiki wiki workspace', () => {
     expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
+  it('does not apply global shortcuts while an editable control has focus', async () => {
+    window.location.hash = '#settings/general';
+    render(App);
+    await screen.findByRole('heading', { name: 'General' });
+
+    const editors = [
+      document.createElement('input'),
+      document.createElement('textarea'),
+      Object.assign(document.createElement('div'), { contentEditable: 'true' }),
+      Object.assign(document.createElement('div'), { role: 'textbox' })
+    ];
+
+    try {
+      for (const editor of editors) {
+        document.body.append(editor);
+        editor.focus();
+        await fireEvent.keyDown(editor, { key: '1', ctrlKey: true });
+        expect(window.location.hash).toBe('#settings/general');
+      }
+    } finally {
+      editors.forEach((editor) => editor.remove());
+    }
+  });
+
+  it('applies global shortcuts from non-text controls', async () => {
+    window.location.hash = '#settings/general';
+    render(App);
+    await screen.findByRole('heading', { name: 'General' });
+
+    const automaticChecks = screen.getByRole('switch', { name: 'Comprobar automáticamente (sin telemetría)' });
+    automaticChecks.focus();
+    await fireEvent.keyDown(automaticChecks, { key: '1', ctrlKey: true });
+    expect(window.location.hash).toBe('#library');
+
+    await fireEvent.keyDown(window, { key: ',', ctrlKey: true });
+    const closeBehavior = await screen.findByRole('combobox', { name: 'Al cerrar' });
+    closeBehavior.focus();
+    await fireEvent.keyDown(closeBehavior, { key: '1', ctrlKey: true });
+    expect(window.location.hash).toBe('#library');
+  });
+
+  it('dismisses the inline update-install confirmation with Escape', async () => {
+    snapshot.updater = {
+      status: 'readyToInstall', version: '0.2.0', releaseNotes: null, issue: null, retryable: true
+    };
+    window.location.hash = '#system/updates';
+    const { container } = render(App);
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Instalar actualización' }));
+    expect(container.querySelector('.install-confirmation')).not.toBeNull();
+    await fireEvent.keyDown(window, { key: 'Escape' });
+    expect(container.querySelector('.install-confirmation')).toBeNull();
+  });
+
   it.each(accessibilityCases)('has no serious or critical accessibility violations in %s/%s/%s', async (locale, theme, route) => {
     snapshot.preferences!.locale = locale;
     snapshot.preferences!.theme = theme;

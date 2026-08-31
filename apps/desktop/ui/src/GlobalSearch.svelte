@@ -17,6 +17,7 @@
   export let onpublic: (value: boolean) => void;
   export let onsearch: () => void;
   export let onopen: () => void;
+  export let onopenmodelsettings: () => void;
 </script>
 
 <form class:preparing={!ready} class="global-search" role="search" onsubmit={(event) => { event.preventDefault(); if (ready && !busy) onsearch(); }}>
@@ -29,4 +30,5 @@
   </div>
   <kbd aria-hidden="true">{platform === 'macOs' ? '⌘K' : 'Ctrl+K'}</kbd>
   <button type="submit" aria-label={busy ? t('search-running') : ready ? t('desktop-search-evidence') : t('desktop-search-preparing-title')} title={!ready ? t('desktop-search-preparing-title') : undefined} disabled={busy || !ready || !question.trim()}>{#if busy}<Spinner size="small" />{:else}<Search size={17} aria-hidden="true" />{/if}</button>
+  {#if !ready}<button class="search-preparing-action" type="button" onclick={onopenmodelsettings}>{t('desktop-search-preparing-action')}</button>{/if}
 </form>

@@ -215,6 +215,7 @@ Every route beyond local use crosses an independently managed access boundary. S
 - [Threat model](docs/threat-model.md)
 - [Code review](CODE_REVIEW.md)
 - [Development packaging](docs/packaging.md)
+- [Public launch kit](docs/launch/README.md)
 - [Public release process](docs/release-process.md)
 - [Code signing policy](docs/code-signing-policy.md)
 - [Security policy](SECURITY.md)

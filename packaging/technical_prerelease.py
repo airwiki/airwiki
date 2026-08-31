@@ -219,9 +219,10 @@ not a supported stable release and is never selected by the AirWiki updater.
 - Linux: the archive contains only the x86-64 federation index server for
   maintainers. It is not the AirWiki desktop application.
 
-Verify SHA256SUMS.txt before installation or deployment. Report reproducible
-issues without attaching private knowledge, credentials, identities, paths or
-raw logs.
+Verify SHA256SUMS.txt and the GitHub build-provenance attestation before
+installation or deployment. The attestation does not provide an operating-system
+publisher identity. Report reproducible issues without attaching private
+knowledge, credentials, identities, paths or raw logs.
 
 AIRWIKI {tag} — PRE-RELEASE TÉCNICA SIN SOPORTE
 
@@ -236,9 +237,10 @@ una versión estable con soporte y el actualizador de AirWiki nunca la elige.
 - Linux: el archivo contiene solamente el servidor de índice federado x86-64
   para mantenedores. No es la aplicación de escritorio AirWiki.
 
-Verifica SHA256SUMS.txt antes de instalar o desplegar. Reporta problemas
-reproducibles sin adjuntar conocimiento privado, credenciales, identidades,
-rutas ni logs sin sanitizar.
+Verifica SHA256SUMS.txt y la atestación de procedencia de GitHub antes de instalar
+o desplegar. La atestación no proporciona una identidad de editor reconocida por
+el sistema operativo. Reporta problemas reproducibles sin adjuntar conocimiento
+privado, credenciales, identidades, rutas ni logs sin sanitizar.
 """
 
 
@@ -247,7 +249,8 @@ def linux_readme(version: str, beta_number: str) -> bytes:
         f"AirWiki {prerelease_tag(version, beta_number)} Linux x64 federation index\n\n"
         "This archive contains a server component for AirWiki maintainers.\n"
         "It is not the AirWiki desktop application and provides no desktop UI.\n"
-        "Use only with the versioned federation runbook and verify the release SHA-256.\n"
+        "Use only with the versioned federation runbook; verify the release SHA-256 "
+        "and GitHub attestation.\n"
     ).encode("utf-8")
 
 
@@ -268,9 +271,17 @@ Built from reviewed commit `{commit}`.
 - **Linux x64 maintainers:** the archive is the federation index server only;
   AirWiki Desktop is not available for Linux in this pre-release.
 
-Download `SHA256SUMS.txt` and verify the exact asset before use. Keep operating
-system and organization protections enabled. The signed stable release and
-updater channel remain separate and unavailable until every public gate passes.
+Download `SHA256SUMS.txt` and verify the exact asset before use. Then verify that
+GitHub Actions produced those bytes from the official release workflow:
+
+```text
+gh attestation verify <asset> --repo airwiki/airwiki --signer-workflow airwiki/airwiki/.github/workflows/package-pilot.yml --source-ref refs/heads/main --source-digest {commit} --deny-self-hosted-runners
+```
+
+The attestation establishes build provenance, not safety or an operating-system
+publisher identity. Keep operating-system and organization protections enabled.
+The signed stable release and updater channel remain separate and unavailable
+until every public gate passes.
 
 See `TECHNICAL-PRE-RELEASE.txt` and `PROVENANCE.json` for the complete boundary.
 """

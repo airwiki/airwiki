@@ -147,7 +147,7 @@ Controls are not considered effective end to end until the
 | Model grants permission | Enrichment schema excludes collection, grants, publication, and cloud policy | Review schemas and preserve human approval |
 | Runtime or model is replaced | Pinned revision/hash, temporary download, atomic move, build manifest | Upstream or build-host compromise remains possible |
 | Stable installer is altered | Native publisher signature, independent updater signature, hashes/SBOM, platform gates | Signing-key or CI compromise remains possible |
-| An unsigned technical pre-release is altered or mistaken for stable | Exact clean `main` origin, all-platform build dependency, closed artifact names, legal payloads, SHA-256 inventory and provenance, protected private-draft publication, re-download verification, immutable beta tag, GitHub pre-release state, Latest/updater fixed false and separate README/install guidance | Windows and macOS provide no public publisher identity and can warn or block the candidate; hosting or CI compromise remains possible, and a user can still ignore the visible warnings |
+| An unsigned technical pre-release is altered or mistaken for stable | Exact clean `main` origin, all-platform build dependency, closed artifact names, legal payloads, SHA-256 inventory, GitHub Artifact Attestation over every final asset, protected private-draft publication, re-download plus attestation verification, immutable beta tag, GitHub pre-release state, Latest/updater fixed false and separate README/install guidance | Windows and macOS provide no public publisher identity and can warn or block the candidate; a compromised official workflow can attest harmful bytes, hosting or CI compromise remains possible, and a user can still ignore the visible warnings |
 | Release dependency captures credentials | Secret-free build, isolated signing/verification, protected environments, scoped credentials | Actions, scripts, and signing services remain in the TCB |
 | Elevated helper opens broad rules | Closed arguments, sibling app, same-publisher validation, Firewall COM API, Private/Domain `LocalSubnet`, no edge traversal | Admin or domain policy can override; conflict and cancellation keep local-only mode |
 | Untrusted executable invokes helper | Helper derives its sibling desktop and requires the same valid publisher | Compromised publisher key or build host breaks the guarantee |
@@ -242,17 +242,23 @@ Controls are not considered effective end to end until the
 ## Current development blockers and residual risks
 
 - No complete cross-platform public candidate has passed the protected release
-  workflows and installed acceptance matrix. Windows public-trust enrollment,
-  final SignPath configuration and native verification remain required before
-  any supported stable release.
+  workflows and installed acceptance matrix. No native Windows signing provider
+  or stable updater channel is operational. The retained SignPath workflow is a
+  deferred design, not current distribution support; a new reviewed decision,
+  public-trust enrollment and native verification remain required before any
+  supported stable release.
 - Public technical pre-releases have no native public trust: Windows MSI files
   are unsigned and the macOS application is ad-hoc signed and not notarized, so
   either platform can warn about or block the candidate. Their reviewed
-  GitHub-hosted build, exact commit and workflow provenance, cross-platform
-  SHA-256 inventory, protected non-latest pre-release publication and exclusion
-  from the updater reduce accidental substitution but do not replace native
-  publisher identity. Testers never disable platform or organization policy to
-  run them. The Linux asset is only the federation index server, not Desktop.
+  GitHub-hosted build, exact commit and workflow provenance, GitHub Artifact
+  Attestation over every final asset, cross-platform SHA-256 inventory,
+  protected non-latest pre-release publication and exclusion from the updater
+  reduce accidental substitution but do not establish software safety or
+  replace native publisher identity. A compromised official workflow can
+  produce validly attested harmful bytes, so pinned Actions and reviewed `main`
+  remain part of the trust boundary. Testers never disable platform or
+  organization policy to run them. The Linux asset is only the federation index
+  server, not Desktop.
 - Trust and grants are per device, not per individual user.
 - LAN assumes one private subnet and cannot overcome router multicast policy.
 - OCR and advanced malicious-file analysis are out of scope.

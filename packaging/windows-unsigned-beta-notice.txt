@@ -2,9 +2,9 @@ AIRWIKI WINDOWS X64 - UNSIGNED BETA / BETA SIN FIRMA
 
 This is a temporary development candidate for invited technical testing. It is
 not a supported public release, is not connected to automatic updates, and has
-not been signed by SignPath. / Este es un candidato temporal para pruebas
+not been signed for Windows public trust. / Este es un candidato temporal para pruebas
 técnicas invitadas. No es un release público soportado, no está conectado a las
-actualizaciones automáticas y no fue firmado por SignPath.
+actualizaciones automáticas y no fue firmado con confianza pública de Windows.
 
 BEFORE INSTALLING / ANTES DE INSTALAR
 

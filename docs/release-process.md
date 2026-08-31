@@ -1,9 +1,11 @@
-# Public release process
+# Future stable release process
 
-AirWiki publishes supported binaries through a two-phase GitHub Actions process.
-Preparation creates a private draft tied to one reviewed commit. Promotion
-re-downloads and verifies that draft on macOS and Windows before a protected
-human approval makes it public. A workflow run never moves or overwrites an
+AirWiki has no supported stable binary release or operational updater channel.
+The retained two-phase GitHub Actions design is a future stable path:
+preparation creates a private draft tied to one reviewed commit, and promotion
+re-downloads and verifies that draft on macOS and Windows before protected
+human approval. It must not be activated until its signing, installed-platform
+and release gates are complete. A workflow run never moves or overwrites an
 existing release tag.
 
 Unsigned candidates from **Package technical candidates** are a separate
@@ -25,11 +27,12 @@ payloads and updates run without the installer UI. Both MSI files remain
 available for first installation.
 
 The technical pre-release path has its own closed provenance, cross-platform
-checksums and bilingual warning. It fixes GitHub Latest and updater eligibility
-to false, labels the macOS DMG as ad-hoc and non-notarized, labels both Windows
-MSI files as unsigned, and describes the Linux x64 artifact only as the
-federation index server. Its protected publication approval grants visibility,
-not stable support or native publisher identity.
+checksums, GitHub Artifact Attestations and bilingual warning. It fixes GitHub
+Latest and updater eligibility to false, labels the macOS DMG as ad-hoc and
+non-notarized, labels both Windows MSI files as unsigned, and describes the
+Linux x64 artifact only as the federation index server. Its protected
+publication approval grants visibility and build provenance, not stable
+support, software safety or native publisher identity.
 
 GitHub Releases may redirect manifest and artifact requests to GitHub-managed
 object storage. A redirect is transport, never authority: the client still

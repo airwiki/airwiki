@@ -31,7 +31,6 @@ env:
     Rust checks (macos-14)
     Rust checks (windows-2022)
     Advisories, licenses and sources
-    Sign-off
     Launch site checks
 
 jobs:
@@ -122,6 +121,7 @@ jobs:
           pnpm --dir apps/desktop/ui run licenses:check macos-arm64
       - name: Sign, notarize and verify rehearsal bytes
         env:
+          GH_TOKEN: ${{ github.token }}
           APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_P12_BASE64 }}
           APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
           APPLE_API_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_BASE64 }}
@@ -130,6 +130,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git fetch --no-tags origin main
+          commit="$(git rev-parse HEAD)"
+          main="$(git rev-parse origin/main)"
+          if [[ "$commit" != "$AIRWIKI_RELEASE_COMMIT" || "$commit" != "$main" ]]; then
+            echo "Rehearsal commit changed before signing and notarization." >&2
+            exit 1
+          fi
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "Rehearsal source checkout is not clean before signing and notarization." >&2
+            exit 1
+          fi
+          check_runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$commit/check-runs?per_page=100")"
+          while IFS= read -r check; do
+            [[ -n "$check" ]] || continue
+            matching_count="$(jq -r --arg name "$check" \
+              '[.check_runs[] | select(.name == $name)] | length' \
+              <<<"$check_runs")"
+            if [[ "$matching_count" != "1" ]]; then
+              echo "Required release check '$check' must have exactly one run; found $matching_count." >&2
+              exit 1
+            fi
+            if ! jq -e --arg name "$check" '
+              [.check_runs[] | select(.name == $name)] |
+              all(.[]; .conclusion == "success" and .app.slug == "github-actions" and .app.id == 15368)
+            ' <<<"$check_runs" >/dev/null; then
+              echo "Required release check '$check' is not a successful GitHub Actions run." >&2
+              exit 1
+            fi
+          done <<<"$AIRWIKI_REQUIRED_RELEASE_CHECKS"
+
           required=(
             AIRWIKI_SIGNING_IDENTITY
             AIRWIKI_MACOS_TEAM_ID

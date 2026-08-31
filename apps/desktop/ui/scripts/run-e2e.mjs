@@ -101,19 +101,44 @@ writeFileSync(join(okfFixture, 'architecture', 'verified.md'), [
 
 async function waitForWebDriver(child) {
   const deadline = Date.now() + 30_000;
+  let lastError;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error(`AirWiki exited before WebDriver became ready (${child.exitCode})`);
     }
     try {
       const response = await fetch('http://127.0.0.1:4445/status');
-      if (response.ok) return;
-    } catch {
-      // Startup races are expected until the local server binds.
+      if (response.ok) {
+        const sessionId = await createWebDriverSession('readiness');
+        try {
+          await deleteWebDriverSession(sessionId, 'readiness');
+        } catch (error) {
+          const detail = error instanceof Error ? `: ${error.message}` : '';
+          throw new Error(
+            `AirWiki WebDriver readiness session was created but could not be closed; refusing to retry${detail}`,
+            { cause: error }
+          );
+        }
+        return;
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith(
+        'AirWiki WebDriver readiness session was created but could not be closed'
+      )) {
+        throw error;
+      }
+      lastError = error;
+      // Startup races are expected until the local server can attach to a window.
     }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
   }
-  throw new Error('AirWiki WebDriver did not become ready within 30 seconds');
+  const detail = lastError instanceof Error ? ` (${lastError.message})` : '';
+  const appState = child.exitCode === null
+    ? 'AirWiki is still running'
+    : `AirWiki exited with ${child.exitCode}`;
+  throw new Error(
+    `AirWiki WebDriver did not become ready with main window within 30 seconds; ${appState}${detail}`
+  );
 }
 
 async function stopApp(child) {
@@ -127,25 +152,58 @@ async function stopApp(child) {
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 
-async function createWebDriverSession() {
+async function describeWebDriverFailure(response, context) {
+  let detail = '';
+  try {
+    const payload = await response.json();
+    const error = payload?.value?.error;
+    const message = payload?.value?.message;
+    if (typeof error === 'string' && typeof message === 'string') {
+      detail = `: ${error}: ${message}`;
+    } else if (typeof message === 'string') {
+      detail = `: ${message}`;
+    } else if (typeof error === 'string') {
+      detail = `: ${error}`;
+    }
+  } catch {
+    // A non-JSON error response is still reported with its HTTP status.
+  }
+  return `${context} (${response.status})${detail}`;
+}
+
+async function createWebDriverSession(context) {
   const response = await fetch('http://127.0.0.1:4445/session', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ capabilities: { alwaysMatch: {}, firstMatch: [{}] } })
+    body: JSON.stringify({
+      capabilities: {
+        alwaysMatch: { 'wdio:tauriServiceOptions': { windowLabel: 'main' } },
+        firstMatch: [{}]
+      }
+    })
   });
   if (!response.ok) {
-    throw new Error(`could not create shutdown WebDriver session (${response.status})`);
+    throw new Error(await describeWebDriverFailure(response, `could not create ${context} WebDriver session`));
   }
   const payload = await response.json();
   const sessionId = payload?.value?.sessionId;
   if (typeof sessionId !== 'string' || sessionId.length === 0) {
-    throw new Error('shutdown WebDriver session returned no session ID');
+    throw new Error(`${context} WebDriver session returned no session ID`);
   }
   return sessionId;
 }
 
+async function deleteWebDriverSession(sessionId, context) {
+  const response = await fetch(`http://127.0.0.1:4445/session/${sessionId}`, {
+    method: 'DELETE'
+  });
+  if (!response.ok) {
+    throw new Error(await describeWebDriverFailure(response, `could not close ${context} WebDriver session`));
+  }
+}
+
 async function requestGracefulShutdown(child) {
-  const sessionId = await createWebDriverSession();
+  const sessionId = await createWebDriverSession('shutdown');
   try {
     await fetch(`http://127.0.0.1:4445/session/${sessionId}/execute/sync`, {
       method: 'POST',

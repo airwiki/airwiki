@@ -2059,7 +2059,10 @@ mod tests {
 
         let report = run_evaluation(&loaded, providers).await.unwrap();
 
-        assert!(report.passed, "deterministic retrieval report: {report:#?}");
+        assert!(
+            report.passed,
+            "deterministic retrieval evaluation did not pass"
+        );
         assert!(report.regression.case_count > 0);
         assert_eq!(
             report.stage_attribution.source_candidate_recall_at_ten,

@@ -17,12 +17,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum IdentityError {
-    #[error("secret store failed: {0}")]
-    SecretStore(String),
-    #[error("stored libp2p identity is invalid: {0}")]
-    InvalidIdentity(String),
-    #[error("could not serialize libp2p identity: {0}")]
-    SerializeIdentity(String),
+    #[error("secret store failed")]
+    SecretStore,
+    #[error("stored libp2p identity is invalid")]
+    InvalidIdentity,
+    #[error("could not serialize libp2p identity")]
+    SerializeIdentity,
 }
 
 pub trait SecretStore: Send + Sync + 'static {
@@ -102,26 +102,23 @@ impl SecretStore for FileSecretStore {
         match fs::read(self.path_for(key)) {
             Ok(value) => Ok(Some(value)),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(IdentityError::SecretStore(error.to_string())),
+            Err(_) => Err(IdentityError::SecretStore),
         }
     }
 
     fn set_secret(&self, key: &str, value: &[u8]) -> Result<(), IdentityError> {
-        fs::create_dir_all(&self.directory)
-            .map_err(|error| IdentityError::SecretStore(error.to_string()))?;
+        fs::create_dir_all(&self.directory).map_err(|_| IdentityError::SecretStore)?;
         let destination = self.path_for(key);
         let temporary = destination.with_extension("tmp");
-        Self::write_restricted(&temporary, value)
-            .map_err(|error| IdentityError::SecretStore(error.to_string()))?;
-        fs::rename(&temporary, &destination)
-            .map_err(|error| IdentityError::SecretStore(error.to_string()))
+        Self::write_restricted(&temporary, value).map_err(|_| IdentityError::SecretStore)?;
+        fs::rename(&temporary, &destination).map_err(|_| IdentityError::SecretStore)
     }
 
     fn delete_secret(&self, key: &str) -> Result<(), IdentityError> {
         match fs::remove_file(self.path_for(key)) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(IdentityError::SecretStore(error.to_string())),
+            Err(_) => Err(IdentityError::SecretStore),
         }
     }
 }
@@ -144,7 +141,7 @@ impl KeyringSecretStore {
 
     fn entry(&self, key: &str) -> Result<keyring::Entry, IdentityError> {
         keyring::Entry::new(&self.service, &format!("{}:{key}", self.account))
-            .map_err(|error| IdentityError::SecretStore(error.to_string()))
+            .map_err(|_| IdentityError::SecretStore)
     }
 }
 
@@ -155,22 +152,22 @@ impl SecretStore for KeyringSecretStore {
             Ok(encoded) => BASE64
                 .decode(encoded)
                 .map(Some)
-                .map_err(|error| IdentityError::SecretStore(error.to_string())),
+                .map_err(|_| IdentityError::SecretStore),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(error) => Err(IdentityError::SecretStore(error.to_string())),
+            Err(_) => Err(IdentityError::SecretStore),
         }
     }
 
     fn set_secret(&self, key: &str, value: &[u8]) -> Result<(), IdentityError> {
         self.entry(key)?
             .set_password(&BASE64.encode(value))
-            .map_err(|error| IdentityError::SecretStore(error.to_string()))
+            .map_err(|_| IdentityError::SecretStore)
     }
 
     fn delete_secret(&self, key: &str) -> Result<(), IdentityError> {
         match self.entry(key)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(error) => Err(IdentityError::SecretStore(error.to_string())),
+            Err(_) => Err(IdentityError::SecretStore),
         }
     }
 }
@@ -207,13 +204,12 @@ impl NodeIdentity {
         storage_key: &str,
     ) -> Result<Self, IdentityError> {
         let keypair = if let Some(encoded) = store.get_secret(storage_key)? {
-            Keypair::from_protobuf_encoding(&encoded)
-                .map_err(|error| IdentityError::InvalidIdentity(error.to_string()))?
+            Keypair::from_protobuf_encoding(&encoded).map_err(|_| IdentityError::InvalidIdentity)?
         } else {
             let keypair = Keypair::generate_ed25519();
             let encoded = keypair
                 .to_protobuf_encoding()
-                .map_err(|error| IdentityError::SerializeIdentity(error.to_string()))?;
+                .map_err(|_| IdentityError::SerializeIdentity)?;
             store.set_secret(storage_key, &encoded)?;
             keypair
         };
@@ -253,5 +249,19 @@ mod tests {
         );
         store.delete_secret("identity").unwrap();
         assert_eq!(store.get_secret("identity").unwrap(), None);
+    }
+
+    #[test]
+    fn identity_errors_do_not_include_store_or_encoding_details() {
+        let errors = [
+            IdentityError::SecretStore,
+            IdentityError::InvalidIdentity,
+            IdentityError::SerializeIdentity,
+        ];
+
+        assert!(errors.into_iter().all(|error| {
+            let message = error.to_string();
+            !message.contains('/') && !message.contains("secret-value")
+        }));
     }
 }

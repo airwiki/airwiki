@@ -288,6 +288,31 @@ before costing if Windows marks either as a reparse point. Windows Installer
 owns only declared immutable files and never performs recursive
 application-data cleanup.
 
+### MSI install/uninstall smoke
+
+The Windows technical-candidate workflow runs a destructive, per-user smoke on
+the freshly packaged `en-US` MSI. It is deliberately narrower than the
+validated installer smoke: it does not start AirWiki, download WebView2, or
+prepare models. It requires an already-present WebView2 Runtime, a clean AirWiki
+installer/shortcut state, reads the MSI identity through the Windows Installer
+COM API, installs silently with `AUTOLAUNCHAPP=0`, validates ARP,
+`InstallLocation`, essential installed files and the Start Menu target, then
+uninstalls by the MSI `ProductCode`.
+
+For a controlled Windows client, invoke it only with explicit authorization:
+
+```powershell
+.\packaging\smoke-windows-msi.ps1 `
+  -Installer '.\target\packages\windows\AirWiki_<version>_x64_en-US.msi' `
+  -AuthorizeDestructiveMsiSmoke
+```
+
+An optional `-UpgradeInstaller` exercises an upgrade only when it has the same
+`UpgradeCode` and a strictly higher `ProductVersion`. The smoke writes one
+hash-checked marker in each documented AirWiki data root, verifies that
+uninstall preserves both, and removes only unchanged markers it created. It
+never uses `Win32_Product` and never removes user data roots.
+
 The release scripts generate a deterministic WiX fragment for the exact
 runtime, helper, bridge, MCPB and legal-resource payload. Every component below
 the current-user profile has a stable HKCU registry key path, and every package

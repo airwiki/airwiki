@@ -338,6 +338,17 @@
       .at(-1) ?? null;
   }
 
+  function shortcutOriginIsEditable(event: KeyboardEvent): boolean {
+    const origins = [...event.composedPath(), document.activeElement];
+    return origins.some((origin) => (
+      typeof (origin as Element | null)?.closest === 'function'
+      && ((origin as HTMLElement).isContentEditable
+        || (origin as Element).closest(
+          'input:not([type]), input[type="text"], input[type="search"], input[type="email"], input[type="url"], input[type="tel"], input[type="password"], input[type="number"], input[type="date"], input[type="datetime-local"], input[type="month"], input[type="time"], input[type="week"], textarea, [role="textbox"], [role="searchbox"]'
+        ) !== null)
+    ));
+  }
+
   function focusDialog(dialogId: Exclude<DialogId, null>) {
     const generation = ++dialogFocusGeneration;
     void tick().then(() => {
@@ -711,7 +722,16 @@
         }
         return;
       }
-      if (dialog !== null && event.key !== 'Escape') return;
+      if (dialog !== null) {
+        if (event.key !== 'Escape') return;
+        dismissActiveDialog();
+        return;
+      }
+      if (event.key === 'Escape' && confirmUpdateInstall) {
+        confirmUpdateInstall = false;
+        return;
+      }
+      if (shortcutOriginIsEditable(event)) return;
       const command = event.metaKey || event.ctrlKey;
       if (command && event.key === '1') {
         event.preventDefault();
@@ -727,8 +747,6 @@
       } else if (command && event.key === ',') {
         event.preventDefault();
         openSettings(lastSettingsSection);
-      } else if (event.key === 'Escape') {
-        dismissActiveDialog();
       }
     };
     window.addEventListener('keydown', handleShortcut);

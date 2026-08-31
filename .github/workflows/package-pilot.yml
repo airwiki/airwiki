@@ -9,6 +9,7 @@ on:
         default: windows-x64-beta
         type: choice
         options:
+          - windows-msi-smoke-no-artifact
           - windows-x64-beta
           - all-internal-candidates
           - public-prerelease
@@ -69,11 +70,14 @@ jobs:
             exit 1
           fi
           version="$(node packaging/release-version.mjs)"
-          if [[ ! "$PRERELEASE_NUMBER" =~ ^[1-9][0-9]{0,3}$ ]]; then
-            echo "prerelease number must be from 1 to 9999" >&2
-            exit 1
+          tag=""
+          if [[ "$TARGET" != "windows-msi-smoke-no-artifact" ]]; then
+            if [[ ! "$PRERELEASE_NUMBER" =~ ^[1-9][0-9]{0,3}$ ]]; then
+              echo "prerelease number must be from 1 to 9999" >&2
+              exit 1
+            fi
+            tag="v${version}-beta.${PRERELEASE_NUMBER}"
           fi
-          tag="v${version}-beta.${PRERELEASE_NUMBER}"
           if [[ "$TARGET" == "public-prerelease" ]]; then
             if [[ "$PUBLICATION_CONFIRMATION" != "publish-${tag}" ]]; then
               echo "public prerelease confirmation must equal publish-${tag}" >&2
@@ -143,7 +147,7 @@ jobs:
   windows-x64:
     name: Windows x64 unsigned beta MSI
     needs: validate-request
-    if: inputs.target == 'windows-x64-beta' || inputs.target == 'all-internal-candidates' || inputs.target == 'public-prerelease'
+    if: inputs.target == 'windows-msi-smoke-no-artifact' || inputs.target == 'windows-x64-beta' || inputs.target == 'all-internal-candidates' || inputs.target == 'public-prerelease'
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
@@ -199,6 +203,7 @@ jobs:
             -Installer $Installer.FullName `
             -AuthorizeDestructiveMsiSmoke
       - name: Verify unsigned beta and prepare tester artifact
+        if: inputs.target != 'windows-msi-smoke-no-artifact'
         shell: powershell
         run: |
           $Commit = (git rev-parse HEAD).Trim()
@@ -223,6 +228,7 @@ jobs:
             -WorkflowRunUrl "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" `
             -RetentionDays 30
       - id: upload-windows-beta
+        if: inputs.target != 'windows-msi-smoke-no-artifact'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: airwiki-windows-x64-unsigned-beta-${{ github.sha }}
@@ -231,6 +237,7 @@ jobs:
           retention-days: 30
           compression-level: 0
       - name: Summarize beta artifact
+        if: inputs.target != 'windows-msi-smoke-no-artifact'
         shell: powershell
         run: |
           $ChecksumSummary = @(

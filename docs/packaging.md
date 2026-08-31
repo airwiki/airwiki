@@ -190,6 +190,14 @@ through `latest.json`, or accepted by the signed promotion workflow. Select
 candidate are also required. Select `public-prerelease` only for the separately
 confirmed and protected publication path below.
 
+Select `windows-msi-smoke-no-artifact` for an internal, destructive validation
+of the freshly built `en-US` MSI without retaining a candidate. That dispatch
+runs only the exact-source validation and the Windows build/clean
+install-uninstall smoke; it skips Linux and macOS jobs, beta staging,
+`upload-artifact`, artifact summaries, attestation, signing, publication and
+release credentials. It does not create a downloadable artifact or release
+evidence, and must not be treated as a technical prerelease.
+
 `prepare-unsigned-windows-beta.ps1` rejects input outside `target`, reparse
 points, unexpected files, a non-official repository identity, a mismatched
 version or commit shape, and anything other than exactly two MSI compound

@@ -3528,6 +3528,18 @@ fn verify_windows_msi_smoke_sources(smoke: &str, smoke_test: &str, pilot: &str) 
             && !pilot.contains("-UpgradeInstaller"),
         "technical candidate CI must run only the clean en-US MSI smoke"
     );
+    const SMOKE_TARGET: &str = "windows-msi-smoke-no-artifact";
+    ensure!(
+        pilot.contains("          - windows-msi-smoke-no-artifact")
+            && pilot.contains("inputs.target == 'windows-msi-smoke-no-artifact'")
+            && pilot
+                .matches("if: inputs.target != 'windows-msi-smoke-no-artifact'")
+                .count()
+                == 3
+            && pilot.contains("if: inputs.target == 'all-internal-candidates' || inputs.target == 'public-prerelease'")
+            && pilot.contains("if: inputs.target == 'public-prerelease'"),
+        "{SMOKE_TARGET} must run only the Windows smoke without artifact, attestation, or publication paths"
+    );
     Ok(())
 }
 

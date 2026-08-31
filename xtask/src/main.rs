@@ -195,7 +195,7 @@ const MCPB_TOOLS: [&str; 8] = [
 const MAX_UPDATER_KEY_OR_SIGNATURE_BYTES: u64 = 16 * 1024;
 const UPDATER_PUBLIC_KEY_ENV: &str = "AIRWIKI_UPDATER_PUBLIC_KEY";
 const PREPARE_RELEASE_WORKFLOW: &str = ".github/workflows/prepare-release.yml";
-const WINDOWS_ESIGNER_WORKFLOW_REFERENCE: &str = "./.github/workflows/windows-esigner.yml";
+const WINDOWS_SIGNPATH_WORKFLOW_REFERENCE: &str = "./.github/workflows/windows-signpath.yml";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -2164,7 +2164,7 @@ fn validate_workflow_uses_at(
 fn is_audited_local_reusable_workflow(path: &Path, location: &str, reference: &str) -> bool {
     path.ends_with(PREPARE_RELEASE_WORKFLOW)
         && location == "jobs.windows-release"
-        && reference == WINDOWS_ESIGNER_WORKFLOW_REFERENCE
+        && reference == WINDOWS_SIGNPATH_WORKFLOW_REFERENCE
 }
 
 fn validate_non_cargo_legal_inventory(root: &Path) -> Result<()> {
@@ -3426,23 +3426,29 @@ fn verify_windows_msi() -> Result<()> {
         .context("reading the managed Windows MSI template")?;
     verify_windows_msi_license_sources(&desktop_config, &template)?;
     verify_windows_msi_sources(&config, &template)?;
-    let workflow = fs::read_to_string(root.join(".github/workflows/windows-esigner.yml"))
-        .context("reading the eSigner Windows workflow")?;
-    let prepare = fs::read_to_string(root.join("packaging/prepare-windows-signing-binaries.ps1"))
-        .context("reading Windows signing binary preparation")?;
-    let package = fs::read_to_string(root.join("packaging/package-signed-windows-msi.ps1"))
-        .context("reading signed Windows MSI packaging")?;
+    let workflow = fs::read_to_string(root.join(".github/workflows/windows-signpath.yml"))
+        .context("reading the SignPath Windows workflow")?;
+    let binaries = fs::read_to_string(root.join(".signpath/windows-binaries.xml"))
+        .context("reading the SignPath binary artifact configuration")?;
+    let msi = fs::read_to_string(root.join(".signpath/windows-msi.xml"))
+        .context("reading the SignPath MSI artifact configuration")?;
+    let prepare = fs::read_to_string(root.join("packaging/prepare-signpath-windows-binaries.ps1"))
+        .context("reading SignPath binary preparation")?;
+    let package = fs::read_to_string(root.join("packaging/package-signpath-windows-msi.ps1"))
+        .context("reading SignPath MSI packaging")?;
     let unsigned_package = fs::read_to_string(root.join("packaging/package-windows.ps1"))
         .context("reading unsigned Windows MSI packaging")?;
-    let verify = fs::read_to_string(root.join("packaging/verify-signed-windows-msi.ps1"))
-        .context("reading signed Windows MSI verification")?;
-    let authenticode = fs::read_to_string(root.join("packaging/windows-authenticode.ps1"))
-        .context("reading Windows Authenticode helpers")?;
+    let verify = fs::read_to_string(root.join("packaging/verify-signpath-windows-msi.ps1"))
+        .context("reading SignPath MSI verification")?;
+    let signpath = fs::read_to_string(root.join("packaging/windows-signpath.ps1"))
+        .context("reading SignPath Authenticode verification helpers")?;
     let updater = fs::read_to_string(root.join("apps/desktop/src/updater.rs"))
         .context("reading the Windows MSI updater implementation")?;
     let main = fs::read_to_string(root.join("apps/desktop/src/main.rs"))
         .context("reading the desktop update shutdown handoff")?;
-    verify_windows_esigner_sources(&workflow, &prepare, &package, &verify, &authenticode)?;
+    verify_windows_signpath_sources(
+        &workflow, &binaries, &msi, &prepare, &package, &verify, &signpath,
+    )?;
     ensure!(
         package
             .matches("packaging generate-windows-msi-resources")
@@ -3653,118 +3659,111 @@ fn verify_windows_msi_sources(config: &str, template: &str) -> Result<()> {
     Ok(())
 }
 
-fn verify_windows_esigner_sources(
+fn verify_windows_signpath_sources(
     workflow: &str,
+    binaries: &str,
+    msi: &str,
     prepare: &str,
     package: &str,
     verify: &str,
-    authenticode: &str,
+    signpath: &str,
 ) -> Result<()> {
     let prepare_runtime_import = ". (Join-Path $PSScriptRoot \"windows-runtime.ps1\")";
     let prepare_payload_import = ". (Join-Path $PSScriptRoot \"windows-payload.ps1\")";
     let prepare_runtime_position = prepare
         .find(prepare_runtime_import)
-        .context("Windows signing binary preparation must import Windows runtime helpers")?;
+        .context("SignPath binary preparation must import Windows runtime helpers")?;
     let prepare_payload_position = prepare
         .find(prepare_payload_import)
-        .context("Windows signing binary preparation must import Windows payload helpers")?;
+        .context("SignPath binary preparation must import Windows payload helpers")?;
     ensure!(
         prepare_runtime_position < prepare_payload_position,
-        "Windows signing binary preparation must import Windows runtime helpers before payload helpers"
+        "SignPath binary preparation must import Windows runtime helpers before payload helpers"
     );
+
+    let pinned_action =
+        "signpath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd";
     ensure!(
-        workflow.matches("runs-on: windows-2022").count() == 2
+        workflow.matches(pinned_action).count() == 2
+            && workflow.matches("runs-on: windows-2022").count() == 2
             && !workflow.contains("self-hosted")
             && workflow.contains("environment: windows-signing")
-            && workflow.contains("SSL_COM_ESIGNER_USERNAME")
-            && workflow.contains("SSL_COM_ESIGNER_PASSWORD")
-            && workflow.contains("SSL_COM_ESIGNER_TOTP_SECRET")
-            && workflow.contains("SSL_COM_ESIGNER_CREDENTIAL_ID")
-            && workflow.contains("SSL.COM.eSigner.CKA_1.1.2_build_202600624.exe")
             && workflow
-                .contains("3F088403139505DDFB0ED3B56B72893F92C865F98B382753A1E1C695A5CECE35")
-            && workflow.contains("code_sign_tool-1.3.3.jar")
-            && workflow
-                .contains("ECDB16FB60C9BE1145F450924B8B1E615BEE08AC45180D5F66B47712A223A6EC")
-            && workflow.contains("actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961")
-            && workflow.contains("java-version: 17.0.20+8")
-            && workflow
-                .matches("java -jar $env:AIRWIKI_CODESIGNTOOL_JAR scan_code")
+                .matches(
+                    "github.repository == 'airwiki/airwiki' && github.ref == 'refs/heads/main'"
+                )
                 .count()
                 == 2
-            && workflow
-                .matches("-credential_id=$env:SSL_COM_ESIGNER_CREDENTIAL_ID")
-                .count()
-                == 2
+            && !workflow.contains("workflow_dispatch:")
+            && workflow.contains("github-artifact-id:")
+            && workflow.contains("secrets.SIGNPATH_API_TOKEN")
+            && workflow.contains("vars.SIGNPATH_BINARIES_CONFIGURATION_SLUG")
+            && workflow.contains("vars.SIGNPATH_MSI_CONFIGURATION_SLUG")
             && workflow.contains(
                 "AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}"
             )
             && workflow.contains("AIRWIKI_RELEASE_VERSION: ${{ inputs.version }}")
-            && workflow.contains("AIRWIKI_WINDOWS_SDK_SIGNTOOL_VERSION: 10.0.26100.0")
-            && workflow.contains("AIRWIKI_ESIGNER_SECRET_TRANSPORT_APPROVED")
-            && workflow.contains(
-                "environment: windows-signing\n    env:\n      AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}\n      AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}\n      AIRWIKI_ESIGNER_SECRET_TRANSPORT_APPROVED: ${{ vars.AIRWIKI_ESIGNER_SECRET_TRANSPORT_APPROVED }}"
-            )
-            && workflow
-                .matches("sslcom-esigner-secret-transport-v1")
-                .count()
-                == 2
-            && workflow
-                .matches(
-                    "Write-Output \"::add-mask::$([Environment]::GetEnvironmentVariable($name))\""
-                )
-                .count()
-                == 2
             && workflow.contains("ref: ${{ inputs.commit_sha }}")
             && workflow.contains("node.exe packaging/release-version.mjs --expect")
-            && workflow.contains("target/windows-signing")
-            && workflow.matches("github.ref == 'refs/heads/main'").count() == 2
-            && !workflow.contains("workflow_dispatch:")
-            && workflow.contains("-Wait -PassThru")
-            && workflow.contains("airwiki-windows-firewall-helper.exe")
-            && workflow.contains("_x64_en-US.msi")
-            && workflow.contains("_x64_es-ES.msi")
-            && workflow.contains("Remove eSigner credentials and logs"),
-        "eSigner workflow must pin signing inputs, restrict refs, scan exact artifacts, and clean private state"
-    );
-    ensure!(
-        authenticode.contains("/fd SHA256 /tr http://ts.ssl.com /td SHA256")
-            && authenticode.contains("verify /pa /all /tw")
-            && authenticode.contains("Get-VerifiedWindowsSignTool")
-            && authenticode.contains("AIRWIKI_WINDOWS_SDK_SIGNTOOL_VERSION")
-            && authenticode.contains("pinned Windows SDK signtool")
-            && authenticode.contains("Microsoft Corporation")
-            && authenticode.contains("Get-ConfiguredWindowsSigningCertificate")
-            && authenticode.contains("$Certificate.HasPrivateKey")
-            && authenticode.contains("one or two distinct uppercase SHA-256")
-            && authenticode.contains(
-                "exactly one configured AirWiki code-signing certificate must be present"
-            ),
-        "Windows Authenticode helpers must select a usable pinned signer and independently verify SHA-256 timestamped signatures"
+            && workflow.contains("SIGNPATH_FOUNDATION_ENROLLMENT")
+            && workflow.contains("SignPath Foundation enrollment is not approved")
+            && workflow
+                .matches("version: \"${{ env.AIRWIKI_RELEASE_VERSION }}\"")
+                .count()
+                == 2,
+        "SignPath workflow must use two pinned, origin-verified signing requests on GitHub-hosted Windows"
     );
     ensure!(
         !workflow.contains("AZURE_")
             && !workflow.contains("artifact-signing")
             && !workflow.contains("Disable")
             && !workflow.contains("Set-RuleOption"),
-        "eSigner workflow must not retain Azure signing or weaken Windows execution policy"
+        "SignPath workflow must not retain Azure signing or weaken Windows execution policy"
+    );
+    ensure!(
+        binaries.matches("<authenticode-sign />").count() == 3
+            && binaries.contains("<parameter name=\"version\" required=\"true\" />")
+            && binaries.matches("product-name=\"AirWiki\"").count() == 3
+            && binaries.matches("product-version=\"${version}\"").count() == 3
+            && binaries.contains("path=\"airwiki.exe\"")
+            && binaries.contains("path=\"airwiki-mcp-bridge.exe\"")
+            && binaries.contains("path=\"airwiki-windows-firewall-helper.exe\""),
+        "SignPath binary configuration must sign exactly the three AirWiki executables"
+    );
+    ensure!(
+        msi.matches("<msi-file-set ").count() == 1
+            && msi.contains("<parameter name=\"version\" required=\"true\" />")
+            && msi.matches("product-name=\"AirWiki\"").count() == 4
+            && msi.matches("product-version=\"${version}\"").count() == 4
+            && msi.matches("<include path=\"AirWiki_").count() == 2
+            && msi.matches("<authenticode-sign />").count() == 1
+            && msi.matches("<authenticode-verify />").count() == 4
+            && msi.contains("AirWiki_*_x64_en-US.msi")
+            && msi.contains("AirWiki_*_x64_es-ES.msi")
+            && msi.contains("server/airwiki-mcp-bridge.exe"),
+        "SignPath MSI configuration must verify every nested AirWiki binary and sign both localized MSI containers"
     );
     ensure!(
         prepare.contains("Set-WindowsMsiBundleType $Desktop")
             && prepare.contains("SignatureStatus]::NotSigned")
             && package.contains("Assert-WindowsMsiBundleType $SignedDesktop")
-            && package.contains("Get-VerifiedWindowsAuthenticodeSignature")
+            && package.contains("Get-VerifiedSignPathSignature")
+            && package.matches("Assert-ExpectedSignPathSigner").count() >= 3
+            && signpath.contains("Get-VerifiedWindowsSignTool")
+            && signpath.contains("verify /pa /all /tw")
+            && signpath.contains("/ds 0")
+            && signpath.contains("/ds 1")
             && package.contains("mcpb build")
             && package.contains(
                 "$Signature.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned"
             )
-            && verify.contains("Assert-ExpectedWindowsSigner")
+            && verify.contains("Assert-ExpectedSignPathSigner")
             && verify.contains("mcpb verify")
             && verify.contains("localized MSI payloads contain different product bytes")
             && workflow.contains("Sign final MSI bytes for the Tauri updater")
             && verify.contains("packaging verify-updater-signature")
             && verify.contains("Tauri updater signature verification failed"),
-        "Windows signing preparation, packaging and final verification do not preserve staged binary identity"
+        "SignPath preparation, packaging and final verification do not preserve the staged binary identity"
     );
     Ok(())
 }
@@ -8016,7 +8015,7 @@ policy:
     fn workflow_gate_accepts_the_audited_windows_release_relationship() {
         validate_workflow_action_references_in(
             Path::new(PREPARE_RELEASE_WORKFLOW),
-            "jobs:\n  windows-release:\n    uses: ./.github/workflows/windows-esigner.yml\n",
+            "jobs:\n  windows-release:\n    uses: ./.github/workflows/windows-signpath.yml\n",
         )
         .unwrap();
     }
@@ -8036,7 +8035,7 @@ policy:
     fn workflow_gate_rejects_local_workflow_traversal() {
         let error = validate_workflow_action_references_in(
             Path::new(PREPARE_RELEASE_WORKFLOW),
-            "jobs:\n  windows-release:\n    uses: ./.github/workflows/../windows-esigner.yml\n",
+            "jobs:\n  windows-release:\n    uses: ./.github/workflows/../windows-signpath.yml\n",
         )
         .unwrap_err();
 
@@ -8047,7 +8046,7 @@ policy:
     fn workflow_gate_rejects_a_local_action_in_the_audited_release_job() {
         let error = validate_workflow_action_references_in(
             Path::new(PREPARE_RELEASE_WORKFLOW),
-            "jobs:\n  windows-release:\n    uses: ./.github/actions/windows-esigner\n",
+            "jobs:\n  windows-release:\n    uses: ./.github/actions/windows-signpath\n",
         )
         .unwrap_err();
 
@@ -8058,7 +8057,7 @@ policy:
     fn workflow_gate_rejects_the_windows_workflow_from_another_caller() {
         let error = validate_workflow_action_references_in(
             Path::new(".github/workflows/example.yml"),
-            "jobs:\n  windows-release:\n    uses: ./.github/workflows/windows-esigner.yml\n",
+            "jobs:\n  windows-release:\n    uses: ./.github/workflows/windows-signpath.yml\n",
         )
         .unwrap_err();
 
@@ -9478,7 +9477,7 @@ policy:
                 && prepare.contains("commit_sha:")
                 && prepare.contains("checks: read")
                 && prepare.contains("environment: macos-signing")
-                && prepare.contains("uses: ./.github/workflows/windows-esigner.yml")
+                && prepare.contains("uses: ./.github/workflows/windows-signpath.yml")
                 && prepare.contains("--draft")
                 && prepare.contains("--prerelease")
                 && prepare.contains("--target \"$AIRWIKI_RELEASE_COMMIT\"")
@@ -9496,7 +9495,7 @@ policy:
                 && promote.contains("$is_draft\" == \"false\"")
                 && promote.contains("$is_prerelease\" == \"false\"")
                 && promote.contains("verify-macos-release.sh")
-                && promote.contains("verify-signed-windows-msi.ps1")
+                && promote.contains("verify-signpath-windows-msi.ps1")
                 && promote.contains("Release target changed after verification.")
                 && promote
                     .contains("Stable recovery is allowed only for the current latest release.")

@@ -9,6 +9,17 @@ re-downloads and verifies it on macOS and Windows before protected human
 approval makes it public. A workflow run never moves or overwrites an existing
 release tag.
 
+## Proposed SignPath Foundation prerequisite
+
+ADR 0016 is a proposed, Windows-only alternative that has not replaced the
+current provider decision. If accepted, it requires SignPath Foundation project
+acceptance, MFA for the public requester `machester4` and independent approver
+`bryanTechera`, a separate manual SignPath approval, and protected token, slugs
+and certificate fingerprint. The existing `windows-signing` environment is
+main-only with self-review and administrator bypass disabled; it has no
+SignPath token or variables today, so the reusable workflow fails closed before
+any request. The public release notes must include `Free code signing provided by SignPath.io, certificate by SignPath Foundation` and link the [Code signing policy](code-signing-policy.md).
+
 Unsigned candidates from **Package technical candidates** are a separate
 technical-testing channel. A protected run may publish them as a clearly marked
 `v<version>-beta.<number>` GitHub pre-release, but those assets are never inputs

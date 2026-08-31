@@ -58,9 +58,16 @@ constitute a supported public release.
 
 ## Windows x64
 
+- [ ] SignPath Foundation has accepted the project; retain only the minimum
+  approval evidence, configure its protected token/slugs/fingerprint, and keep
+  the separate manual request approval and MFA in place. Do not set the
+  enrollment gate before this review.
+- [ ] Put `Free code signing provided by SignPath.io, certificate by SignPath Foundation` and a link named [Code signing policy](code-signing-policy.md) in
+  the stable release notes.
+
 - [ ] Build the pinned llama.cpp runtime twice in isolated roots and require
   byte-identical output plus a complete build manifest.
-- [ ] Complete SSL.com entity prevalidation and purchase the OV certificate plus
+- [ ] If ADR 0016 is rejected, complete SSL.com entity prevalidation and purchase the OV certificate plus
   eSigner tier; provision the credential in the cloud HSM without exporting its
   key.
 - [ ] In the second-approved `windows-signing` environment, verify hash-pinned

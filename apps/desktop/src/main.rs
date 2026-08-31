@@ -47,7 +47,7 @@ use tauri::{
     AppHandle, Emitter, Manager, WindowEvent,
     image::Image,
     ipc::Channel,
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
 };
 use tokio::sync::{Semaphore, broadcast, mpsc, oneshot, watch};
@@ -79,6 +79,44 @@ const TRAY_ICON_WIDTH: u32 = 24;
 const TRAY_ICON_HEIGHT: u32 = 24;
 const TRAY_ICON_RGBA: &[u8; 2_304] =
     include_bytes!("../../../resources/branding/airwiki-tray.rgba");
+const NATIVE_MENU_COMMAND_EVENT: &str = "native-menu-command";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NativeMenuCommand {
+    NewWiki,
+    Library,
+    Search,
+    Settings,
+}
+
+impl NativeMenuCommand {
+    fn from_menu_id(id: &str) -> Option<Self> {
+        match id {
+            "native-menu-new-wiki" => Some(Self::NewWiki),
+            "native-menu-library" => Some(Self::Library),
+            "native-menu-search" => Some(Self::Search),
+            "native-menu-settings" => Some(Self::Settings),
+            _ => None,
+        }
+    }
+
+    const fn event_payload(self) -> &'static str {
+        match self {
+            Self::NewWiki => "new-wiki",
+            Self::Library => "library",
+            Self::Search => "search",
+            Self::Settings => "settings",
+        }
+    }
+}
+
+fn handle_native_menu_event(app: &AppHandle, id: &str) {
+    if id == "native-menu-quit" {
+        begin_shutdown(app.clone());
+    } else if let Some(command) = NativeMenuCommand::from_menu_id(id) {
+        let _ = app.emit(NATIVE_MENU_COMMAND_EVENT, command.event_payload());
+    }
+}
 
 #[derive(Clone, Copy)]
 enum NativeConfirmation {
@@ -3852,6 +3890,163 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn native_menu_label(labels: Option<&Localization>, id: &str, fallback: &str) -> String {
+    labels
+        .and_then(|localization| localization.text(id))
+        .unwrap_or_else(|| fallback.to_owned())
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn install_native_menu(app: &AppHandle, locale: UiLocale) -> tauri::Result<()> {
+    let labels = Localization::new(locale).ok();
+    let new_wiki = MenuItem::with_id(
+        app,
+        "native-menu-new-wiki",
+        native_menu_label(labels.as_ref(), "native-menu-new-wiki", "New wiki…"),
+        true,
+        Some("CmdOrCtrl+N"),
+    )?;
+    let library = MenuItem::with_id(
+        app,
+        "native-menu-library",
+        native_menu_label(labels.as_ref(), "native-menu-library", "Library"),
+        true,
+        None::<&str>,
+    )?;
+    let search = MenuItem::with_id(
+        app,
+        "native-menu-search",
+        native_menu_label(labels.as_ref(), "native-menu-search", "Search"),
+        true,
+        None::<&str>,
+    )?;
+    let settings = MenuItem::with_id(
+        app,
+        "native-menu-settings",
+        native_menu_label(labels.as_ref(), "native-menu-settings", "Settings"),
+        true,
+        None::<&str>,
+    )?;
+    #[cfg(target_os = "macos")]
+    let quit = MenuItem::with_id(
+        app,
+        "native-menu-quit",
+        native_menu_label(labels.as_ref(), "native-menu-quit", "Quit AirWiki"),
+        true,
+        Some("CmdOrCtrl+Q"),
+    )?;
+
+    #[cfg(target_os = "macos")]
+    let file = Submenu::with_items(
+        app,
+        native_menu_label(labels.as_ref(), "native-menu-file", "File"),
+        true,
+        &[&new_wiki],
+    )?;
+    #[cfg(target_os = "windows")]
+    let file = {
+        let file_separator = PredefinedMenuItem::separator(app)?;
+        let close = PredefinedMenuItem::close_window(app, None)?;
+        let exit = MenuItem::with_id(
+            app,
+            "native-menu-quit",
+            native_menu_label(labels.as_ref(), "native-menu-exit", "Exit AirWiki"),
+            true,
+            Some("CmdOrCtrl+Q"),
+        )?;
+        Submenu::with_items(
+            app,
+            native_menu_label(labels.as_ref(), "native-menu-file", "File"),
+            true,
+            &[&new_wiki, &file_separator, &close, &exit],
+        )?
+    };
+    let undo = PredefinedMenuItem::undo(app, None)?;
+    let redo = PredefinedMenuItem::redo(app, None)?;
+    let edit_separator = PredefinedMenuItem::separator(app)?;
+    let cut = PredefinedMenuItem::cut(app, None)?;
+    let copy = PredefinedMenuItem::copy(app, None)?;
+    let paste = PredefinedMenuItem::paste(app, None)?;
+    let select_all = PredefinedMenuItem::select_all(app, None)?;
+    let edit = Submenu::with_items(
+        app,
+        native_menu_label(labels.as_ref(), "native-menu-edit", "Edit"),
+        true,
+        &[
+            &undo,
+            &redo,
+            &edit_separator,
+            &cut,
+            &copy,
+            &paste,
+            &select_all,
+        ],
+    )?;
+    let view = Submenu::with_items(
+        app,
+        native_menu_label(labels.as_ref(), "native-menu-view", "View"),
+        true,
+        &[&library, &search, &settings],
+    )?;
+    let minimize = PredefinedMenuItem::minimize(app, None)?;
+    let maximize = PredefinedMenuItem::maximize(app, None)?;
+    #[cfg(target_os = "macos")]
+    let window_separator = PredefinedMenuItem::separator(app)?;
+    #[cfg(target_os = "macos")]
+    let close = PredefinedMenuItem::close_window(app, None)?;
+    #[cfg(target_os = "macos")]
+    let window = Submenu::with_id_and_items(
+        app,
+        tauri::menu::WINDOW_SUBMENU_ID,
+        native_menu_label(labels.as_ref(), "native-menu-window", "Window"),
+        true,
+        &[&minimize, &maximize, &window_separator, &close],
+    )?;
+    #[cfg(target_os = "windows")]
+    let window = Submenu::with_id_and_items(
+        app,
+        tauri::menu::WINDOW_SUBMENU_ID,
+        native_menu_label(labels.as_ref(), "native-menu-window", "Window"),
+        true,
+        &[&minimize, &maximize],
+    )?;
+
+    #[cfg(target_os = "macos")]
+    let menu = {
+        let about = PredefinedMenuItem::about(app, None, None)?;
+        let services = PredefinedMenuItem::services(app, None)?;
+        let hide = PredefinedMenuItem::hide(app, None)?;
+        let hide_others = PredefinedMenuItem::hide_others(app, None)?;
+        let show_all = PredefinedMenuItem::show_all(app, None)?;
+        let app_separator_one = PredefinedMenuItem::separator(app)?;
+        let app_separator_two = PredefinedMenuItem::separator(app)?;
+        let app_separator_three = PredefinedMenuItem::separator(app)?;
+        let app_menu = Submenu::with_items(
+            app,
+            "AirWiki",
+            true,
+            &[
+                &about,
+                &app_separator_one,
+                &services,
+                &app_separator_two,
+                &hide,
+                &hide_others,
+                &show_all,
+                &app_separator_three,
+                &quit,
+            ],
+        )?;
+        Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window])?
+    };
+    #[cfg(target_os = "windows")]
+    let menu = Menu::with_items(app, &[&file, &edit, &view, &window])?;
+
+    app.set_menu(menu)?;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CloseAction {
     Hide,
@@ -6667,6 +6862,9 @@ fn main() -> Result<()> {
     let builder = tauri::Builder::default();
     #[cfg(feature = "e2e")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+    let builder = builder.on_menu_event(|app, event| {
+        handle_native_menu_event(app, event.id().as_ref());
+    });
 
     let result = builder
         .plugin(navigation_guard())
@@ -6690,6 +6888,9 @@ fn main() -> Result<()> {
             worker_finished: Mutex::new(Some(worker_finished)),
         })
         .setup(move |app| {
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            install_native_menu(app.handle(), UiLocale::from_system())
+                .context("failed to install native application menu")?;
             let updater_backend = UpdaterBuildConfig::from_compile_time()
                 .and_then(|config| TauriUpdateBackend::new(app.handle().clone(), config))
                 .map(|backend| Box::new(backend) as Box<dyn UpdateBackend>);
@@ -6734,6 +6935,22 @@ fn main() -> Result<()> {
                     let knowledge_reload =
                         application_wiki_reload_target(&snapshot, &event, &presentation_requests);
                     let request_id = worker_event_request_id(&event);
+                    #[cfg(any(target_os = "macos", target_os = "windows"))]
+                    if let WorkerEvent::DesktopPreferencesUpdated {
+                        result: Ok(preferences),
+                        ..
+                    } = &event
+                        && let Err(error) = install_native_menu(
+                            &presentation_app,
+                            UiLocale::from(preferences.locale),
+                        )
+                    {
+                        tracing::warn!(
+                            error_kind = "native_menu_unavailable",
+                            error = %error,
+                            "native application menu refresh failed"
+                        );
+                    }
                     snapshot
                         .apply(
                             event,
@@ -6924,6 +7141,25 @@ mod tests {
     fn background_mode_requires_the_exact_flag() {
         assert!(launch_in_background(["--background"]));
         assert!(!launch_in_background(["background", "--foreground"]));
+    }
+
+    #[test]
+    fn native_menu_commands_only_map_known_navigation_intents() {
+        let cases = [
+            ("native-menu-new-wiki", "new-wiki"),
+            ("native-menu-library", "library"),
+            ("native-menu-search", "search"),
+            ("native-menu-settings", "settings"),
+        ];
+
+        for (id, expected_payload) in cases {
+            assert_eq!(
+                NativeMenuCommand::from_menu_id(id).map(NativeMenuCommand::event_payload),
+                Some(expected_payload)
+            );
+        }
+        assert_eq!(NativeMenuCommand::from_menu_id("native-menu-quit"), None);
+        assert_eq!(NativeMenuCommand::from_menu_id("unrelated"), None);
     }
 
     #[test]

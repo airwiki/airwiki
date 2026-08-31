@@ -25,6 +25,14 @@ env:
   CARGO_TERM_COLOR: always
   AIRWIKI_RELEASE_COMMIT: ${{ inputs.commit_sha }}
   AIRWIKI_UPDATE_ENDPOINT: https://github.com/airwiki/airwiki/releases/latest/download/latest.json
+  AIRWIKI_REQUIRED_RELEASE_CHECKS: |
+    Frontend checks (macos-arm64)
+    Frontend checks (windows-x64)
+    Rust checks (macos-14)
+    Rust checks (windows-2022)
+    Advisories, licenses and sources
+    Sign-off
+    Launch site checks
 
 jobs:
   notarize:
@@ -83,22 +91,23 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
           check_runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$commit/check-runs?per_page=100")"
-          required_checks=(
-            "Frontend checks (macos-arm64)"
-            "Frontend checks (windows-x64)"
-            "Rust checks (macos-14)"
-            "Rust checks (windows-2022)"
-            "Advisories, licenses and sources"
-          )
-          for check in "${required_checks[@]}"; do
-            conclusion="$(jq -r --arg name "$check" \
-              '[.check_runs[] | select(.name == $name)][0].conclusion // "missing"' \
+          while IFS= read -r check; do
+            [[ -n "$check" ]] || continue
+            matching_count="$(jq -r --arg name "$check" \
+              '[.check_runs[] | select(.name == $name)] | length' \
               <<<"$check_runs")"
-            if [[ "$conclusion" != "success" ]]; then
-              echo "Required release check '$check' is $conclusion." >&2
+            if [[ "$matching_count" != "1" ]]; then
+              echo "Required release check '$check' must have exactly one run; found $matching_count." >&2
               exit 1
             fi
-          done
+            if ! jq -e --arg name "$check" '
+              [.check_runs[] | select(.name == $name)] |
+              all(.[]; .conclusion == "success" and .app.slug == "github-actions" and .app.id == 15368)
+            ' <<<"$check_runs" >/dev/null; then
+              echo "Required release check '$check' is not a successful GitHub Actions run." >&2
+              exit 1
+            fi
+          done <<<"$AIRWIKI_REQUIRED_RELEASE_CHECKS"
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: 1.96.1
@@ -167,12 +176,99 @@ jobs:
 
           APPLE_API_KEY_PATH="$api_key" ./packaging/release-macos.sh
           ./packaging/verify-macos-release.sh target/packages/macos
+      - name: Revalidate source and green release gates before recording receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          commit="$(git rev-parse HEAD)"
+          main="$(git rev-parse origin/main)"
+          if [[ "$commit" != "$AIRWIKI_RELEASE_COMMIT" || "$commit" != "$main" ]]; then
+            echo "Rehearsal commit changed before recording the receipt." >&2
+            exit 1
+          fi
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "Rehearsal source checkout is not clean before recording the receipt." >&2
+            exit 1
+          fi
+          check_runs="$(gh api "repos/$GITHUB_REPOSITORY/commits/$commit/check-runs?per_page=100")"
+          while IFS= read -r check; do
+            [[ -n "$check" ]] || continue
+            matching_count="$(jq -r --arg name "$check" \
+              '[.check_runs[] | select(.name == $name)] | length' \
+              <<<"$check_runs")"
+            if [[ "$matching_count" != "1" ]]; then
+              echo "Required release check '$check' must have exactly one run; found $matching_count." >&2
+              exit 1
+            fi
+            if ! jq -e --arg name "$check" '
+              [.check_runs[] | select(.name == $name)] |
+              all(.[]; .conclusion == "success" and .app.slug == "github-actions" and .app.id == 15368)
+            ' <<<"$check_runs" >/dev/null; then
+              echo "Required release check '$check' is not a successful GitHub Actions run." >&2
+              exit 1
+            fi
+          done <<<"$AIRWIKI_REQUIRED_RELEASE_CHECKS"
+      - name: Record non-binary rehearsal receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/macos-notarization-rehearsal-receipt.json"
+          python3 - "$receipt" "$AIRWIKI_RELEASE_COMMIT" "$AIRWIKI_RELEASE_VERSION" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          receipt, commit, version = sys.argv[1:]
+          package_directory = Path("target/packages/macos")
+          names = [
+              f"AirWiki_{version}_aarch64.dmg",
+              "AirWiki.app.tar.gz",
+              "AirWiki.app.tar.gz.sig",
+          ]
+          artifacts = []
+          for name in names:
+              artifact = package_directory / name
+              if artifact.is_symlink() or not artifact.is_file():
+                  raise ValueError(f"missing regular rehearsal artifact: {name}")
+              digest = hashlib.sha256()
+              with artifact.open("rb") as payload:
+                  for chunk in iter(lambda: payload.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              artifacts.append(
+                  {
+                      "name": name,
+                      "sha256": digest.hexdigest(),
+                  }
+              )
+          Path(receipt).write_text(
+              json.dumps(
+                  {
+                      "schema": "airwiki-macos-notarization-rehearsal-receipt-v1",
+                      "commit": commit,
+                      "version": version,
+                      "verification": "release-macos-and-verify-macos-release-completed",
+                      "artifacts": artifacts,
+                  },
+                  indent=2,
+                  sort_keys=True,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          PY
+          {
+            echo "### macOS notarization rehearsal"
+            echo
+            echo "Native signing and notarization verification completed for the requested commit."
+            echo "No installer, updater archive, signature, tag, release, or updater manifest is retained or published by this workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: airwiki-macos-arm64-notarization-rehearsal-${{ inputs.commit_sha }}
-          path: |
-            target/packages/macos/AirWiki_${{ steps.source.outputs.version }}_aarch64.dmg
-            target/packages/macos/AirWiki.app.tar.gz
-            target/packages/macos/AirWiki.app.tar.gz.sig
+          name: airwiki-macos-notarization-rehearsal-receipt-${{ inputs.commit_sha }}
+          path: ${{ runner.temp }}/macos-notarization-rehearsal-receipt.json
           if-no-files-found: error
           retention-days: 14

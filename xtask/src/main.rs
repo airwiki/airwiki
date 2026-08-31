@@ -9551,14 +9551,35 @@ policy:
                 && rehearsal.contains("actions: read")
                 && rehearsal.contains("checks: read")
                 && rehearsal.contains("contents: read")
+                && rehearsal.contains("Frontend checks (macos-arm64)")
+                && rehearsal.contains("Frontend checks (windows-x64)")
+                && rehearsal.contains("Rust checks (macos-14)")
+                && rehearsal.contains("Rust checks (windows-2022)")
+                && rehearsal.contains("Advisories, licenses and sources")
+                && rehearsal.contains("Sign-off")
+                && rehearsal.contains("Launch site checks")
                 && rehearsal.contains("./packaging/release-macos.sh")
                 && rehearsal.contains("./packaging/verify-macos-release.sh")
+                && rehearsal
+                    .contains("Revalidate source and green release gates before recording receipt")
+                && rehearsal.contains("must have exactly one run")
+                && rehearsal.contains(".app.slug == \"github-actions\"")
+                && rehearsal.contains(".app.id == 15368")
+                && rehearsal.contains("Record non-binary rehearsal receipt")
+                && rehearsal.contains("airwiki-macos-notarization-rehearsal-receipt-")
+                && rehearsal.contains("macos-notarization-rehearsal-receipt.json")
+                && rehearsal.contains(
+                    "No installer, updater archive, signature, tag, release, or updater manifest"
+                )
                 && rehearsal.contains("retention-days: 14")
+                && !rehearsal.contains("name: airwiki-macos-arm64-notarization-rehearsal-")
+                && !rehearsal.contains("path: |\n            target/packages/macos")
                 && !rehearsal.contains("id-token:")
                 && !rehearsal.contains("gh release")
                 && !rehearsal.contains("contents: write")
                 && !rehearsal.contains("generate-update-manifest.py")
                 && !rehearsal.contains("packaging/release_assets.py")
+                && !rehearsal.contains("][0]")
         );
     }
 

@@ -124,10 +124,17 @@ current 40-character `commit_sha` and set `rehearsal_confirmation` to exactly
 `rehearse-macos-notarization-<commit_sha>`. The workflow permits only the clean,
 current green tip of `airwiki/airwiki` `main`, uses the same protected macOS
 identity and ephemeral keychain/API-key handling as release preparation, and
-verifies the final DMG and updater archive. It uploads only those three private
-artifacts for 14 days. It cannot create tags or releases, publish `latest.json`,
-or request OIDC credentials; a successful rehearsal is evidence of the macOS
-path only and does not promote a release.
+verifies the final DMG and updater archive. Immediately before recording any
+evidence it again requires that the checkout and `origin/main` resolve to that SHA,
+that the checkout is clean, and that every named release context has exactly one
+successful run from the GitHub Actions app: both Frontend and Rust platform
+checks, Advisories/licenses/sources, Sign-off, and Launch site checks. It never
+uploads the signed binaries: GitHub Actions artifacts are not a private package
+channel. The only retained evidence is a 14-day JSON receipt with the commit,
+version, verification result, artifact names and SHA-256 values; it contains no
+installer bytes, paths, signing identity or credentials. It cannot create tags
+or releases, publish `latest.json`, or request OIDC credentials; a successful
+rehearsal is evidence of the macOS path only and does not promote a release.
 
 Before enabling the protected job, prevalidate the project entity with SSL.com
 and purchase the OV code-signing certificate plus required eSigner tier. Keep

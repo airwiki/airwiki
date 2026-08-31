@@ -60,9 +60,20 @@ constitute a supported public release.
 
 - [ ] Build the pinned llama.cpp runtime twice in isolated roots and require
   byte-identical output plus a complete build manifest.
-- [ ] Use the origin-verified SignPath workflow to sign the desktop, bridge and
-  firewall helper before packaging, then sign both localized MSI containers
-  with the approved public-trust identity and RFC3161 timestamps.
+- [ ] Complete SSL.com entity prevalidation and purchase the OV certificate plus
+  eSigner tier; provision the credential in the cloud HSM without exporting its
+  key.
+- [ ] In the second-approved `windows-signing` environment, verify hash-pinned
+  CKA from the reviewed `SSLcom/eSignerCKA` release and separately hash-pinned
+  CodeSignTool inputs plus the explicit `10.0.26100.0/x64` Windows SDK
+  `signtool`; pass the
+  CodeSignTool malware scan before signing the desktop, bridge, firewall helper,
+  and both localized MSI containers with timestamps.
+- [ ] Record SSL.com's written confirmation of the signing-secret transport, or
+  an explicit approver acceptance of its remaining risk, then set the protected
+  environment variable `AIRWIKI_ESIGNER_SECRET_TRANSPORT_APPROVED` to exactly
+  `sslcom-esigner-secret-transport-v1`. Any other value must stop signing before
+  CKA or CodeSignTool runs.
 - [ ] Validate Authenticode, code-signing EKU, durable publisher identity, PE
   version metadata, helper elevation manifest, runtime imports, nested MSI
   signatures, and exact payload.
@@ -85,8 +96,8 @@ constitute a supported public release.
   artifact URLs and detached signatures in the candidate.
 - [ ] Reject invalid signatures, equal versions, downgrades, replayed historical
   installers, symlinks, reparse points, and unexpected assets. Treat hosting
-  redirects as untrusted transport and verify the final downloaded bytes with
-  both the updater signature and native platform trust.
+  redirects as untrusted transport, verify every downloaded artifact with its
+  updater signature, and recheck the downloaded Windows MSI with native trust.
 - [ ] Create a draft prerelease tied to the exact audited commit.
 - [ ] Protect `v*` tags against update and deletion; resolve the release target
   and final tag to the exact audited commit immediately before publication.
@@ -124,8 +135,8 @@ The official source repository is [airwiki/airwiki](https://github.com/airwiki/a
 The repository now contains fail-closed preparation and promotion workflows,
 and the protected environments plus macOS credentials are configured. No
 signed and notarized candidate has completed the protected workflow yet. Public
-release remains blocked on Windows public-trust signing configuration,
-validated updater-key recovery custody, a monitored Code of Conduct contact,
-legal review and the complete installed acceptance matrix. Clearing any one
-blocker does not waive the others. Follow the
+release remains blocked on SSL.com entity onboarding, eSigner credentials and a
+protected signing run, installed Windows signing/update acceptance, validated
+updater-key recovery custody, a monitored Code of Conduct contact, legal review
+and the complete installed acceptance matrix. Clearing any one blocker does not waive the others. Follow the
 [public release process](release-process.md).

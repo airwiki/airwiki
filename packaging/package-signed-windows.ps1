@@ -1,6 +1,10 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+if ($env:AIRWIKI_ENABLE_LEGACY_ARTIFACT_SIGNING -cne "true") {
+    throw "the retired Artifact Signing/NSIS experiment is disabled; use windows-esigner.yml"
+}
+
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $ReleaseDir = Join-Path $Root "target\x86_64-pc-windows-msvc\release"
 $Bridge = Join-Path $ReleaseDir "airwiki-mcp-bridge.exe"

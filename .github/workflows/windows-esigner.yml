@@ -1,0 +1,209 @@
+name: Windows eSigner MSI candidate
+
+on:
+  workflow_call:
+    inputs:
+      version: { required: true, type: string }
+      commit_sha: { required: true, type: string }
+
+permissions: { actions: read, contents: read }
+concurrency:
+  group: windows-esigner-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  CARGO_TERM_COLOR: always
+  AIRWIKI_UPDATE_ENDPOINT: https://github.com/airwiki/airwiki/releases/latest/download/latest.json
+  AIRWIKI_RELEASE_VERSION: ${{ inputs.version }}
+  AIRWIKI_RELEASE_COMMIT: ${{ inputs.commit_sha }}
+  AIRWIKI_WINDOWS_SDK_SIGNTOOL_VERSION: 10.0.26100.0
+
+jobs:
+  build-signing-inputs:
+    if: github.repository == 'airwiki/airwiki' && github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
+      AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with: { node-version: 24.15.0, package-manager-cache: false }
+      - name: Validate exact release source
+        shell: powershell
+        run: |
+          if ($env:GITHUB_REPOSITORY -cne "airwiki/airwiki") { throw "release signing is restricted to airwiki/airwiki" }
+          if ((git rev-parse HEAD).Trim() -cne $env:AIRWIKI_RELEASE_COMMIT -or (git rev-parse HEAD).Trim() -cne (git rev-parse origin/main).Trim()) { throw "release commit must be the exact current tip of main" }
+          node.exe packaging/release-version.mjs --expect $env:AIRWIKI_RELEASE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "release version validation failed" }
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: 1.96.1, targets: x86_64-pc-windows-msvc }
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install pinned frontend dependencies
+        shell: powershell
+        run: |
+          corepack enable; corepack prepare pnpm@10.18.3 --activate
+          pnpm.cmd --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
+          pnpm.cmd --dir apps/desktop/ui run licenses:check windows-x64
+      - name: Prepare unsigned Windows signing input
+        shell: powershell
+        run: ./packaging/prepare-windows-signing-binaries.ps1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with: { name: airwiki-windows-signing-binaries, path: target/windows-signing/windows-binaries, if-no-files-found: error, retention-days: 7 }
+
+  sign-and-package:
+    if: github.repository == 'airwiki/airwiki' && github.ref == 'refs/heads/main'
+    needs: build-signing-inputs
+    runs-on: windows-2022
+    timeout-minutes: 90
+    environment: windows-signing
+    env:
+      AIRWIKI_UPDATER_PUBLIC_KEY: ${{ vars.AIRWIKI_UPDATER_PUBLIC_KEY }}
+      AIRWIKI_WINDOWS_SIGNER_SHA256: ${{ vars.AIRWIKI_WINDOWS_SIGNER_SHA256 }}
+      AIRWIKI_ESIGNER_SECRET_TRANSPORT_APPROVED: ${{ vars.AIRWIKI_ESIGNER_SECRET_TRANSPORT_APPROVED }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with: { node-version: 24.15.0, package-manager-cache: false }
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: 17.0.20+8
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        with: { toolchain: 1.96.1, targets: x86_64-pc-windows-msvc }
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install pinned frontend dependencies
+        shell: powershell
+        run: |
+          corepack enable; corepack prepare pnpm@10.18.3 --activate
+          pnpm.cmd --dir apps/desktop/ui install --frozen-lockfile --ignore-scripts --prod=false
+          pnpm.cmd --dir apps/desktop/ui run licenses:check windows-x64
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: airwiki-windows-signing-binaries
+          path: target/windows-signing/windows-binaries
+      - name: Download and verify SSL.com tools
+        shell: powershell
+        run: |
+          $stage = Join-Path $env:GITHUB_WORKSPACE "target\windows-signing\esigner"; New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          # CKA is obtained from SSL.com's published GitHub release; CodeSignTool
+          # is a separately versioned SSL.com distribution and never inferred from CKA.
+          $scan = Join-Path $stage "CodeSignTool-v1.3.3.zip"; Invoke-WebRequest -Uri "https://www.ssl.com/download/codesigntool-for-linux-and-macos/?tmstv=1784307706" -OutFile $scan
+          if ((Get-FileHash $scan -Algorithm SHA256).Hash -cne "ECDB16FB60C9BE1145F450924B8B1E615BEE08AC45180D5F66B47712A223A6EC") { throw "CodeSignTool SHA-256 mismatch" }
+          Expand-Archive $scan -DestinationPath $stage -Force
+          $scanner = @(Get-ChildItem $stage -Recurse -File -Filter "code_sign_tool-1.3.3.jar")
+          if ($scanner.Count -ne 1 -or -not (Get-Command java -ErrorAction SilentlyContinue)) { throw "pinned CodeSignTool Java layout is unexpected" }
+          $cka = Join-Path $stage "SSL.COM.eSigner.CKA_1.1.2_build_202600624.exe"
+          Invoke-WebRequest -Uri "https://github.com/SSLcom/eSignerCKA/releases/download/v1.1.2/SSL.COM.eSigner.CKA_1.1.2_build_202600624.exe" -OutFile $cka
+          if ((Get-FileHash $cka -Algorithm SHA256).Hash -cne "3F088403139505DDFB0ED3B56B72893F92C865F98B382753A1E1C695A5CECE35") { throw "eSigner CKA SHA-256 mismatch" }
+          $install = Join-Path $stage "install"
+          $installer = Start-Process $cka -ArgumentList "/TYPE=automatic /CURRENTUSER /VERYSILENT /SUPPRESSMSGBOXES /DIR=`"$install`"" -Wait -PassThru
+          if ($installer.ExitCode -ne 0) { throw "eSigner CKA installation failed" }
+          $tool = Join-Path $install "eSignerCKATool.exe"
+          $register = Join-Path $install "RegisterKSP.exe"
+          if (!(Test-Path $tool -PathType Leaf) -or !(Test-Path $register -PathType Leaf)) { throw "eSigner CKA installation is incomplete" }
+          $master = Join-Path $stage "master.key"
+          "AIRWIKI_CODESIGNTOOL_JAR=$($scanner[0].FullName)" >> $env:GITHUB_ENV; "AIRWIKI_ESIGNER_TOOL=$tool" >> $env:GITHUB_ENV; "AIRWIKI_ESIGNER_MASTER_KEY=$master" >> $env:GITHUB_ENV; "AIRWIKI_ESIGNER_REGISTER=$register" >> $env:GITHUB_ENV
+      - name: Scan malware, configure CKA, and sign PE binaries
+        env:
+          SSL_COM_ESIGNER_USERNAME: ${{ secrets.SSL_COM_ESIGNER_USERNAME }}
+          SSL_COM_ESIGNER_PASSWORD: ${{ secrets.SSL_COM_ESIGNER_PASSWORD }}
+          SSL_COM_ESIGNER_TOTP_SECRET: ${{ secrets.SSL_COM_ESIGNER_TOTP_SECRET }}
+          SSL_COM_ESIGNER_CREDENTIAL_ID: ${{ secrets.SSL_COM_ESIGNER_CREDENTIAL_ID }}
+        shell: powershell
+        run: |
+          if ($env:AIRWIKI_ESIGNER_SECRET_TRANSPORT_APPROVED -cne "sslcom-esigner-secret-transport-v1") {
+            throw "eSigner secret transport is not approved for this protected environment"
+          }
+          foreach ($name in @("SSL_COM_ESIGNER_USERNAME", "SSL_COM_ESIGNER_PASSWORD", "SSL_COM_ESIGNER_TOTP_SECRET", "SSL_COM_ESIGNER_CREDENTIAL_ID")) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "$name is missing" }
+            Write-Output "::add-mask::$([Environment]::GetEnvironmentVariable($name))"
+          }
+          $expected = @("airwiki.exe", "airwiki-mcp-bridge.exe", "airwiki-windows-firewall-helper.exe")
+          $unsigned = @(Get-ChildItem target\windows-signing\windows-binaries -Force)
+          if ($unsigned.Count -ne 3 -or @($unsigned | Where-Object { $_.PSIsContainer -or $_.Name -cnotin $expected }).Count -ne 0) { throw "expected exactly the three AirWiki PE binaries" }
+          foreach ($file in $unsigned) {
+            & java -jar $env:AIRWIKI_CODESIGNTOOL_JAR scan_code "-credential_id=$env:SSL_COM_ESIGNER_CREDENTIAL_ID" "-username=$env:SSL_COM_ESIGNER_USERNAME" "-password=$env:SSL_COM_ESIGNER_PASSWORD" "-input_file_path=$($file.FullName)"
+            if ($LASTEXITCODE -ne 0) { throw "malware scan failed for $($file.Name)" }
+          }
+          & $env:AIRWIKI_ESIGNER_REGISTER | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "eSigner KSP registration failed" }
+          & $env:AIRWIKI_ESIGNER_TOOL config -mode product -user $env:SSL_COM_ESIGNER_USERNAME -pass $env:SSL_COM_ESIGNER_PASSWORD -totp $env:SSL_COM_ESIGNER_TOTP_SECRET -key $env:AIRWIKI_ESIGNER_MASTER_KEY -r
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path $env:AIRWIKI_ESIGNER_MASTER_KEY -PathType Leaf)) { throw "eSigner CKA configuration failed" }
+          & $env:AIRWIKI_ESIGNER_TOOL unload
+          if ($LASTEXITCODE -ne 0) { throw "eSigner certificate unload failed" }
+          & $env:AIRWIKI_ESIGNER_TOOL load
+          if ($LASTEXITCODE -ne 0) { throw "eSigner certificate loading failed" }
+          . ./packaging/windows-runtime.ps1
+          . ./packaging/windows-authenticode.ps1
+          $signTool = Get-VerifiedWindowsSignTool
+          New-Item target\windows-signing\windows-binaries-signed -ItemType Directory -Force | Out-Null
+          foreach ($file in $unsigned) {
+            $out = Join-Path target\windows-signing\windows-binaries-signed $file.Name
+            Copy-Item $file.FullName $out
+            Invoke-WindowsAuthenticodeSigning $signTool $out $file.Name
+          }
+      - name: Build MSI from signed binaries
+        shell: powershell
+        run: ./packaging/package-signed-windows-msi.ps1 -SignedBinaryRoot target/windows-signing/windows-binaries-signed
+      - name: Scan malware and sign MSI containers
+        env:
+          SSL_COM_ESIGNER_USERNAME: ${{ secrets.SSL_COM_ESIGNER_USERNAME }}
+          SSL_COM_ESIGNER_PASSWORD: ${{ secrets.SSL_COM_ESIGNER_PASSWORD }}
+          SSL_COM_ESIGNER_CREDENTIAL_ID: ${{ secrets.SSL_COM_ESIGNER_CREDENTIAL_ID }}
+        shell: powershell
+        run: |
+          if ($env:AIRWIKI_ESIGNER_SECRET_TRANSPORT_APPROVED -cne "sslcom-esigner-secret-transport-v1") {
+            throw "eSigner secret transport is not approved for this protected environment"
+          }
+          foreach ($name in @("SSL_COM_ESIGNER_USERNAME", "SSL_COM_ESIGNER_PASSWORD", "SSL_COM_ESIGNER_CREDENTIAL_ID")) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "$name is missing" }
+            Write-Output "::add-mask::$([Environment]::GetEnvironmentVariable($name))"
+          }
+          $expected = @("AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_en-US.msi", "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_es-ES.msi")
+          $installers = @(Get-ChildItem target\windows-signing\windows-msi -Force)
+          if ($installers.Count -ne 2 -or @($installers | Where-Object { $_.PSIsContainer -or $_.Name -cnotin $expected }).Count -ne 0) { throw "expected exactly the two localized AirWiki MSI containers" }
+          . ./packaging/windows-runtime.ps1
+          . ./packaging/windows-authenticode.ps1
+          $signTool = Get-VerifiedWindowsSignTool
+          New-Item target\packages\windows-signed -ItemType Directory -Force | Out-Null
+          foreach ($file in $installers) {
+            & java -jar $env:AIRWIKI_CODESIGNTOOL_JAR scan_code "-credential_id=$env:SSL_COM_ESIGNER_CREDENTIAL_ID" "-username=$env:SSL_COM_ESIGNER_USERNAME" "-password=$env:SSL_COM_ESIGNER_PASSWORD" "-program_name=AirWiki" "-input_file_path=$($file.FullName)"
+            if ($LASTEXITCODE -ne 0) { throw "malware scan failed for $($file.Name)" }
+            $out = Join-Path target\packages\windows-signed $file.Name
+            Copy-Item $file.FullName $out
+            Invoke-WindowsAuthenticodeSigning $signTool $out $file.Name
+          }
+      - name: Sign final MSI bytes for the Tauri updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: powershell
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY) -or [string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD)) { throw "Tauri updater signing key or password is missing" }
+          $Tauri = Resolve-Path apps\desktop\ui\node_modules\.bin\tauri.cmd
+          $expected = @("AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_en-US.msi", "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_es-ES.msi")
+          $installers = @(Get-ChildItem target\packages\windows-signed -Force)
+          if ($installers.Count -ne 2 -or @($installers | Where-Object { $_.PSIsContainer -or $_.Name -cnotin $expected }).Count -ne 0) { throw "expected exactly the two signed localized MSI containers" }
+          foreach ($installer in $installers) {
+            & $Tauri signer sign $installer.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Tauri updater signing failed" }
+          }
+      - name: Verify signed MSI candidate
+        shell: powershell
+        run: ./packaging/verify-signed-windows-msi.ps1 -PackageRoot target/packages/windows-signed
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with: { name: airwiki-windows-x64-signed-msi, path: target/packages/windows-signed, if-no-files-found: error, retention-days: 14 }
+      - name: Remove eSigner credentials and logs
+        if: always()
+        shell: powershell
+        run: |
+          if ($env:AIRWIKI_ESIGNER_TOOL) { & $env:AIRWIKI_ESIGNER_TOOL unload 2>$null }; if ($env:AIRWIKI_ESIGNER_MASTER_KEY) { Remove-Item $env:AIRWIKI_ESIGNER_MASTER_KEY -Force -ErrorAction SilentlyContinue }
+          . ./packaging/windows-authenticode.ps1; $pins = Get-ConfiguredWindowsSignerFingerprints; Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert -ErrorAction SilentlyContinue | Where-Object { $pins -ccontains (Get-WindowsCertificateFingerprint $_) } | ForEach-Object { Remove-Item $_.PSPath -Force -ErrorAction SilentlyContinue }; Remove-Item (Join-Path $env:APPDATA "eSignerCKA") -Recurse -Force -ErrorAction SilentlyContinue; Remove-Item (Join-Path $env:GITHUB_WORKSPACE "target\windows-signing\esigner") -Recurse -Force -ErrorAction SilentlyContinue

@@ -16,12 +16,13 @@ tests, operational runbooks or evaluation reports.
 | [0006](0006-windows-firewall-privilege-boundary.md) | Isolate Windows firewall changes in a narrow elevated helper | Accepted | 2026-07-16 | — |
 | [0007](0007-separate-evidence-from-authorized-candidates.md) | Separate answerability-accepted evidence from authorized external-chat candidates | Accepted | 2026-07-20 | Supersedes ADR 0001 and the answerability-only disclosure clause in ADR 0005 |
 | [0008](0008-public-federation.md) | Separate opt-in public federation from LAN authorization | Accepted | 2026-07-21 | Keeps ADR 0005 unchanged |
-| [0009](0009-windows-msi-signpath.md) | Use per-user MSI and origin-verified open-source signing on Windows | Accepted | 2026-08-10 | Refines ADR 0003 for the Windows package and signing provider |
+| [0009](0009-windows-msi-signpath.md) | Use per-user MSI and origin-verified open-source signing on Windows | Superseded | 2026-08-10 | Superseded by ADR 0015; MSI installation boundary remains in force |
 | [0010](0010-okf-v02-managed-memory-and-attested-computation.md) | Adopt OKF v0.2 for managed memory and attested computation | Accepted | 2026-08-13 | Supersedes ADR 0002 read-only MCP and extends ADR 0004 beyond folder publication |
 | [0011](0011-portable-project-memory.md) | Store portable project memory in `.airwiki` | Accepted | 2026-08-23 | Supersedes ADR 0002 project selection and ADR 0010 private-only application memory |
 | [0012](0012-public-technical-prereleases.md) | Publish unsigned technical candidates as non-latest pre-releases | Accepted | 2026-08-25 | Refines ADR 0003 prerelease distribution and ADR 0009 unsigned Windows candidates |
 | [0013](0013-connected-app-federated-search.md) | Let connected applications search accessible federated knowledge | Accepted | 2026-08-29 | Refines ADR 0002, ADR 0005 and ADR 0008 |
 | [0014](0014-github-attested-technical-prereleases.md) | Attest public technical prerelease assets with GitHub | Accepted | 2026-08-31 | Refines ADR 0012; defers stable native signing and updater activation |
+| [0015](0015-sslcom-esigner-and-github-releases-updates.md) | Use SSL.com eSigner cloud-HSM signing and GitHub Releases update transport | Accepted | 2026-08-30 | Supersedes ADR 0009; refines ADR 0003 and ADR 0012 |
 
 ## Policy
 

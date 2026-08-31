@@ -1098,6 +1098,48 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('heading', { name: 'Conexiones', level: 1 })).toBeInTheDocument();
   });
 
+  it('routes native menu commands through the existing desktop actions', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    render(App);
+    await waitFor(() => expect(tauriListeners.has('native-menu-command')).toBe(true));
+
+    await act(() => {
+      tauriListeners.get('native-menu-command')?.({ payload: 'settings' });
+    });
+    expect(await screen.findByRole('heading', { name: 'General', level: 1 })).toBeInTheDocument();
+
+    await act(() => {
+      tauriListeners.get('native-menu-command')?.({ payload: 'search' });
+    });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveFocus());
+
+    await act(() => {
+      tauriListeners.get('native-menu-command')?.({ payload: 'new-wiki' });
+    });
+    expect(await screen.findByRole('dialog', { name: '¿De dónde viene esta wiki?' })).toBeInTheDocument();
+  });
+
+  it('keeps unsaved Settings preferences in place for native Library and New wiki commands', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    render(App);
+    await openSettingsSection('general');
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Al cerrar' }), { target: { value: 'hide_to_tray' } });
+    await waitFor(() => expect(tauriListeners.has('native-menu-command')).toBe(true));
+
+    await act(() => {
+      tauriListeners.get('native-menu-command')?.({ payload: 'library' });
+    });
+    const dialog = await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' });
+    expect(window.location.hash).toBe('#settings/general');
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Continuar editando' }));
+
+    await act(() => {
+      tauriListeners.get('native-menu-command')?.({ payload: 'new-wiki' });
+    });
+    expect(await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '¿De dónde viene esta wiki?' })).not.toBeInTheDocument();
+  });
+
   it('restores focus after cancelling a standalone close confirmation', async () => {
     Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
     render(App);

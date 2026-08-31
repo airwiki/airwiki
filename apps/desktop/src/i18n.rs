@@ -5,6 +5,8 @@ use std::str::FromStr;
 use fluent_bundle::{FluentBundle, FluentResource};
 use unic_langid::LanguageIdentifier;
 
+use crate::model_config::LocalePreference;
+
 const EN_US_SOURCE: &str = include_str!("../locales/en-US.ftl");
 const ES_SOURCE: &str = include_str!("../locales/es.ftl");
 
@@ -36,6 +38,16 @@ impl UiLocale {
         match self {
             Self::Es => ES_SOURCE,
             Self::EnUs => EN_US_SOURCE,
+        }
+    }
+}
+
+impl From<LocalePreference> for UiLocale {
+    fn from(value: LocalePreference) -> Self {
+        match value {
+            LocalePreference::System => Self::from_system(),
+            LocalePreference::Es => Self::Es,
+            LocalePreference::En => Self::EnUs,
         }
     }
 }
@@ -76,15 +88,59 @@ pub(crate) enum LocalizationError {
 
 #[cfg(test)]
 mod tests {
-    use super::{Localization, UiLocale};
+    use super::{LocalePreference, Localization, UiLocale};
 
     #[test]
-    fn native_tray_messages_exist_in_both_catalogs() -> Result<(), Box<dyn std::error::Error>> {
+    fn native_menu_messages_exist_in_both_catalogs() -> Result<(), Box<dyn std::error::Error>> {
         let cases = [
-            (UiLocale::EnUs, "Open AirWiki", "Quit completely"),
-            (UiLocale::Es, "Abrir AirWiki", "Salir completamente"),
+            (
+                UiLocale::EnUs,
+                "Open AirWiki",
+                "Quit completely",
+                [
+                    "File",
+                    "Edit",
+                    "View",
+                    "Window",
+                    "New wiki…",
+                    "Library",
+                    "Search",
+                    "Settings",
+                    "Quit AirWiki",
+                    "Exit AirWiki",
+                ],
+            ),
+            (
+                UiLocale::Es,
+                "Abrir AirWiki",
+                "Salir completamente",
+                [
+                    "Archivo",
+                    "Edición",
+                    "Visualización",
+                    "Ventana",
+                    "Nueva wiki…",
+                    "Biblioteca",
+                    "Buscar",
+                    "Configuración",
+                    "Salir de AirWiki",
+                    "Salir de AirWiki",
+                ],
+            ),
         ];
-        for (locale, expected_open, expected_quit) in cases {
+        let menu_ids = [
+            "native-menu-file",
+            "native-menu-edit",
+            "native-menu-view",
+            "native-menu-window",
+            "native-menu-new-wiki",
+            "native-menu-library",
+            "native-menu-search",
+            "native-menu-settings",
+            "native-menu-quit",
+            "native-menu-exit",
+        ];
+        for (locale, expected_open, expected_quit, expected_menu) in cases {
             let localization = Localization::new(locale)?;
             assert_eq!(
                 localization.text("tray-open").as_deref(),
@@ -94,7 +150,16 @@ mod tests {
                 localization.text("tray-quit").as_deref(),
                 Some(expected_quit)
             );
+            for (id, expected) in menu_ids.iter().zip(expected_menu) {
+                assert_eq!(localization.text(id).as_deref(), Some(expected));
+            }
         }
         Ok(())
+    }
+
+    #[test]
+    fn explicit_airwiki_language_preferences_select_the_matching_native_locale() {
+        assert_eq!(UiLocale::from(LocalePreference::Es), UiLocale::Es);
+        assert_eq!(UiLocale::from(LocalePreference::En), UiLocale::EnUs);
     }
 }

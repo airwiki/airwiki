@@ -231,6 +231,12 @@ row: its name and origin lead into separate detected, searchable and review
 counts, a Local/LAN/Internet exposure route, and the next required action. The
 row remains understandable without relying on a separate table header.
 
+On macOS and Windows, the native application menu provides **New wiki…**,
+standard Edit and Window commands, and Library, Search, and Settings navigation.
+The menu follows AirWiki's saved language preference; **System** follows the
+operating-system language. Its commands use the same local flows as the visible
+controls; they do not add a second configuration or publication path.
+
 Inside a Wiki, use the page scrollbar for its status bar and local content.
 The page list and selected document do not create separate vertical scroll
 areas. The compact bar stays beside the review-state filters, view switch and

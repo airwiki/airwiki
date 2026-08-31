@@ -772,6 +772,28 @@
         focusDialog('close-choice');
       })
       : Promise.resolve(() => {});
+    const unlistenNativeMenu = '__TAURI_INTERNALS__' in window
+      ? listen<string>('native-menu-command', (event) => {
+        if (topDialogElement() !== null) return;
+        switch (event.payload) {
+          case 'new-wiki':
+            requestNewWikiSource();
+            break;
+          case 'library':
+            select('library');
+            break;
+          case 'search':
+            openGlobalSearch();
+            requestAnimationFrame(() => document.querySelector<HTMLInputElement>('#global-search')?.focus());
+            break;
+          case 'settings':
+            openSettings(lastSettingsSection);
+            break;
+          default:
+            break;
+        }
+      })
+      : Promise.resolve(() => {});
     connect((event) => {
       snapshot = event.snapshot;
       if (
@@ -868,6 +890,7 @@
       window.removeEventListener('focus', refreshStatusAfterReturn);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       void unlistenClose.then((unlisten) => unlisten());
+      void unlistenNativeMenu.then((unlisten) => unlisten());
     };
   });
 
@@ -875,6 +898,7 @@
     actionMessage = '';
     if (next === 'settings') openSettings(lastSettingsSection);
     else {
+      if (!canLeaveSettings()) return;
       selectedWikiId = null;
       dismissSharedBrowse();
       destination = 'library';
@@ -930,6 +954,22 @@
     destination = 'settings';
     activateSettingsSection(section);
     void refreshAutostartState();
+  }
+
+  function canLeaveSettings(): boolean {
+    if (destination !== 'settings' || !preferencesDirty) return true;
+    settingsLeavePending = true;
+    return false;
+  }
+
+  function requestNewWikiSource() {
+    if (newWikiMenuOpen) {
+      newWikiMenuOpen = false;
+      return;
+    }
+    if (!canLeaveSettings()) return;
+    newWikiMenuOpen = true;
+    void tick().then(() => focusDialog('new-wiki-source'));
   }
 
   function restoreLibraryContext() {
@@ -1003,10 +1043,7 @@
   }
 
   function openGlobalSearch() {
-    if (destination === 'settings' && preferencesDirty) {
-      settingsLeavePending = true;
-      return;
-    }
+    if (!canLeaveSettings()) return;
     // The search field owns focus. This transition must not call restoreLibraryContext,
     // whose accessible back-navigation contract intentionally focuses the page heading.
     selectedWikiId = null;
@@ -2547,7 +2584,7 @@
           onopen={openGlobalSearch}
           onopenmodelsettings={() => openSettings('general')}
         />
-        <div class="top-actions"><button class="secondary new-wiki-command" aria-label={t('desktop-new-wiki')} title={t('desktop-new-wiki')} aria-haspopup="dialog" aria-expanded={newWikiMenuOpen} onclick={() => { newWikiMenuOpen = !newWikiMenuOpen; }}><Plus size={17} aria-hidden="true" />{t('desktop-new-wiki')}</button><SystemStatusButton {snapshot} {t} onclick={() => openSettings(lastSettingsSection)} /></div>
+        <div class="top-actions"><button class="secondary new-wiki-command" aria-label={t('desktop-new-wiki')} title={t('desktop-new-wiki')} aria-haspopup="dialog" aria-expanded={newWikiMenuOpen} onclick={requestNewWikiSource}><Plus size={17} aria-hidden="true" />{t('desktop-new-wiki')}</button><SystemStatusButton {snapshot} {t} onclick={() => openSettings(lastSettingsSection)} /></div>
       </header>
     {/if}
 

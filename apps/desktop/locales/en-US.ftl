@@ -819,6 +819,16 @@ language-spanish = Spanish
 language-english = English
 tray-open = Open AirWiki
 tray-quit = Quit completely
+native-menu-file = File
+native-menu-edit = Edit
+native-menu-view = View
+native-menu-window = Window
+native-menu-new-wiki = New wiki…
+native-menu-library = Library
+native-menu-search = Search
+native-menu-settings = Settings
+native-menu-quit = Quit AirWiki
+native-menu-exit = Exit AirWiki
 
 # Tauri desktop shell
 desktop-nav-library = Library

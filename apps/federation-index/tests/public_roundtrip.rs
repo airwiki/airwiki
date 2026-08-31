@@ -19,6 +19,7 @@ use airwiki_types::{
 };
 use async_trait::async_trait;
 use chrono::{Duration as ChronoDuration, Utc};
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -179,6 +180,32 @@ impl PublicSourceBackend for DelayedPublicSourceBackend {
         request: PublicBrowseRequest,
     ) -> Result<PublicBrowseDelivery, PublicSourceBackendError> {
         tokio::time::sleep(self.delay).await;
+        self.inner.browse(request).await
+    }
+}
+
+#[derive(Debug)]
+struct BlockingPublicSourceBackend {
+    inner: Arc<PublicFixtureBackend>,
+    search_started: Arc<Notify>,
+    release_search: Arc<Notify>,
+}
+
+#[async_trait]
+impl PublicSourceBackend for BlockingPublicSourceBackend {
+    async fn search(
+        &self,
+        request: PublicSearchRequest,
+    ) -> Result<PublicSearchDelivery, PublicSourceBackendError> {
+        self.search_started.notify_one();
+        self.release_search.notified().await;
+        self.inner.search(request).await
+    }
+
+    async fn browse(
+        &self,
+        request: PublicBrowseRequest,
+    ) -> Result<PublicBrowseDelivery, PublicSourceBackendError> {
         self.inner.browse(request).await
     }
 }
@@ -494,6 +521,8 @@ async fn concurrent_public_routes_do_not_cross_between_success_and_timeout() {
     let catalog_cancellation = CancellationToken::new();
     let fast_source_cancellation = CancellationToken::new();
     let slow_source_cancellation = CancellationToken::new();
+    let slow_search_started = Arc::new(Notify::new());
+    let release_slow_search = Arc::new(Notify::new());
     let catalog_task = tokio::spawn(run_public_catalog_server(
         index_identity.clone(),
         airwiki_network::PublicCatalogServerConfig::new(vec![index_address.clone()]),
@@ -515,13 +544,14 @@ async fn concurrent_public_routes_do_not_cross_between_success_and_timeout() {
     let slow_source_task = tokio::spawn(run_public_source_server(
         slow_source_identity.clone(),
         PublicSourceServerConfig::new(vec![slow_source_address.clone()]),
-        Arc::new(DelayedPublicSourceBackend {
+        Arc::new(BlockingPublicSourceBackend {
             inner: Arc::new(PublicFixtureBackend {
                 gate: DisclosureGate::default(),
                 publisher_id: slow_source_identity.peer_id().to_string(),
                 manifest_sequence: 1,
             }),
-            delay: Duration::from_millis(900),
+            search_started: Arc::clone(&slow_search_started),
+            release_search: Arc::clone(&release_slow_search),
         }),
         slow_source_cancellation.clone(),
     ));
@@ -597,10 +627,14 @@ async fn concurrent_public_routes_do_not_cross_between_success_and_timeout() {
 
     assert_eq!(fast_result.response.hits.len(), 1);
     assert_eq!(fast_result.route_kind, PublicRouteKind::Direct);
+    tokio::time::timeout(Duration::from_secs(1), slow_search_started.notified())
+        .await
+        .expect("slow owner received the request before its response budget elapsed");
     assert!(slow_result.response.partial);
     assert!(slow_result.response.hits.is_empty());
     assert_eq!(slow_result.route_kind, PublicRouteKind::Offline);
 
+    release_slow_search.notify_one();
     fast_source_cancellation.cancel();
     tokio::time::timeout(Duration::from_secs(2), fast_source_task)
         .await

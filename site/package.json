@@ -8,8 +8,9 @@
   },
   "packageManager": "pnpm@10.18.3",
   "scripts": {
-    "build": "vite build",
-    "check": "tsc --noEmit && vite build",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "pnpm clean && vite build",
+    "check": "tsc --noEmit && pnpm build",
     "dev": "vite",
     "preview": "vite preview"
   },

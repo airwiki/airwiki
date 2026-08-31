@@ -44,7 +44,8 @@ Each of these choices is independent and opt-in:
 | Install AirWiki from GitHub | A download request and normal network metadata to GitHub or its delivery providers | GitHub handles repository, release-download, and account data under its own policies |
 | Install or prepare local model assets | A download request and normal network metadata to the selected asset host | The current catalog uses third-party model hosts; local models process knowledge on-device after verified assets are available |
 | Install required Windows WebView2 | A download request and normal network metadata to Microsoft when the runtime is absent | The installer reports a failed network request without a partial AirWiki install |
-| Trust a LAN device and grant a Wiki | Bounded, authorized search evidence and, when opened, that exact published read-only OKF Wiki | Discovery alone grants nothing; original sources, paths, chunks, embeddings, and operational indexes stay local |
+| Establish or retain LAN trust | The peer can learn AirWiki's PeerId and, after durable trust, an operating-system-inspected private/on-link endpoint, display name, and OS family; the peer and network can also observe the authenticated connection's IP address and timing | Pairing or trust does not grant any Wiki. The endpoint and display data are discovery/presentation metadata, not authorization |
+| Grant a Wiki to a trusted LAN device | Bounded, authorized search evidence and, when opened, that exact published read-only OKF Wiki | The Wiki grant is a separate decision. Original sources, paths, chunks, embeddings, and operational indexes stay local |
 | Publish a reviewed Wiki experimentally | Signed, expiring routing metadata to public indexes; authorized evidence and published OKF content to public readers | It never publishes drafts or source folders; public federation is experimental |
 | Enable public search for a Library search or connected AI app | That query can reach configured public indexes and selected publishers | This does not publish a local Wiki; public search is off by default |
 | Connect a chat or MCP client | Authorized search evidence and, for explicitly authorized memory workflows, the requested memory content | The local bridge is loopback-only, but data returned to a chat client can enter that client's provider or workspace and is subject to its policy |
@@ -58,15 +59,19 @@ and the [search and federation guide](docs/search-and-federation.md).
 
 ## Retention, deletion, and requests
 
-AirWiki keeps its local operational state and managed Wiki files until the
-person deletes them or uses the applicable product recovery/uninstall flow.
-Windows uninstall keeps local data by default. The product does not promise a
-cloud-side deletion, export, correction, or recovery service because it has no
-central account or knowledge store. A public reader who receives a published
-OKF Wiki or another service that receives authorized data may retain it under
-that recipient's controls; AirWiki cannot delete copies outside the owner's
-device. Revoking access prevents future authorized responses but cannot recall
-data already disclosed.
+Retention and deletion vary by local artifact and operating-system behavior.
+SQLite state, managed Wiki files, local models, trust/grant state, and audit
+records can remain until the person uses the specific applicable deletion,
+recovery, or uninstall flow. Recovery is not a promise to delete every related
+artifact. Windows uninstall removes immutable application files but keeps local
+data by default. There is no global retention period for local logs or audit
+records, and no general cloud-side deletion, export, correction, or recovery
+service because AirWiki has no central account or knowledge store.
+
+A public reader who receives a published OKF Wiki or another service that
+receives authorized data may retain it under that recipient's controls; AirWiki
+cannot delete copies outside the owner's device. Revoking access prevents future
+authorized responses but cannot recall data already disclosed.
 
 The project has not published a general retention schedule, privacy contact, or
 jurisdiction-specific rights process for public sites or community operations.

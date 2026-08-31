@@ -15,11 +15,15 @@ $ProcessWaitMilliseconds = 300000
 $StateWaitMilliseconds = 30000
 $ProductName = "AirWiki"
 $Publisher = "AirWiki"
-$InstallDirectory = Join-Path (Join-Path $env:LOCALAPPDATA "Programs") $ProductName
-$ShortcutPath = Join-Path (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\AirWiki") "AirWiki.lnk"
-$LocalMarkerPath = Join-Path $env:LOCALAPPDATA "airwiki\AirWiki\msi-smoke-marker.json"
-$RoamingMarkerPath = Join-Path $env:APPDATA "airwiki\AirWiki\msi-smoke-marker.json"
-$script:InstalledProductCode = $null
+$LocalDataRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+$RoamingDataRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)
+$ProgramsRoot = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)
+$InstallDirectory = Join-Path (Join-Path $LocalDataRoot "Programs") $ProductName
+$ShortcutPath = Join-Path (Join-Path $ProgramsRoot $ProductName) "$ProductName.lnk"
+$LocalMarkerPath = Join-Path $LocalDataRoot "airwiki\AirWiki\msi-smoke-marker.json"
+$RoamingMarkerPath = Join-Path $RoamingDataRoot "airwiki\AirWiki\msi-smoke-marker.json"
+$script:InstalledProduct = $null
+$script:ManualCleanupRequired = $false
 $script:Markers = [Collections.Generic.List[object]]::new()
 
 function Assert-RegularFile([string] $Path, [string] $Label) {
@@ -29,6 +33,49 @@ function Assert-RegularFile([string] $Path, [string] $Label) {
         throw "$Label must be a regular file"
     }
     return $Item.FullName
+}
+
+function Get-CanonicalPath([string] $Path, [string] $Label) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { throw "$Label is empty" }
+    return [IO.Path]::GetFullPath($Path).TrimEnd('\')
+}
+
+function Assert-PathInsideRoot([string] $Path, [string] $Root, [string] $Label) {
+    $CanonicalRoot = Get-CanonicalPath $Root "$Label root"
+    $CanonicalPath = Get-CanonicalPath $Path $Label
+    if (-not $CanonicalPath.StartsWith("$CanonicalRoot\", [StringComparison]::OrdinalIgnoreCase)) {
+        throw "$Label is outside its canonical Windows known-folder root"
+    }
+    $Cursor = $CanonicalPath
+    while ($true) {
+        if (Test-Path -LiteralPath $Cursor) {
+            $Item = Get-Item -LiteralPath $Cursor -Force -ErrorAction Stop
+            if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "$Label has a reparse-point ancestor"
+            }
+        }
+        if ($Cursor.Equals($CanonicalRoot, [StringComparison]::OrdinalIgnoreCase)) { break }
+        $Cursor = Split-Path -Parent $Cursor
+        if ([string]::IsNullOrWhiteSpace($Cursor)) {
+            throw "$Label could not be traced to its canonical root"
+        }
+    }
+    return $CanonicalPath
+}
+
+function ConvertTo-MsiCommandLine([string[]] $Arguments) {
+    return (($Arguments | ForEach-Object {
+        if ($_ -match '[\s"]') {
+            if ($_.Contains('"')) { throw "MSI argument contains an unsupported quote" }
+            '"' + $_ + '"'
+        } else { $_ }
+    }) -join ' ')
+}
+
+function ConvertTo-MsiGuid([string] $Value, [string] $Label) {
+    $Parsed = [guid]::Empty
+    if (-not [guid]::TryParse($Value, [ref]$Parsed)) { throw "$Label is not a GUID" }
+    return "{$($Parsed.ToString().ToUpperInvariant())}"
 }
 
 function Assert-WindowsMsiSmokeHost {
@@ -45,10 +92,15 @@ function Assert-WindowsMsiSmokeHost {
         $Processors.Count -eq 0 -or @($Processors | Where-Object Architecture -ne 9).Count -ne 0) {
         throw "the MSI smoke test requires native x64 Windows 10 or 11 client"
     }
-    if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA) -or
-        [string]::IsNullOrWhiteSpace($env:APPDATA)) {
+    if ([string]::IsNullOrWhiteSpace($LocalDataRoot) -or
+        [string]::IsNullOrWhiteSpace($RoamingDataRoot) -or
+        [string]::IsNullOrWhiteSpace($ProgramsRoot)) {
         throw "the MSI smoke test requires current-user data roots"
     }
+    $null = Assert-PathInsideRoot $InstallDirectory $LocalDataRoot "MSI installation directory"
+    $null = Assert-PathInsideRoot $ShortcutPath $ProgramsRoot "Start Menu shortcut"
+    $null = Assert-PathInsideRoot $LocalMarkerPath $LocalDataRoot "local marker"
+    $null = Assert-PathInsideRoot $RoamingMarkerPath $RoamingDataRoot "roaming marker"
 }
 
 function Get-MsiProperties([string] $Path) {
@@ -90,8 +142,8 @@ function Get-InstallerMetadata([string] $Path) {
     try { $Version = [version][string]$Properties.ProductVersion } catch { throw "MSI ProductVersion is invalid" }
     return [pscustomobject]@{
         Path = $Verified
-        ProductCode = [string]$Properties.ProductCode
-        UpgradeCode = [string]$Properties.UpgradeCode
+        ProductCode = ConvertTo-MsiGuid ([string]$Properties.ProductCode) "MSI ProductCode"
+        UpgradeCode = ConvertTo-MsiGuid ([string]$Properties.UpgradeCode) "MSI UpgradeCode"
         ProductVersion = $Version
         Sha256 = (Get-FileHash -LiteralPath $Verified -Algorithm SHA256).Hash.ToLowerInvariant()
     }
@@ -99,6 +151,20 @@ function Get-InstallerMetadata([string] $Path) {
 
 function Get-ArpPath([string] $ProductCode) {
     return "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$ProductCode"
+}
+
+function Get-ProductRegistrationPaths([string] $ProductCode) {
+    return @(
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$ProductCode",
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$ProductCode",
+        "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\$ProductCode"
+    ) | Where-Object { Test-Path -LiteralPath $_ }
+}
+
+function Assert-NoProductCodeRegistration($Metadata) {
+    if ((Get-ProductRegistrationPaths $Metadata.ProductCode).Count -ne 0) {
+        throw "the MSI ProductCode already has a registered installation; resolve it manually"
+    }
 }
 
 function Test-WebView2Present {
@@ -129,7 +195,9 @@ function Get-AirWikiArpEntries {
     })
 }
 
-function Assert-CleanPreflight {
+function Assert-CleanPreflight($Metadata) {
+    $null = Assert-PathInsideRoot $InstallDirectory $LocalDataRoot "MSI installation directory"
+    $null = Assert-PathInsideRoot $ShortcutPath $ProgramsRoot "Start Menu shortcut"
     if (-not (Test-WebView2Present)) {
         throw "WebView2 Runtime is absent; refusing an installer path that could download it"
     }
@@ -138,21 +206,36 @@ function Assert-CleanPreflight {
         (Test-Path -LiteralPath $ShortcutPath)) {
         throw "the MSI smoke test requires no existing AirWiki installer, payload, or shortcut collision"
     }
+    Assert-NoProductCodeRegistration $Metadata
     if (@(Get-CimInstance Win32_Process -Filter "Name = 'airwiki.exe'").Count -ne 0) {
         throw "close AirWiki before the MSI smoke test"
     }
 }
 
-function Invoke-MsiExec([string[]] $Arguments, [string] $Label) {
+function Get-MsiOperationState([string] $ProductCode) {
+    $Registrations = @(Get-ProductRegistrationPaths $ProductCode).Count
+    $MsiExecProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'msiexec.exe'").Count
+    return "registrations=$Registrations payload=$([bool](Test-Path -LiteralPath $InstallDirectory)) shortcut=$([bool](Test-Path -LiteralPath $ShortcutPath)) msiexec_processes=$MsiExecProcesses"
+}
+
+function Invoke-MsiExec([string[]] $Arguments, [string] $Label, [string] $ProductCode) {
     $MsiExec = Assert-RegularFile (Join-Path $env:SystemRoot "System32\msiexec.exe") "Windows Installer executable"
-    $Process = Start-Process -FilePath $MsiExec -ArgumentList $Arguments -PassThru -WindowStyle Hidden
+    $CommandLine = ConvertTo-MsiCommandLine $Arguments
+    $Process = Start-Process -FilePath $MsiExec -ArgumentList $CommandLine -PassThru -WindowStyle Hidden
     try {
         if (-not $Process.WaitForExit($ProcessWaitMilliseconds)) {
-            $Process.Kill()
-            if (-not $Process.WaitForExit(10000)) { throw "$Label timeout cleanup did not complete" }
-            throw "$Label did not exit within the bounded wait"
+            try { $Process.Kill() } catch { }
+            $null = $Process.WaitForExit(10000)
+            $script:ManualCleanupRequired = $true
+            throw "$Label timed out; Windows Installer may still be changing state ($((Get-MsiOperationState $ProductCode))). Preserve state and clean it manually"
         }
-        if ($Process.ExitCode -ne 0) { throw "$Label returned exit $($Process.ExitCode)" }
+        if ($Process.ExitCode -ne 0) {
+            $State = Get-MsiOperationState $ProductCode
+            if ($State -notmatch 'registrations=0 payload=False shortcut=False') {
+                $script:ManualCleanupRequired = $true
+            }
+            throw "$Label returned exit $($Process.ExitCode) ($State)"
+        }
     } finally { $Process.Dispose() }
 }
 
@@ -183,43 +266,67 @@ function Assert-EssentialPayload([string] $Root) {
         "LICENSE",
         "THIRD_PARTY_NOTICES.md"
     )) {
-        $null = Assert-RegularFile (Join-Path $Root $Relative) "installed payload $Relative"
+        $Path = Join-Path $Root $Relative
+        $null = Assert-PathInsideRoot $Path $LocalDataRoot "installed payload $Relative"
+        $null = Assert-RegularFile $Path "installed payload $Relative"
     }
 }
 
 function Assert-InstalledProduct($Metadata) {
+    $SafeInstallDirectory = Assert-PathInsideRoot $InstallDirectory $LocalDataRoot "MSI installation directory"
+    $SafeShortcutPath = Assert-PathInsideRoot $ShortcutPath $ProgramsRoot "Start Menu shortcut"
     Wait-ForArp $Metadata.ProductCode $true
     $Arp = Get-ItemProperty -LiteralPath (Get-ArpPath $Metadata.ProductCode) -ErrorAction Stop
     if ([string]$Arp.DisplayName -cne $ProductName -or [string]$Arp.Publisher -cne $Publisher -or
-        -not (Test-SamePath ([string]$Arp.InstallLocation) $InstallDirectory)) {
+        -not (Test-SamePath ([string]$Arp.InstallLocation) $SafeInstallDirectory)) {
         throw "MSI ARP metadata does not identify the installed AirWiki payload"
     }
-    Assert-EssentialPayload $InstallDirectory
+    Assert-EssentialPayload $SafeInstallDirectory
+    $DesktopExecutable = Join-Path $SafeInstallDirectory "airwiki.exe"
+    $null = Assert-PathInsideRoot $DesktopExecutable $LocalDataRoot "installed desktop executable"
+    $null = Assert-RegularFile $DesktopExecutable "installed desktop executable"
+    $null = Assert-RegularFile $SafeShortcutPath "Start Menu shortcut"
     $Shell = New-Object -ComObject WScript.Shell
     try {
-        $Shortcut = $Shell.CreateShortcut($ShortcutPath)
-        if (-not (Test-SamePath ([string]$Shortcut.TargetPath) (Join-Path $InstallDirectory "airwiki.exe"))) {
+        $Shortcut = $Shell.CreateShortcut($SafeShortcutPath)
+        if (-not (Test-SamePath ([string]$Shortcut.TargetPath) $DesktopExecutable)) {
             throw "Start Menu shortcut target is not the installed desktop executable"
         }
     } finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($Shell) }
+    return $true
 }
 
 function New-Marker([string] $Path, $Metadata) {
-    if (Test-Path -LiteralPath $Path) { throw "MSI smoke marker path already exists" }
-    $Parent = Split-Path -Parent $Path
+    $Root = if ($Path -ceq $LocalMarkerPath) {
+        $LocalDataRoot
+    } elseif ($Path -ceq $RoamingMarkerPath) {
+        $RoamingDataRoot
+    } else {
+        throw "MSI smoke marker path is not owned by this smoke test"
+    }
+    $SafePath = Assert-PathInsideRoot $Path $Root "MSI smoke marker"
+    if (Test-Path -LiteralPath $SafePath) { throw "MSI smoke marker path already exists" }
+    $Parent = Split-Path -Parent $SafePath
     New-Item -ItemType Directory -Path $Parent -Force | Out-Null
+    $SafePath = Assert-PathInsideRoot $SafePath $Root "MSI smoke marker"
     $Record = [ordered]@{
         schema = 1
         run_id = [guid]::NewGuid().ToString("D")
         installer_sha256 = $Metadata.Sha256
         product_code = $Metadata.ProductCode
     } | ConvertTo-Json -Compress
-    [IO.File]::WriteAllText($Path, $Record, [Text.UTF8Encoding]::new($false))
-    $script:Markers.Add([pscustomobject]@{ Path = $Path; Sha256 = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }) | Out-Null
+    $Stream = [IO.File]::Open($SafePath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try {
+        $Writer = [IO.StreamWriter]::new($Stream, [Text.UTF8Encoding]::new($false))
+        try { $Writer.Write($Record) } finally { $Writer.Dispose() }
+    } finally { $Stream.Dispose() }
+    $script:Markers.Add([pscustomobject]@{ Path = $SafePath; Root = $Root; Sha256 = (Get-FileHash -LiteralPath $SafePath -Algorithm SHA256).Hash }) | Out-Null
 }
 
 function Assert-MarkersPreserved {
     foreach ($Marker in $script:Markers) {
+        $null = Assert-PathInsideRoot $Marker.Path $Marker.Root "owned MSI smoke marker"
+        $null = Assert-RegularFile $Marker.Path "owned MSI smoke marker"
         $Actual = (Get-FileHash -LiteralPath $Marker.Path -Algorithm SHA256).Hash
         if ($Actual -cne $Marker.Sha256) { throw "MSI uninstall changed an owned data-root marker" }
     }
@@ -227,6 +334,8 @@ function Assert-MarkersPreserved {
 
 function Remove-ExactMarkers {
     foreach ($Marker in @($script:Markers)) {
+        $null = Assert-PathInsideRoot $Marker.Path $Marker.Root "owned MSI smoke marker"
+        $null = Assert-RegularFile $Marker.Path "owned MSI smoke marker"
         if (-not (Test-Path -LiteralPath $Marker.Path -PathType Leaf)) { throw "owned marker disappeared before cleanup" }
         if ((Get-FileHash -LiteralPath $Marker.Path -Algorithm SHA256).Hash -cne $Marker.Sha256) {
             throw "owned marker changed; refusing deletion"
@@ -236,13 +345,24 @@ function Remove-ExactMarkers {
     }
 }
 
-function Remove-InstalledProduct([string] $ProductCode) {
-    Invoke-MsiExec @("/x", $ProductCode, "/qn", "/norestart") "MSI uninstall"
-    Wait-ForArp $ProductCode $false
-    if ((Test-Path -LiteralPath $InstallDirectory) -or (Test-Path -LiteralPath $ShortcutPath)) {
-        throw "MSI uninstall left the application payload or Start Menu shortcut"
+function Remove-InstalledProduct($Metadata) {
+    try {
+        $null = Assert-InstalledProduct $Metadata
+        Invoke-MsiExec @("/x", $Metadata.ProductCode, "/qn", "/norestart") "MSI uninstall" $Metadata.ProductCode
+        Wait-ForArp $Metadata.ProductCode $false
+        if ((Get-ProductRegistrationPaths $Metadata.ProductCode).Count -ne 0) {
+            throw "MSI uninstall left a ProductCode registration"
+        }
+        $null = Assert-PathInsideRoot $InstallDirectory $LocalDataRoot "MSI installation directory"
+        $null = Assert-PathInsideRoot $ShortcutPath $ProgramsRoot "Start Menu shortcut"
+        if ((Test-Path -LiteralPath $InstallDirectory) -or (Test-Path -LiteralPath $ShortcutPath)) {
+            throw "MSI uninstall left the application payload or Start Menu shortcut"
+        }
+    } catch {
+        $script:ManualCleanupRequired = $true
+        throw
     }
-    $script:InstalledProductCode = $null
+    $script:InstalledProduct = $null
 }
 
 try {
@@ -255,31 +375,50 @@ try {
             throw "upgrade MSI must keep UpgradeCode and have a strictly greater ProductVersion"
         }
     }
-    Assert-CleanPreflight
+    Assert-CleanPreflight $Base
+    if ($null -ne $Upgrade -and $Upgrade.ProductCode -cne $Base.ProductCode) {
+        Assert-NoProductCodeRegistration $Upgrade
+    }
     New-Marker $LocalMarkerPath $Base
     New-Marker $RoamingMarkerPath $Base
-    Invoke-MsiExec @("/i", $Base.Path, "/qn", "/norestart", "AUTOLAUNCHAPP=0") "MSI install"
-    $script:InstalledProductCode = $Base.ProductCode
-    Assert-InstalledProduct $Base
+    Invoke-MsiExec @("/i", $Base.Path, "/qn", "/norestart", "AUTOLAUNCHAPP=0") "MSI install" $Base.ProductCode
+    try { $null = Assert-InstalledProduct $Base } catch {
+        $script:ManualCleanupRequired = $true
+        throw
+    }
+    $script:InstalledProduct = $Base
 
     if ($null -ne $Upgrade) {
-        Invoke-MsiExec @("/i", $Upgrade.Path, "/qn", "/norestart", "AUTOLAUNCHAPP=0") "MSI upgrade"
+        try { $null = Assert-InstalledProduct $Base } catch {
+            $script:ManualCleanupRequired = $true
+            throw
+        }
+        Invoke-MsiExec @("/i", $Upgrade.Path, "/qn", "/norestart", "AUTOLAUNCHAPP=0") "MSI upgrade" $Upgrade.ProductCode
         if ($Upgrade.ProductCode -cne $Base.ProductCode) {
             Wait-ForArp $Base.ProductCode $false
         }
-        $script:InstalledProductCode = $Upgrade.ProductCode
-        Assert-InstalledProduct $Upgrade
+        try { $null = Assert-InstalledProduct $Upgrade } catch {
+            $script:ManualCleanupRequired = $true
+            throw
+        }
+        $script:InstalledProduct = $Upgrade
     }
 
-    Remove-InstalledProduct $script:InstalledProductCode
+    Remove-InstalledProduct $script:InstalledProduct
     Assert-MarkersPreserved
     Remove-ExactMarkers
     Write-Host "Windows MSI smoke passed."
 } finally {
-    if ($null -ne $script:InstalledProductCode) {
-        try { Remove-InstalledProduct $script:InstalledProductCode } catch { Write-Error "MSI smoke cleanup could not uninstall its verified product: $($_.Exception.Message)" }
+    if ($script:ManualCleanupRequired) {
+        [Console]::Error.WriteLine("MSI smoke preserved installer and marker state for manual cleanup after an ambiguous operation.")
+    } elseif ($null -ne $script:InstalledProduct) {
+        try { Remove-InstalledProduct $script:InstalledProduct } catch {
+            [Console]::Error.WriteLine("MSI smoke cleanup could not uninstall its verified product: $($_.Exception.Message)")
+        }
     }
-    if ($script:Markers.Count -ne 0 -and $null -eq $script:InstalledProductCode) {
-        try { Remove-ExactMarkers } catch { Write-Error "MSI smoke cleanup preserved changed or missing marker state: $($_.Exception.Message)" }
+    if ($script:Markers.Count -ne 0 -and $null -eq $script:InstalledProduct -and -not $script:ManualCleanupRequired) {
+        try { Remove-ExactMarkers } catch {
+            [Console]::Error.WriteLine("MSI smoke cleanup preserved changed or missing marker state: $($_.Exception.Message)")
+        }
     }
 }

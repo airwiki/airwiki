@@ -297,7 +297,11 @@ prepare models. It requires an already-present WebView2 Runtime, a clean AirWiki
 installer/shortcut state, reads the MSI identity through the Windows Installer
 COM API, installs silently with `AUTOLAUNCHAPP=0`, validates ARP,
 `InstallLocation`, essential installed files and the Start Menu target, then
-uninstalls by the MSI `ProductCode`.
+uninstalls by the MSI `ProductCode`. It rejects malformed product identifiers,
+any pre-existing registration for either requested product code, and reparse
+points or paths outside the canonical Windows known-folder roots. The smoke
+revalidates the exact AirWiki identity, location and payload immediately before
+uninstalling; an incomplete or ambiguous state is preserved for manual cleanup.
 
 For a controlled Windows client, invoke it only with explicit authorization:
 
@@ -311,7 +315,10 @@ An optional `-UpgradeInstaller` exercises an upgrade only when it has the same
 `UpgradeCode` and a strictly higher `ProductVersion`. The smoke writes one
 hash-checked marker in each documented AirWiki data root, verifies that
 uninstall preserves both, and removes only unchanged markers it created. It
-never uses `Win32_Product` and never removes user data roots.
+never uses `Win32_Product` and never removes user data roots. If an MSI client
+times out or returns a partial state, the smoke rechecks registration, payload,
+shortcut and installer-process state; it does not assume terminating the client
+has stopped Windows Installer, and leaves affected state for a human to inspect.
 
 The release scripts generate a deterministic WiX fragment for the exact
 runtime, helper, bridge, MCPB and legal-resource payload. Every component below

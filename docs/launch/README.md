@@ -30,6 +30,10 @@ only after all of the following are true:
 - the launch owner has reviewed the final, version-specific platform list,
   download URL, known limits, support route, security-reporting route, and
   rollback plan; and
+- the selected landing or download destination links to the current
+  [privacy notice](../../PRIVACY.md). A project-operated site also has its own
+  reviewed service-specific notice; the desktop notice does not describe its
+  host, CDN, cookies, server logs, forms, or third-party services; and
 - every public claim has been checked against the exact stable build rather than
   a source checkout or technical pre-release.
 

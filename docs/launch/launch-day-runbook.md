@@ -29,6 +29,11 @@ details to this repository merely for a launch.
   evidence, following [maintainer validation](../maintainer-validation.md).
 - [ ] The public support, private security-reporting, and Code of Conduct
   enforcement routes have been tested as reachable by their designated humans.
+- [ ] The selected landing or download destination links to the current
+  [privacy notice](../../PRIVACY.md). If the project operates that site, its
+  service-specific notice identifies the operator, host, CDN, third parties,
+  data handling, retention, and contact route; do not treat the desktop notice
+  as a notice for the site.
 - [ ] The known limits in the README and installation guide are visible from the
   chosen destination; no beta artifact is presented as the stable release.
 - [ ] The Product Hunt, Show HN, directory, and community text has been checked

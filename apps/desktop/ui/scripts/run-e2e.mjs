@@ -109,14 +109,24 @@ async function waitForWebDriver(child) {
     try {
       const response = await fetch('http://127.0.0.1:4445/status');
       if (response.ok) {
-        const sessionId = await createWebDriverSession();
+        const sessionId = await createWebDriverSession('readiness');
         try {
-          return;
-        } finally {
-          await deleteWebDriverSession(sessionId);
+          await deleteWebDriverSession(sessionId, 'readiness');
+        } catch (error) {
+          const detail = error instanceof Error ? `: ${error.message}` : '';
+          throw new Error(
+            `AirWiki WebDriver readiness session was created but could not be closed; refusing to retry${detail}`,
+            { cause: error }
+          );
         }
+        return;
       }
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith(
+        'AirWiki WebDriver readiness session was created but could not be closed'
+      )) {
+        throw error;
+      }
       lastError = error;
       // Startup races are expected until the local server can attach to a window.
     }
@@ -142,7 +152,26 @@ async function stopApp(child) {
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 
-async function createWebDriverSession() {
+async function describeWebDriverFailure(response, context) {
+  let detail = '';
+  try {
+    const payload = await response.json();
+    const error = payload?.value?.error;
+    const message = payload?.value?.message;
+    if (typeof error === 'string' && typeof message === 'string') {
+      detail = `: ${error}: ${message}`;
+    } else if (typeof message === 'string') {
+      detail = `: ${message}`;
+    } else if (typeof error === 'string') {
+      detail = `: ${error}`;
+    }
+  } catch {
+    // A non-JSON error response is still reported with its HTTP status.
+  }
+  return `${context} (${response.status})${detail}`;
+}
+
+async function createWebDriverSession(context) {
   const response = await fetch('http://127.0.0.1:4445/session', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -154,27 +183,27 @@ async function createWebDriverSession() {
     })
   });
   if (!response.ok) {
-    throw new Error(`could not create shutdown WebDriver session (${response.status})`);
+    throw new Error(await describeWebDriverFailure(response, `could not create ${context} WebDriver session`));
   }
   const payload = await response.json();
   const sessionId = payload?.value?.sessionId;
   if (typeof sessionId !== 'string' || sessionId.length === 0) {
-    throw new Error('shutdown WebDriver session returned no session ID');
+    throw new Error(`${context} WebDriver session returned no session ID`);
   }
   return sessionId;
 }
 
-async function deleteWebDriverSession(sessionId) {
+async function deleteWebDriverSession(sessionId, context) {
   const response = await fetch(`http://127.0.0.1:4445/session/${sessionId}`, {
     method: 'DELETE'
   });
   if (!response.ok) {
-    throw new Error(`could not close readiness WebDriver session (${response.status})`);
+    throw new Error(await describeWebDriverFailure(response, `could not close ${context} WebDriver session`));
   }
 }
 
 async function requestGracefulShutdown(child) {
-  const sessionId = await createWebDriverSession();
+  const sessionId = await createWebDriverSession('shutdown');
   try {
     await fetch(`http://127.0.0.1:4445/session/${sessionId}/execute/sync`, {
       method: 'POST',

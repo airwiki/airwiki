@@ -10,12 +10,23 @@ const securityHeaders = {
   "X-Frame-Options": "DENY",
 } as const;
 
+interface Env {
+  ASSETS: Fetcher;
+}
+
 export default {
-  fetch() {
-    return new Response("Not found", {
-      status: 404,
-      headers: securityHeaders,
+  async fetch(request, env) {
+    const assetResponse = await env.ASSETS.fetch(request);
+    const headers = new Headers(assetResponse.headers);
+
+    for (const [name, value] of Object.entries(securityHeaders)) {
+      headers.set(name, value);
+    }
+
+    return new Response(assetResponse.body, {
+      status: assetResponse.status,
+      statusText: assetResponse.statusText,
+      headers,
     });
   },
-} satisfies ExportedHandler;
-
+} satisfies ExportedHandler<Env>;

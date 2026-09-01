@@ -17,14 +17,17 @@ Neither artifact changes the desktop product's release state.
 ## Local preview
 
 Run `pnpm dev` for the source page. Run `pnpm build && pnpm preview` to inspect
-the Cloudflare-compatible private-preview artifact. Run `pnpm pages:build` to
-create the exact static GitHub Pages artifact in `dist-pages/`.
+the Cloudflare-compatible private-preview artifact. The Worker bundles the four
+small media assets from `src/assets/`, so its production package contains no
+static client objects that can bypass response headers. Run `pnpm pages:build`
+to create the separate static GitHub Pages artifact in `dist-pages/`; that
+builder copies the allowlisted assets and converts only the Worker-protected
+local references to project-relative paths.
 
-The landing keeps its media assets next to the page. Its documentation links
-deliberately use absolute GitHub `main` URLs. No browser request is made for
-analytics, cookies, web fonts, CDNs, forms, or third-party scripts. Links to
-GitHub source, documentation, Releases, and privacy information are intentional
-visitor-initiated destinations.
+The documentation links deliberately use absolute GitHub `main` URLs. No
+browser request is made for analytics, cookies, web fonts, CDNs, forms, or
+third-party scripts. Links to GitHub source, documentation, Releases, and
+privacy information are intentional visitor-initiated destinations.
 
 ## Release state
 
@@ -100,15 +103,26 @@ introduced without a separate ownership and DNS decision.
 
 ## Worker preview checks
 
-`public/_headers` defines the response controls expected from a future
-header-capable host. The Worker build deliberately removes the generated
-client entry points and serves protected virtual routes with those headers. It
-also supplies a bounded single-range fallback for the demo video.
+The Worker applies a CSP equivalent to `default-src 'self'; script-src 'self';
+style-src 'self'; img-src 'self'; media-src 'self'; object-src 'none'; base-uri
+'self'; frame-ancestors 'none'; form-action 'self'`, plus
+`X-Content-Type-Options: nosniff`, a restrictive `Permissions-Policy`, and
+`Referrer-Policy: no-referrer`. `public/_headers` mirrors that policy for local
+host compatibility, but the production build removes every static client file
+and leaves only the empty binding directory because Sites can bypass the Worker
+for existing static files.
 
-Test `/`, every referenced virtual route, a 404, a disallowed method, and video
-seeking on the exact private deployment. If a host bypasses any referenced
-route, use a host that guarantees Worker-first routing instead of treating the
-workaround as a production control.
+The Worker serves `/`, the referenced CSS/JavaScript, and bundled virtual media
+routes with the same seven headers. Media is decoded lazily on first use rather
+than during isolate startup, and the build fails if the gzipped Worker exceeds
+the repository's conservative 2,400,000-byte budget. It also supplies bounded
+single-range responses for the small demo video.
+
+Test `/`, every referenced virtual route, a 404, a disallowed method, video
+seeking, and the former `/assets/*`, `/_headers`, and `/.assetsignore` paths on
+the exact private deployment. Those former backing-object paths must return the
+protected Worker 404; any `200` is a blocker for that hosting path. If a host
+bypasses any referenced route, use a host that guarantees Worker-first routing.
 
 ## Static checks
 

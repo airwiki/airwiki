@@ -60,6 +60,7 @@ await assertRegularTree(outputRoot);
 
 const html = await readFile(path.join(outputRoot, "index.html"), "utf8");
 assert(!html.includes("/__airwiki-protected"), "Pages HTML must not reference Worker-only routes");
+assert(!html.includes("vite-ignore"), "Pages HTML must not retain Worker-only Vite markers");
 assert(!/<form\b/i.test(html), "The public landing must not collect form data");
 assert(!/<script\b(?![^>]*\bsrc=)/i.test(html), "Inline scripts are not permitted");
 assert(

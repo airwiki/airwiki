@@ -1,13 +1,26 @@
 # Public release process
 
 This is AirWiki's planned supported-release process; it is not currently
-operational. Stable release remains blocked until SSL.com entity onboarding,
-eSigner credentials, a protected signing run, updater-key custody, and an
+operational. Stable release remains blocked until SignPath Foundation accepts
+the project, maintainers complete its required account and policy review, a
+protected signing rehearsal succeeds, updater-key custody is confirmed, and an
 installed update acceptance pass. Once those gates pass, a two-phase GitHub
 Actions process prepares a private draft tied to one reviewed commit, then
 re-downloads and verifies it on macOS and Windows before protected human
 approval makes it public. A workflow run never moves or overwrites an existing
 release tag.
+
+## Selected SignPath Foundation prerequisite (inactive)
+
+ADR 0016 selects the Windows signing route. It is inactive and does
+not assert provider acceptance. Before it can be used, SignPath Foundation must
+accept the project and maintainers must confirm its then-current terms and
+privacy information. It requires MFA for the public requester `machester4` and independent approver
+`bryanTechera`, a separate manual SignPath approval, and protected token, slugs
+and certificate fingerprint. The existing `windows-signing` environment is
+main-only with self-review and administrator bypass disabled; it has no
+SignPath token or variables today, so the reusable workflow fails closed before
+any request. The public release notes must include `Free code signing provided by SignPath.io, certificate by SignPath Foundation` and link the [Code signing policy](code-signing-policy.md).
 
 Unsigned candidates from **Package technical candidates** are a separate
 technical-testing channel. A protected run may publish them as a clearly marked
@@ -69,20 +82,23 @@ reporting, secret scanning with push protection, Dependabot security updates
 and GitHub CodeQL default setup before accepting a public candidate.
 
 Configure these non-secret repository variables so verification jobs can use
-them without entering a signing environment:
+them without entering a signing environment. Do not create or populate any
+SignPath value before the Foundation accepts the project and maintainers review
+the resulting configuration:
 
 | Variable | Purpose |
 | --- | --- |
 | `AIRWIKI_UPDATER_PUBLIC_KEY` | Tauri updater public key embedded in release builds |
 | `AIRWIKI_MACOS_TEAM_ID` | Expected Apple Developer team identifier |
-| `AIRWIKI_WINDOWS_SIGNER_SHA256` | Expected SSL.com eSigner leaf-certificate fingerprint |
-| `AIRWIKI_ESIGNER_SECRET_TRANSPORT_APPROVED` | Exact protected-environment gate for SSL.com-confirmed secret transport |
+| `AIRWIKI_WINDOWS_SIGNER_SHA256` | Expected SignPath Foundation leaf-certificate SHA-256 fingerprint, obtained after acceptance |
 
-Set `AIRWIKI_ESIGNER_SECRET_TRANSPORT_APPROVED` only in the protected
-`windows-signing` environment and only to `sslcom-esigner-secret-transport-v1`
-after SSL.com has confirmed the secret transport in writing or the approvers have
-explicitly accepted the residual risk. Any other value keeps stable signing
-closed.
+After acceptance only, set the following protected `windows-signing`
+environment variables from the configuration issued for AirWiki:
+`SIGNPATH_FOUNDATION_ENROLLMENT=approved`, `SIGNPATH_ORGANIZATION_ID`,
+`SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG`,
+`SIGNPATH_BINARIES_CONFIGURATION_SLUG`, and
+`SIGNPATH_MSI_CONFIGURATION_SLUG`. The exact values are not versioned. Missing,
+unexpected, or unapproved values keep the signing job closed.
 
 Set `AIRWIKI_MACOS_SIGNING_IDENTITY` in `macos-signing` to the complete
 `Developer ID Application: ... (TEAMID)` identity. Add these protected secrets:
@@ -94,10 +110,7 @@ Set `AIRWIKI_MACOS_SIGNING_IDENTITY` in `macos-signing` to the complete
 | `macos-signing` | `APPLE_API_PRIVATE_KEY_BASE64` |
 | `macos-signing` | `TAURI_SIGNING_PRIVATE_KEY` |
 | `macos-signing` | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
-| `windows-signing` | `SSL_COM_ESIGNER_USERNAME` |
-| `windows-signing` | `SSL_COM_ESIGNER_PASSWORD` |
-| `windows-signing` | `SSL_COM_ESIGNER_TOTP_SECRET` |
-| `windows-signing` | `SSL_COM_ESIGNER_CREDENTIAL_ID` |
+| `windows-signing` | `SIGNPATH_API_TOKEN` |
 | `windows-signing` | `TAURI_SIGNING_PRIVATE_KEY` |
 | `windows-signing` | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
 
@@ -141,15 +154,17 @@ signing identity or credentials. It cannot create tags or releases, publish
 `latest.json`, or request OIDC credentials; a successful rehearsal is evidence
 of the macOS path only and does not promote a release.
 
-Before enabling the protected job, prevalidate the project entity with SSL.com
-and purchase the OV code-signing certificate plus required eSigner tier. Keep
-the CKA installer from the reviewed `SSLcom/eSignerCKA` release and CodeSignTool
-archive versions and hashes in reviewed configuration; the build fails if either
-hash differs. The workflow selects only the explicit `10.0.26100.0/x64`
-`signtool` from the Windows SDK and requires a valid native signature and
-matching file-version prefix. The `windows-signing` approval is independent from authoring the
-build, and the certificate key remains non-exportable in SSL.com's cloud HSM.
-See the [code-signing policy](code-signing-policy.md).
+Before enabling the protected Windows job, obtain SignPath Foundation acceptance,
+review the issued organization, project, policy, and configuration slugs, and
+record the expected certificate fingerprint in the protected configuration. The
+workflow submits two separately origin-verified requests: first the three
+AirWiki-owned PE files, then the two localized MSI containers. It selects the
+pinned Microsoft `signtool` and verifies `/pa /all /tw`, indexed signatures,
+code-signing and timestamp EKUs, the expected fingerprint, and nested MSI
+payload signatures. The `windows-signing` approval is independent from
+authoring the build, and SignPath retains the signing key in its service/HSM.
+The visible Windows publisher is SignPath Foundation; SmartScreen and
+organization policy may still warn or block a signed download. See the [code-signing policy](code-signing-policy.md).
 
 Generate the Tauri updater key once on a trusted administrative Mac with the
 pinned repository CLI:
@@ -204,9 +219,11 @@ From the Actions page, run **Prepare signed public release** on `main` with:
 The workflow fails closed if the commit moved, a tag or release already exists,
 the manifests differ, or the required checks are not green. It then:
 
-1. builds secret-free Windows binaries, then the protected eSigner job scans and
-   signs AirWiki-owned files with CKA plus `signtool`;
-2. builds two localized MSI packages, obtains their outer signatures and signs
+1. builds secret-free Windows binaries, then the protected SignPath job submits
+   the origin-verified AirWiki-owned PE files and verifies their signatures with
+   `signtool`;
+2. builds two localized MSI packages, submits their origin-verified containers
+   for outer signatures, verifies the nested payload and final MSI signatures, and signs
    their final bytes for the Tauri updater;
 3. imports the ephemeral Developer ID identity, builds the macOS app, notarizes
    and staples the app and DMG, restores only validated EULA resources while
@@ -245,7 +262,8 @@ same version. The workflow:
 3. independently re-verifies Developer ID, notarization, stapling and the macOS
    updater signature, explicitly accepts the bundled Apache-2.0 agreement for
    the noninteractive mount, and compares its application bytes with the updater;
-4. independently re-verifies SSL.com certificate fingerprint, nested Windows payload and both
+4. independently re-verifies the SignPath Foundation certificate fingerprint,
+   nested Windows payload and both
    MSI updater signatures; and
 5. waits at the protected `public-release` environment.
 

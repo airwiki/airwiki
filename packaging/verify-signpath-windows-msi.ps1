@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
-    throw "Signed Windows MSI verification requires Windows"
+    throw "SignPath MSI verification requires Windows"
 }
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -29,7 +29,7 @@ $CandidateRoot = if ([IO.Path]::IsPathRooted($PackageRoot)) {
 . (Join-Path $PSScriptRoot "windows-payload.ps1")
 . (Join-Path $PSScriptRoot "windows-runtime.ps1")
 . (Join-Path $PSScriptRoot "windows-safe-staging.ps1")
-. (Join-Path $PSScriptRoot "windows-authenticode.ps1")
+. (Join-Path $PSScriptRoot "windows-signpath.ps1")
 
 function Expand-WindowsMsi([string] $Installer, [string] $Destination) {
     $MsiExec = Get-VerifiedWindowsRegularFile `
@@ -84,7 +84,7 @@ if ($Unexpected.Count -ne 0) {
 
 $ReferenceSigner = $null
 $ReferencePayload = $null
-$VerificationRoot = Join-Path $TargetRoot "windows-signing\signed-msi-verification"
+$VerificationRoot = Join-Path $TargetRoot "signpath\signed-msi-verification"
 Push-Location $Root
 try {
     & cargo run --locked -p xtask -- packaging verify-windows-msi
@@ -100,12 +100,12 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw "Tauri updater signature verification failed"
         }
-        $MsiSigner = Get-VerifiedWindowsAuthenticodeSignature $Installer.FullName "signed AirWiki MSI"
-        Assert-ExpectedWindowsSigner $MsiSigner
+        $MsiSigner = Get-VerifiedSignPathSignature $Installer.FullName "signed AirWiki MSI"
+        Assert-ExpectedSignPathSigner $MsiSigner
         if ($null -eq $ReferenceSigner) {
             $ReferenceSigner = $MsiSigner
         } else {
-            Assert-SameWindowsSigner $ReferenceSigner $MsiSigner "localized MSI"
+            Assert-SameSignPathSigner $ReferenceSigner $MsiSigner "localized MSI"
         }
 
         Remove-AirWikiWindowsStagingPath `
@@ -144,9 +144,9 @@ try {
             @{ Path = $Bridge; Label = "MCP bridge" },
             @{ Path = $Helper; Label = "firewall helper" }
         )) {
-            $NestedSigner = Get-VerifiedWindowsAuthenticodeSignature $Nested.Path "signed MSI $($Nested.Label)"
-            Assert-ExpectedWindowsSigner $NestedSigner
-            Assert-SameWindowsSigner $ReferenceSigner $NestedSigner $Nested.Label
+            $NestedSigner = Get-VerifiedSignPathSignature $Nested.Path "signed MSI $($Nested.Label)"
+            Assert-ExpectedSignPathSigner $NestedSigner
+            Assert-SameSignPathSigner $ReferenceSigner $NestedSigner $Nested.Label
         }
 
         $null = Get-WindowsLlamaRuntimeManifest $RuntimeRoot $LlamaPolicy

@@ -193,7 +193,7 @@ jobs:
             --asset "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_es-ES.msi" `
             --asset "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_es-ES.msi.sig"
           if ($LASTEXITCODE -ne 0) { throw "Windows release set changed after inspection" }
-          ./packaging/verify-signed-windows-msi.ps1 -PackageRoot target\public-release
+          ./packaging/verify-signpath-windows-msi.ps1 -PackageRoot target\public-release
 
   publish:
     name: Human-approved stable publication
@@ -231,7 +231,7 @@ jobs:
           version="$AIRWIKI_RELEASE_VERSION"
           expected_commit="${{ needs.inspect-draft.outputs.commit-sha }}"
           release="$(gh release view "v${version}" \
-            --json isDraft,isPrerelease,targetCommitish)"
+            --json isDraft,isPrerelease,targetCommitish,body)"
           release_state="$(jq -r '[.isDraft,.isPrerelease] | @tsv' <<<"$release")"
           if [[ "$release_state" != $'true\ttrue' && "$release_state" != $'false\tfalse' ]]; then
             echo "Release state changed to an invalid promotion state." >&2
@@ -239,6 +239,11 @@ jobs:
           fi
           if [[ "$(jq -r '.targetCommitish' <<<"$release")" != "$expected_commit" ]]; then
             echo "Release target changed after verification." >&2
+            exit 1
+          fi
+          body="$(jq -r '.body' <<<"$release")"
+          if [[ "$body" != *"[Code signing policy](https://github.com/airwiki/airwiki/blob/main/docs/code-signing-policy.md)"* || "$body" != *"Free code signing provided by SignPath.io, certificate by SignPath Foundation"* ]]; then
+            echo "Release notes do not contain the required signing disclosure." >&2
             exit 1
           fi
 
@@ -293,6 +298,11 @@ jobs:
             --draft=false \
             --prerelease=false \
             --latest
+          body_after="$(gh release view "v${version}" --json body --jq '.body')"
+          if [[ "$body_after" != *"[Code signing policy](https://github.com/airwiki/airwiki/blob/main/docs/code-signing-policy.md)"* || "$body_after" != *"Free code signing provided by SignPath.io, certificate by SignPath Foundation"* ]]; then
+            echo "Published release notes lost the required signing disclosure." >&2
+            exit 1
+          fi
           state="$(gh release view "v${version}" --json isDraft,isPrerelease \
             --jq '[.isDraft,.isPrerelease] | @tsv')"
           latest="$(gh release view --json tagName --jq '.tagName')"

@@ -131,7 +131,7 @@ jobs:
       - name: Windows Authenticode source contract
         if: runner.os == 'Windows'
         shell: powershell
-        run: ./packaging/test-windows-authenticode-source-contract.ps1
+        run: ./packaging/test-windows-signpath-source-contract.ps1
       - name: macOS beta bootstrap packaging policy
         if: runner.os == 'macOS'
         shell: bash

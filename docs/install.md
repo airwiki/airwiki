@@ -8,7 +8,8 @@ subnet with multicast available. Hiding the window keeps the node running;
 AirWiki is still a development candidate. Public technical pre-releases are
 available from [GitHub Releases](https://github.com/airwiki/airwiki/releases),
 but they are explicitly unsupported, non-latest manual downloads while native
-signing is incomplete. Verify their provenance and SHA-256 independently. Never
+signing is incomplete. Verify their provenance and SHA-256 independently. See
+the [Code signing policy](code-signing-policy.md). Never
 disable Gatekeeper, SmartScreen, Smart App Control, antivirus, model hashes or
 runtime verification to make a candidate run. When a stable release exists,
 use only the signed installers on the

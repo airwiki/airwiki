@@ -20,7 +20,8 @@
   <a href="FAQ.md">Beta FAQ</a> ·
   <a href="#run-from-source">Run from source</a> ·
   <a href="CONTRIBUTING.md">Contribute</a> ·
-  <a href="SUPPORT.md">Feedback</a>
+  <a href="SUPPORT.md">Feedback</a> ·
+  <a href="docs/code-signing-policy.md">Code signing policy</a>
 </p>
 
 AirWiki is an open-source desktop app that turns folders, [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundles, and assistant conversations into wikis you can search, review, and selectively share. Knowledge stays on the device that owns it by default. Local AI can organize and index it, but cannot publish it or grant access.
@@ -216,6 +217,7 @@ Every route beyond local use crosses an independently managed access boundary. S
 - [Threat model](docs/threat-model.md)
 - [Code review](CODE_REVIEW.md)
 - [Development packaging](docs/packaging.md)
+- [Public launch kit](docs/launch/README.md)
 - [Public release process](docs/release-process.md)
 - [Code signing policy](docs/code-signing-policy.md)
 - [Security policy](SECURITY.md)
@@ -231,6 +233,6 @@ AirWiki does not currently provide OCR, DOCX ingestion, image/audio/video proces
 
 ## License
 
-AirWiki is open source under the [Apache License 2.0](LICENSE). The current public technical beta is unsigned or unnotarized. Future Windows stable signing is planned through [SSL.com eSigner](https://www.ssl.com/esigner/) with a non-exportable cloud-HSM key; it is not operational until entity onboarding, credentials, and installed acceptance pass. The stable Tauri updater will use one confirmed channel hosted on GitHub Releases, whose assets remain independently signed and verified. See the [code signing policy](docs/code-signing-policy.md).
+AirWiki is open source under the [Apache License 2.0](LICENSE). The current public technical beta is unsigned or unnotarized. The selected SignPath Foundation route for future Windows stable signing is inactive until provider acceptance, protected configuration, a separate manual approval, and installed acceptance pass. The stable Tauri updater will use one confirmed channel hosted on GitHub Releases, whose assets remain independently signed and verified. See the [Code signing policy](docs/code-signing-policy.md).
 
 ChatGPT, Codex, Claude, and Gemini names and marks belong to OpenAI, Anthropic, and Google respectively. AirWiki uses their official artwork only to identify optional integrations; this does not imply sponsorship or endorsement. See [third-party notices](THIRD_PARTY_NOTICES.md).

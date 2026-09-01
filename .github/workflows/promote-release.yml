@@ -242,7 +242,7 @@ jobs:
             exit 1
           fi
           body="$(jq -r '.body' <<<"$release")"
-          if [[ "$body" != *"Code signing policy"* || "$body" != *"Free code signing provided by SignPath.io, certificate by SignPath Foundation"* ]]; then
+          if [[ "$body" != *"[Code signing policy](https://github.com/airwiki/airwiki/blob/main/docs/code-signing-policy.md)"* || "$body" != *"Free code signing provided by SignPath.io, certificate by SignPath Foundation"* ]]; then
             echo "Release notes do not contain the required signing disclosure." >&2
             exit 1
           fi
@@ -299,7 +299,7 @@ jobs:
             --prerelease=false \
             --latest
           body_after="$(gh release view "v${version}" --json body --jq '.body')"
-          if [[ "$body_after" != *"Code signing policy"* || "$body_after" != *"Free code signing provided by SignPath.io, certificate by SignPath Foundation"* ]]; then
+          if [[ "$body_after" != *"[Code signing policy](https://github.com/airwiki/airwiki/blob/main/docs/code-signing-policy.md)"* || "$body_after" != *"Free code signing provided by SignPath.io, certificate by SignPath Foundation"* ]]; then
             echo "Published release notes lost the required signing disclosure." >&2
             exit 1
           fi

@@ -10159,6 +10159,9 @@ policy:
             fs::read_to_string(root.join(".github/workflows/prepare-release.yml")).unwrap();
         let promote =
             fs::read_to_string(root.join(".github/workflows/promote-release.yml")).unwrap();
+        let signing_policy_link = "[Code signing policy](https://github.com/airwiki/airwiki/blob/main/docs/code-signing-policy.md)";
+        let signpath_disclosure =
+            "Free code signing provided by SignPath.io, certificate by SignPath Foundation";
 
         assert!(
             prepare.contains("workflow_dispatch:")
@@ -10171,6 +10174,8 @@ policy:
                 && prepare.contains("--target \"$AIRWIKI_RELEASE_COMMIT\"")
                 && prepare.contains("packaging/generate-update-manifest.py")
                 && prepare.contains("packaging/release_assets.py generate")
+                && prepare.contains(signing_policy_link)
+                && prepare.contains(signpath_disclosure)
                 && !prepare.contains("self-hosted")
         );
         assert!(
@@ -10195,6 +10200,8 @@ policy:
                 && promote.contains("--draft=false")
                 && promote.contains("--prerelease=false")
                 && promote.contains("--latest")
+                && promote.matches(signing_policy_link).count() == 2
+                && promote.matches(signpath_disclosure).count() == 2
                 && !promote.contains("packaging/generate-update-manifest.py")
                 && !promote.contains("gh release upload")
                 && !promote.contains("--clobber")

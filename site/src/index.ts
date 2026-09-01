@@ -2,6 +2,10 @@ import appScript from "../app.js?raw";
 import htmlSource from "../index.html?raw";
 import launchConfigScript from "../launch-config.js?raw";
 import stylesheet from "../styles.css?raw";
+import demoPosterDataUrl from "./assets/airwiki-demo-poster.png?inline";
+import demoVideoDataUrl from "./assets/airwiki-demo.mp4?inline";
+import markDataUrl from "./assets/airwiki-mark.png?inline";
+import reviewFlowDataUrl from "./assets/airwiki-review-flow.png?inline";
 
 const securityHeaders = {
   "Content-Security-Policy":
@@ -17,18 +21,54 @@ const securityHeaders = {
 
 const protectedPrefix = "/__airwiki-protected";
 const protectedAssetPrefix = `${protectedPrefix}/assets/`;
-const assetNames = new Set([
-  "airwiki-demo-poster.png",
-  "airwiki-demo.mp4",
-  "airwiki-mark.png",
-  "airwiki-review-flow.png",
+
+interface ProtectedAsset {
+  bytes?: Uint8Array<ArrayBuffer>;
+  contentType: string;
+  dataUrl: string;
+  size: number;
+}
+
+function decodeDataUrl(dataUrl: string): Uint8Array<ArrayBuffer> {
+  const separator = dataUrl.indexOf(",");
+  if (separator === -1 || !dataUrl.slice(0, separator).endsWith(";base64")) {
+    throw new Error("Bundled launch asset is not a base64 data URL");
+  }
+
+  const encoded = dataUrl.slice(separator + 1);
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+const protectedAssets = new Map<string, ProtectedAsset>([
+  [
+    "airwiki-demo-poster.png",
+    { contentType: "image/png", dataUrl: demoPosterDataUrl, size: 106_092 },
+  ],
+  [
+    "airwiki-demo.mp4",
+    { contentType: "video/mp4", dataUrl: demoVideoDataUrl, size: 663_509 },
+  ],
+  [
+    "airwiki-mark.png",
+    { contentType: "image/png", dataUrl: markDataUrl, size: 877_237 },
+  ],
+  [
+    "airwiki-review-flow.png",
+    { contentType: "image/png", dataUrl: reviewFlowDataUrl, size: 191_525 },
+  ],
 ]);
 
-const protectedHtml = htmlSource
-  .replaceAll('="assets/', `="${protectedAssetPrefix}`)
-  .replace('href="styles.css"', `href="${protectedPrefix}/styles.css"`)
-  .replace('src="launch-config.js"', `src="${protectedPrefix}/launch-config.js"`)
-  .replace('src="app.js"', `src="${protectedPrefix}/app.js"`);
+function assetBytes(asset: ProtectedAsset): Uint8Array<ArrayBuffer> {
+  asset.bytes ??= decodeDataUrl(asset.dataUrl);
+  return asset.bytes;
+}
+
+const protectedHtml = htmlSource.replaceAll(" vite-ignore", "");
 
 const textRoutes = new Map<string, { body: string; contentType: string }>([
   ["/", { body: protectedHtml, contentType: "text/html; charset=utf-8" }],
@@ -46,10 +86,6 @@ const textRoutes = new Map<string, { body: string; contentType: string }>([
     { body: appScript, contentType: "text/javascript; charset=utf-8" },
   ],
 ]);
-
-interface Env {
-  ASSETS: Fetcher;
-}
 
 function applySecurityHeaders(headers: Headers): void {
   for (const [name, value] of Object.entries(securityHeaders)) {
@@ -111,65 +147,61 @@ function parseByteRange(value: string, size: number): ByteRangeResult {
   return { start, end: Math.min(requestedEnd, size - 1) };
 }
 
-async function securedAssetResponse(
+function securedAssetResponse(
   request: Request,
-  response: Response,
+  asset: ProtectedAsset,
   assetName: string,
-): Promise<Response> {
-  const headers = new Headers(response.headers);
+): Response {
+  const bytes = request.method === "HEAD" ? undefined : assetBytes(asset);
+  const headers = new Headers({
+    "Content-Length": String(asset.size),
+    "Content-Type": asset.contentType,
+  });
   applySecurityHeaders(headers);
 
   if (assetName === "airwiki-demo.mp4") {
     headers.set("Accept-Ranges", "bytes");
     const rangeHeader = request.headers.get("Range");
-    if (rangeHeader && response.status === 200) {
-      const contentLengthHeader = headers.get("Content-Length");
-      const contentLength = contentLengthHeader === null ? null : Number(contentLengthHeader);
-      if (
-        request.method === "HEAD" &&
-        (contentLength === null || !Number.isSafeInteger(contentLength) || contentLength < 0)
-      ) {
-        return new Response(null, { status: response.status, headers });
-      }
-      const bytes = request.method === "HEAD" ? null : await response.arrayBuffer();
-      const size = bytes?.byteLength ?? contentLength;
-      const range = size !== null && Number.isSafeInteger(size) && size >= 0
-        ? parseByteRange(rangeHeader, size)
-        : "ignore";
+    if (rangeHeader && isSingleByteRange(rangeHeader)) {
+      const range = parseByteRange(rangeHeader, asset.size);
 
       if (range === "ignore") {
-        if (bytes) headers.set("Content-Length", String(bytes.byteLength));
-        return new Response(bytes, { status: response.status, headers });
+        return new Response(bytes ?? null, {
+          status: 200,
+          headers,
+        });
       }
 
       if (range === "unsatisfiable") {
-        headers.set(
-          "Content-Range",
-          `bytes */${size !== null && Number.isSafeInteger(size) ? size : "*"}`,
-        );
+        headers.set("Content-Range", `bytes */${asset.size}`);
         headers.set("Content-Length", "0");
         return new Response(null, { status: 416, headers });
       }
 
       const length = range.end - range.start + 1;
-      headers.set("Content-Range", `bytes ${range.start}-${range.end}/${size}`);
+      headers.set(
+        "Content-Range",
+        `bytes ${range.start}-${range.end}/${asset.size}`,
+      );
       headers.set("Content-Length", String(length));
-      return new Response(bytes?.slice(range.start, range.end + 1) ?? null, {
+      return new Response(
+        bytes?.slice(range.start, range.end + 1) ?? null,
+        {
         status: 206,
         headers,
-      });
+        },
+      );
     }
   }
 
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
+  return new Response(bytes ?? null, {
+    status: 200,
     headers,
   });
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request) {
     if (request.method !== "GET" && request.method !== "HEAD") {
       const response = textResponse(
         request,
@@ -189,22 +221,13 @@ export default {
 
     if (url.pathname.startsWith(protectedAssetPrefix)) {
       const assetName = url.pathname.slice(protectedAssetPrefix.length);
-      if (!assetNames.has(assetName)) {
+      const asset = protectedAssets.get(assetName);
+      if (!asset) {
         return textResponse(request, "Not found\n", "text/plain; charset=utf-8", 404);
       }
-
-      const assetUrl = new URL(`/assets/${assetName}`, request.url);
-      let assetRequest = new Request(assetUrl, request);
-      const rangeHeader = request.headers.get("Range");
-      if (assetName === "airwiki-demo.mp4" && rangeHeader && !isSingleByteRange(rangeHeader)) {
-        const headers = new Headers(assetRequest.headers);
-        headers.delete("Range");
-        assetRequest = new Request(assetRequest, { headers });
-      }
-      const assetResponse = await env.ASSETS.fetch(assetRequest);
-      return securedAssetResponse(request, assetResponse, assetName);
+      return securedAssetResponse(request, asset, assetName);
     }
 
     return textResponse(request, "Not found\n", "text/plain; charset=utf-8", 404);
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler;

@@ -198,6 +198,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: powershell
         run: |
+          . .\packaging\windows-runtime.ps1
+          . .\packaging\windows-signpath.ps1
           if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
             throw "Tauri updater signing key is missing"
           }
@@ -206,6 +208,7 @@ jobs:
           }
           $Tauri = Resolve-Path apps\desktop\ui\node_modules\.bin\tauri.cmd
           $PackageRoot = Get-Item target\packages\windows-signed -Force
+          Assert-NoWindowsReparseAncestor $PackageRoot.FullName "SignPath MSI output"
           $Entries = @(Get-ChildItem $PackageRoot.FullName -Force)
           $Expected = @(
             "AirWiki_$($env:AIRWIKI_RELEASE_VERSION)_x64_en-US.msi",
@@ -216,7 +219,8 @@ jobs:
           }
           $Installers = @($Entries | Where-Object { -not $_.PSIsContainer })
           foreach ($Installer in $Installers) {
-            & $Tauri signer sign $Installer.FullName
+            $VerifiedInstaller = Get-VerifiedWindowsRegularFile $Installer.FullName "SignPath MSI output"
+            & $Tauri signer sign $VerifiedInstaller
             if ($LASTEXITCODE -ne 0) { throw "Tauri updater signing failed" }
           }
       - name: Verify signed MSI candidate

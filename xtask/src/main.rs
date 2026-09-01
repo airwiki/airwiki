@@ -197,7 +197,7 @@ const UPDATER_PUBLIC_KEY_ENV: &str = "AIRWIKI_UPDATER_PUBLIC_KEY";
 const PREPARE_RELEASE_WORKFLOW: &str = ".github/workflows/prepare-release.yml";
 const WINDOWS_SIGNPATH_WORKFLOW_REFERENCE: &str = "./.github/workflows/windows-signpath.yml";
 const WINDOWS_SIGNPATH_WORKFLOW_CONTRACT_SHA256: &str =
-    "8b460e62f111000fed73cf072822dac35cd4b6f5a81fbb889f59b0e05804413c";
+    "2b6c795c00668aad78bc7b59bb6d724255f3e7df3f36df7691c7dfe8183954e5";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -4117,6 +4117,11 @@ fn verify_windows_signpath_workflow(source: &str) -> Result<()> {
     ensure!(
         updater.contains("TAURI_SIGNING_PRIVATE_KEY")
             && updater.contains("TAURI_SIGNING_PRIVATE_KEY_PASSWORD")
+            && updater.contains(". .\\packaging\\windows-runtime.ps1")
+            && updater.contains(". .\\packaging\\windows-signpath.ps1")
+            && updater.contains("Assert-NoWindowsReparseAncestor $PackageRoot.FullName")
+            && updater.contains("Get-VerifiedWindowsRegularFile $Installer.FullName")
+            && updater.contains("& $Tauri signer sign $VerifiedInstaller")
             && updater.contains(
                 "SignPath output must contain exactly the two signed localized MSI files"
             ),

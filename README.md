@@ -13,6 +13,7 @@
 </p>
 
 <p align="center">
+  <a href="https://airwiki.github.io/airwiki/">Website</a> ·
   <a href="#how-airwiki-works">How it works</a> ·
   <a href="#availability">Availability</a> ·
   <a href="https://github.com/airwiki/airwiki/releases">Technical beta</a> ·

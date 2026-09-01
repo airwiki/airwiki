@@ -38,7 +38,7 @@ jobs:
         run: pnpm --dir site install --frozen-lockfile --ignore-scripts
       - name: Build and verify launch site
         shell: bash
-        run: pnpm --dir site check
+        run: pnpm --dir site pages:check
 
   frontend:
     name: Frontend checks (${{ matrix.target }})

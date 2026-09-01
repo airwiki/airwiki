@@ -117,6 +117,10 @@ summary { cursor: pointer; font-weight: 750; }
 .faq-list summary { font-family: var(--display); font-size: 1.28rem; }
 .faq-list p { max-width: 43rem; margin: 0.85rem 0 0; color: var(--ink-soft); }
 
+.site-privacy { display: grid; grid-template-columns: minmax(15rem, 0.8fr) minmax(0, 1.2fr); gap: clamp(2rem, 7vw, 7rem); border-top: 1px solid var(--line); }
+.site-privacy-copy { max-width: 45rem; color: var(--ink-soft); }
+.site-privacy-copy p:last-child { margin-bottom: 0; }
+
 .closing { padding: clamp(5rem, 11vw, 10rem) max(1rem, calc((100% - var(--measure)) / 2)); color: white; background: var(--moss-deep); }
 .closing h2 { max-width: 15ch; }
 .closing > p:not(.eyebrow) { max-width: 39rem; color: #d2e6d6; font-size: 1.15rem; }
@@ -141,6 +145,7 @@ summary { cursor: pointer; font-weight: 750; }
   .workflow-card { min-height: 0; }
   .workflow-card > a { margin-top: 1rem; }
   .boundaries { grid-template-columns: 1fr; }
+  .site-privacy { grid-template-columns: 1fr; }
   .boundary-stamp { width: 10rem; }
   .site-footer { align-items: flex-start; flex-direction: column; }
   .site-footer nav { justify-content: flex-start; }

@@ -21,7 +21,7 @@ const freshnessDeadline = new Date();
 freshnessDeadline.setUTCFullYear(freshnessDeadline.getUTCFullYear() + 1);
 const staleAfter = freshnessDeadline.toISOString().slice(0, 10);
 
-async function availableLoopbackPort() {
+async function availableLoopbackPort(purpose) {
   const server = createServer();
   await new Promise((resolveListen, rejectListen) => {
     server.once('error', rejectListen);
@@ -30,7 +30,7 @@ async function availableLoopbackPort() {
   const address = server.address();
   if (!address || typeof address === 'string') {
     server.close();
-    throw new Error('the E2E runner could not reserve a loopback MCP port');
+    throw new Error(`the E2E runner could not reserve a loopback ${purpose} port`);
   }
   await new Promise((resolveClose, rejectClose) => {
     server.close((error) => error ? rejectClose(error) : resolveClose());
@@ -38,7 +38,11 @@ async function availableLoopbackPort() {
   return address.port;
 }
 
-const e2eMcpPort = await availableLoopbackPort();
+const [e2eMcpPort, e2eWebDriverPort] = await Promise.all([
+  availableLoopbackPort('MCP'),
+  availableLoopbackPort('WebDriver')
+]);
+const webDriverUrl = `http://127.0.0.1:${e2eWebDriverPort}`;
 mkdirSync(sourceFixture, { recursive: true });
 mkdirSync(join(okfFixture, 'architecture'), { recursive: true });
 mkdirSync(projectFixture, { recursive: true });
@@ -107,7 +111,7 @@ async function waitForWebDriver(child) {
       throw new Error(`AirWiki exited before WebDriver became ready (${child.exitCode})`);
     }
     try {
-      const response = await fetch('http://127.0.0.1:4445/status');
+      const response = await fetch(`${webDriverUrl}/status`);
       if (response.ok) {
         const sessionId = await createWebDriverSession('readiness');
         try {
@@ -172,7 +176,7 @@ async function describeWebDriverFailure(response, context) {
 }
 
 async function createWebDriverSession(context) {
-  const response = await fetch('http://127.0.0.1:4445/session', {
+  const response = await fetch(`${webDriverUrl}/session`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -194,7 +198,7 @@ async function createWebDriverSession(context) {
 }
 
 async function deleteWebDriverSession(sessionId, context) {
-  const response = await fetch(`http://127.0.0.1:4445/session/${sessionId}`, {
+  const response = await fetch(`${webDriverUrl}/session/${sessionId}`, {
     method: 'DELETE'
   });
   if (!response.ok) {
@@ -205,7 +209,7 @@ async function deleteWebDriverSession(sessionId, context) {
 async function requestGracefulShutdown(child) {
   const sessionId = await createWebDriverSession('shutdown');
   try {
-    await fetch(`http://127.0.0.1:4445/session/${sessionId}/execute/sync`, {
+    await fetch(`${webDriverUrl}/session/${sessionId}/execute/sync`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -237,7 +241,7 @@ const app = spawn(appBinaryPath, [], {
     AIRWIKI_E2E_OKF_FOLDER: okfFixture,
     AIRWIKI_E2E_PROJECT_FOLDER: projectFixture,
     AIRWIKI_E2E_MCP_PORT: String(e2eMcpPort),
-    TAURI_WEBDRIVER_PORT: '4445'
+    TAURI_WEBDRIVER_PORT: String(e2eWebDriverPort)
   },
   stdio: 'inherit'
 });
@@ -252,7 +256,8 @@ try {
       ...process.env,
       AIRWIKI_E2E_DATA_ROOT: testRoot,
       AIRWIKI_E2E_PROJECT_FOLDER: projectFixture,
-      AIRWIKI_E2E_MCP_PORT: String(e2eMcpPort)
+      AIRWIKI_E2E_MCP_PORT: String(e2eMcpPort),
+      TAURI_WEBDRIVER_PORT: String(e2eWebDriverPort)
     },
     stdio: 'inherit'
   });

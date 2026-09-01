@@ -10,9 +10,9 @@ re-downloads and verifies it on macOS and Windows before protected human
 approval makes it public. A workflow run never moves or overwrites an existing
 release tag.
 
-## Proposed SignPath Foundation prerequisite
+## Selected SignPath Foundation prerequisite (inactive)
 
-ADR 0016 is the proposed Windows signing route. It is not operational and does
+ADR 0016 selects the Windows signing route. It is inactive and does
 not assert provider acceptance. Before it can be used, SignPath Foundation must
 accept the project and maintainers must confirm its then-current terms and
 privacy information. It requires MFA for the public requester `machester4` and independent approver

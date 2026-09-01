@@ -1,14 +1,14 @@
 # Code signing policy
 
-This policy describes a proposed Windows signing route for future stable AirWiki releases. It is not evidence of provider acceptance, a certificate, credentials, project configuration, or a supported signed download.
+This policy describes the selected but inactive Windows signing route for future stable AirWiki releases. It is not evidence of provider acceptance, a certificate, credentials, project configuration, or a supported signed download.
 
 ## Technical pre-release boundary
 
 Technical prereleases remain unsigned/manual-only, non-Latest and excluded from the updater. GitHub Artifact Attestations establish build provenance, not a Windows publisher identity. Keep platform protections enabled and stop if a device blocks a candidate.
 
-## Proposed SignPath Foundation route
+## Selected SignPath Foundation route (inactive)
 
-ADR 0016 is Proposed. Before application, maintainers must confirm current SignPath Foundation terms and the project's [privacy policy](../PRIVACY.md). The Windows publisher would be SignPath Foundation. Every stable release note and this policy must disclose exactly: `Free code signing provided by SignPath.io, certificate by SignPath Foundation`.
+ADR 0016 is accepted as the route selection, but remains inactive until acceptance and all release gates complete. Before application, maintainers must confirm current SignPath Foundation terms and the project's [privacy policy](../PRIVACY.md). The Windows publisher would be SignPath Foundation. Every stable release note and this policy must disclose exactly: `Free code signing provided by SignPath.io, certificate by SignPath Foundation`.
 
 Proposed GitHub roles: `machester4` is author/committer; `machester4` and `bryanTechera` are reviewers; both are signing approvers, except that the person who initiated a request never approves it. MFA is required before application and must be confirmed, not assumed. SignPath's manual approval is separate from GitHub environment approval.
 

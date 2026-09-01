@@ -1,8 +1,8 @@
-# ADR 0016: Propose SignPath Foundation for Windows stable-signing review
+# ADR 0016: Select SignPath Foundation for conditional Windows stable signing
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-31
-- Conditional relationship: would replace only the Windows signing-provider choice in ADR 0015 if accepted; ADR 0014 remains unchanged
+- Supersedes: ADR 0015 (Windows signing-provider choice only); ADR 0014 remains unchanged
 
 ## Context
 
@@ -35,10 +35,11 @@ The public policy and each stable release note must disclose exactly:
 
 `Free code signing provided by SignPath.io, certificate by SignPath Foundation`
 
-While Proposed, this ADR supersedes nothing. If accepted it would replace only
-the Windows provider choice in ADR 0015 while retaining its GitHub Releases
-transport; it does not alter ADR 0014, macOS notarization, GitHub Artifact
-Attestations, the updater design, or the per-user MSI/data boundary.
+This accepted selection replaces only the Windows provider choice in ADR 0015.
+It retains GitHub Releases and update transport, GitHub Artifact Attestations
+and technical prereleases, macOS notarization, and the per-user MSI/data
+boundary. It does not assert provider acceptance, a certificate, secrets,
+project configuration, or confirmed MFA.
 
 ## Consequences
 

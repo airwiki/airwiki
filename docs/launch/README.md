@@ -40,7 +40,9 @@ only after all of the following are true:
 An openly labelled technical beta can be discussed only in channels that allow
 it, with its current trust limits stated plainly. It is never a substitute for
 the gates above, never a stable-download call to action, and never an updater
-channel.
+channel. Its approved informational deployment target is
+<https://airwiki.github.io/airwiki/>; the source repository remains the primary
+call to action until a supported stable release passes every gate.
 
 ## How to use this kit
 

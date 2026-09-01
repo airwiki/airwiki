@@ -1,5 +1,5 @@
 dist/
+dist-pages/
 node_modules/
 .wrangler/
 .dev.vars*
-

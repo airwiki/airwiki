@@ -11,6 +11,8 @@
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "pnpm clean && vite build && node scripts/protect-static-output.mjs && node scripts/verify-worker-routes.mjs",
     "check": "tsc --noEmit && pnpm build",
+    "pages:build": "node scripts/build-github-pages.mjs",
+    "pages:check": "pnpm check && pnpm pages:build && node scripts/verify-github-pages.mjs",
     "dev": "vite",
     "preview": "wrangler dev --cwd dist/server --config wrangler.json --local"
   },

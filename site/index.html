@@ -6,7 +6,21 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <meta name="referrer" content="no-referrer">
     <meta name="description" content="AirWiki turns folders into private, reviewable wikis without centralizing the source material.">
-    <!-- Set canonical and social metadata only after a hosting owner and canonical URL are approved. -->
+    <link rel="canonical" href="https://airwiki.github.io/airwiki/">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="AirWiki">
+    <meta property="og:title" content="AirWiki — private, reviewable knowledge">
+    <meta property="og:description" content="Turn folders into private, reviewable wikis without centralizing the source material.">
+    <meta property="og:url" content="https://airwiki.github.io/airwiki/">
+    <meta property="og:image" content="https://airwiki.github.io/airwiki/assets/airwiki-social-preview.png">
+    <meta property="og:image:width" content="1280">
+    <meta property="og:image:height" content="640">
+    <meta property="og:image:alt" content="AirWiki — local-first, private knowledge with human review">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="AirWiki — private, reviewable knowledge">
+    <meta name="twitter:description" content="Turn folders into private, reviewable wikis without centralizing the source material.">
+    <meta name="twitter:image" content="https://airwiki.github.io/airwiki/assets/airwiki-social-preview.png">
+    <meta name="twitter:image:alt" content="AirWiki — local-first, private knowledge with human review">
     <title>AirWiki — private, reviewable knowledge</title>
     <link vite-ignore rel="icon" href="/__airwiki-protected/assets/airwiki-mark.png" type="image/png">
     <link vite-ignore rel="stylesheet" href="/__airwiki-protected/styles.css">
@@ -171,6 +185,17 @@
         </div>
       </section>
 
+      <section class="section site-privacy" id="site-privacy" aria-labelledby="site-privacy-title">
+        <div class="section-heading compact">
+          <p class="eyebrow">About this website</p>
+          <h2 id="site-privacy-title">A static technical-beta landing.</h2>
+        </div>
+        <div class="site-privacy-copy">
+          <p>This official AirWiki project page is hosted by GitHub Pages. The AirWiki project does not use analytics, cookies, forms, remote fonts, or third-party scripts here, and the project does not receive visitor-level request logs from this site.</p>
+          <p>GitHub processes ordinary request metadata, such as IP addresses and browser information, to operate and secure Pages under the <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub General Privacy Statement</a>. Links away from this page are governed by their destination. For help, use the <a href="https://github.com/airwiki/airwiki/blob/main/SUPPORT.md">public support route</a> with synthetic material only; report security concerns through the <a href="https://github.com/airwiki/airwiki/blob/main/SECURITY.md">private security route</a>.</p>
+        </div>
+      </section>
+
       <section class="closing" aria-labelledby="closing-title">
         <p class="eyebrow">Inspect it before you trust it</p>
         <h2 id="closing-title">Your knowledge should not need a black box.</h2>
@@ -186,7 +211,8 @@
       <a class="brand" href="#top"><img vite-ignore src="/__airwiki-protected/assets/airwiki-mark.png" width="32" height="32" alt=""><span>AirWiki</span></a>
       <p>Open source under <a href="https://github.com/airwiki/airwiki/blob/main/LICENSE">Apache-2.0</a>.</p>
       <nav aria-label="Footer links">
-        <a href="https://github.com/airwiki/airwiki/blob/main/PRIVACY.md">Privacy</a>
+        <a href="#site-privacy">Website privacy</a>
+        <a href="https://github.com/airwiki/airwiki/blob/main/PRIVACY.md">Software privacy</a>
         <a href="https://github.com/airwiki/airwiki/blob/main/SECURITY.md">Security</a>
         <a href="https://github.com/airwiki/airwiki/blob/main/FAQ.md">FAQ</a>
         <a href="https://github.com/airwiki/airwiki/blob/main/SUPPORT.md">Support</a>

@@ -1,22 +1,33 @@
-# AirWiki launch landing (private preview)
+# AirWiki launch landing
 
-This directory contains a static landing page plus the smallest Sites build
-wrapper needed for an owner-only deployment. The page itself has no runtime
-application dependencies. A private deployment is a review artifact, **not** a
-public launch; public access remains blocked until the project has a supported
-stable release and its required product, legal, security, and platform gates
-have passed.
+This directory contains the official static landing for AirWiki. The page is a
+public, informational technical-beta surface: it links to source and explicitly
+labelled evaluator builds, but it is not a supported web application, stable
+download channel, account service, or release approval.
+
+The source intentionally produces two separate artifacts:
+
+- `dist/` is the Worker-backed, owner-only preview used to review response
+  headers and Worker routing before a future supported release.
+- `dist-pages/` is the static artifact configured for deployment at
+  <https://airwiki.github.io/airwiki/> by GitHub Actions from `main`.
+
+Neither artifact changes the desktop product's release state.
 
 ## Local preview
 
-Run `pnpm dev`, or build and preview the Cloudflare-compatible artifact with
-`pnpm build && pnpm preview`. The Worker bundles the four small media assets so
-the production package contains no static client objects that can bypass its
-response headers. Its documentation links
-deliberately use absolute GitHub `main` URLs. No browser request should be made
-for analytics, cookies, web fonts, CDNs, or third-party scripts. Links to the
-public source repository and GitHub Releases are intentional user-initiated
-destinations.
+Run `pnpm dev` for the source page. Run `pnpm build && pnpm preview` to inspect
+the Cloudflare-compatible private-preview artifact. The Worker bundles the four
+small media assets from `src/assets/`, so its production package contains no
+static client objects that can bypass response headers. Run `pnpm pages:build`
+to create the separate static GitHub Pages artifact in `dist-pages/`; that
+builder copies the allowlisted assets and converts only the Worker-protected
+local references to project-relative paths.
+
+The documentation links deliberately use absolute GitHub `main` URLs. No
+browser request is made for analytics, cookies, web fonts, CDNs, forms, or
+third-party scripts. Links to GitHub source, documentation, Releases, and
+privacy information are intentional visitor-initiated destinations.
 
 ## Release state
 
@@ -38,50 +49,80 @@ Then change `releaseState`, `primaryCta`, and `secondaryCta` in
 `launch-config.js` in the same reviewable change as the release decision. Do
 not infer a stable URL.
 
-## Hosting and deployment checks
+## GitHub Pages boundary
 
-The Sites configuration is intentionally owner-only. Do not change its access
-policy, add a custom domain, or make it public without an explicit launch
-decision. Before enabling public access:
+GitHub Pages is suitable for this read-only technical-beta landing because the
+page has no sensitive interaction or project-operated request logging. It does
+not provide per-site response-header configuration. The HTML therefore keeps a
+defense-in-depth CSP meta element and a `no-referrer` meta element, but these
+cannot implement `frame-ancestors`, COOP, CORP, `Permissions-Policy`,
+`X-Content-Type-Options`, or `X-Frame-Options`.
 
-1. Install from `pnpm-lock.yaml`, run `pnpm check`, and package the resulting
-   `dist/` directory from the exact committed source SHA.
-2. Confirm that public GitHub `main` still contains `SUPPORT.md`, `PRIVACY.md`,
-   `FAQ.md`, and `ROADMAP.md` before launch. Those landing targets are present
-   today and must remain valid at the release commit.
-3. Confirm the host does not inject analytics, cookie banners, remote fonts,
-   or unreviewed scripts.
-4. Verify the deployed response headers. The Worker applies a CSP equivalent to
-   `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self';
-   media-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';
-   form-action 'self'`, plus `X-Content-Type-Options: nosniff`, a restrictive
-   `Permissions-Policy`, and `Referrer-Policy: no-referrer`. `public/_headers`
-   mirrors that policy for local host compatibility, but the production build
-   removes every static client file and leaves only the empty binding directory
-   because Sites can bypass the Worker for existing static files.
-   The Worker serves `/`, the referenced CSS/JavaScript, and bundled virtual
-   media routes with the same seven headers. Media is decoded lazily on first
-   use rather than during isolate startup, and the build fails if the gzipped
-   Worker exceeds the repository's conservative 2,400,000-byte budget. It also supplies bounded
-   single-range responses for the small demo video; verify playback and seeking
-   on the deployed version. Test `/`, every referenced virtual route, a 404, a
-   disallowed method, and the former `/assets/*`, `/_headers`, and
-   `/.assetsignore` paths on the exact deployment. Those former backing-object
-   paths must return the protected Worker 404; any `200` remains a public-launch
-   blocker.
+That residual limitation is accepted only for this static informational page.
+Do not add authentication, forms, visitor-specific state, embedded remote
+content, analytics, or a stable download trust boundary to the Pages artifact.
+A supported release site that needs those controls must use a host with
+reviewed response-header and routing guarantees.
 
-   The HTML also carries an early CSP meta element and a referrer meta element
-   as limited defense in depth when a private preview layer omits response
-   headers. Those elements do not implement `frame-ancestors`, COOP, CORP,
-   `Permissions-Policy`, `X-Content-Type-Options`, or `X-Frame-Options`,
-   and never satisfy this production-header gate.
-5. Do not add a canonical URL, `og:url`, or social-card URL until a hosting
-   owner and canonical domain have been explicitly approved. The HTML contains
-   a reminder comment rather than an invented URL.
-6. Keep deployments bound to a committed source SHA. No domain or analytics
-   provider is assumed by this page.
-7. Re-run the static checks below and add a current visual review at desktop,
-   tablet, and narrow mobile widths.
+The visible page identifies GitHub Pages as the host and links to GitHub's
+privacy statement. The AirWiki project receives no visitor-level request logs,
+while GitHub processes ordinary request metadata under its own policy. See the
+repository [privacy notice](../PRIVACY.md) for the complete boundary.
+
+## Deployment
+
+`.github/workflows/pages.yml` is the only publication path. It runs for the
+official `airwiki/airwiki` repository at `main`, builds from the exact committed
+SHA, uploads an allowlisted static artifact, and deploys through the
+`github-pages` environment. Pull requests run the same static checks through
+the ordinary CI workflow without publishing.
+
+The repository owner must first enable GitHub Pages with **GitHub Actions** as
+its source. `actions/configure-pages` verifies that setting but deliberately
+cannot create or change it with the workflow token; merge only after this
+one-time repository setting is present.
+
+Before enabling or changing the deployment:
+
+1. Confirm that public GitHub `main` still contains `SUPPORT.md`, `PRIVACY.md`,
+   `FAQ.md`, and `ROADMAP.md`.
+2. Run `pnpm pages:check`; it also rebuilds and verifies the Worker artifact.
+3. Confirm the output contains only the allowlisted page files, media, social
+   image. The Actions artifact is deployed directly and does not use Jekyll.
+4. Keep the repository Pages source set to **GitHub Actions**. Do not publish a
+   branch directory or a generated artifact committed to source control.
+5. Verify the exact deployed URL, internal assets, outbound links, video
+   playback, social metadata, keyboard navigation, reduced-motion behavior,
+   and desktop/tablet/mobile layouts.
+6. Keep the Sites configuration owner-only unless a separate reviewed hosting
+   decision changes it.
+
+The canonical and social-card URLs are intentionally fixed to the approved
+project-site deployment target. A custom domain is not required and must not be
+introduced without a separate ownership and DNS decision.
+
+## Worker preview checks
+
+The Worker applies a CSP equivalent to `default-src 'self'; script-src 'self';
+style-src 'self'; img-src 'self'; media-src 'self'; object-src 'none'; base-uri
+'self'; frame-ancestors 'none'; form-action 'self'`, plus
+`X-Content-Type-Options: nosniff`, a restrictive `Permissions-Policy`, and
+`Referrer-Policy: no-referrer`. `public/_headers` mirrors that policy for local
+host compatibility, but the production build removes every static client file
+and leaves only the empty binding directory because Sites can bypass the Worker
+for existing static files.
+
+The Worker serves `/`, the referenced CSS/JavaScript, and bundled virtual media
+routes with the same seven headers. Media is decoded lazily on first use rather
+than during isolate startup, and the build fails if the gzipped Worker exceeds
+the repository's conservative 2,400,000-byte budget. It also supplies bounded
+single-range responses for the small demo video.
+
+Test `/`, every referenced virtual route, a 404, a disallowed method, video
+seeking, and the former `/assets/*`, `/_headers`, and `/.assetsignore` paths on
+the exact private deployment. Those former backing-object paths must return the
+protected Worker 404; any `200` is a blocker for that hosting path. If a host
+bypasses any referenced route, use a host that guarantees Worker-first routing.
 
 ## Static checks
 
@@ -89,9 +130,9 @@ From the repository root:
 
 ```bash
 git diff --check
-rg -n 'https?://(?!github\\.com/airwiki/airwiki)' site
+pnpm --dir site pages:check
 rg -n 'prefers-reduced-motion|skip-link|<main|<nav|<footer|alt=|figcaption|transcript' site
 ```
 
-The second command requires an `rg` build with PCRE2; otherwise inspect the
-small allowlist of outbound links manually.
+The Pages verifier enforces the small outbound-origin allowlist and resolves
+every local HTML asset against the `/airwiki/` project-site base path.

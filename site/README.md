@@ -10,8 +10,9 @@ have passed.
 ## Local preview
 
 Run `pnpm dev`, or build and preview the Cloudflare-compatible artifact with
-`pnpm build && pnpm preview`. The landing keeps its media assets next to the
-page. Its documentation links
+`pnpm build && pnpm preview`. The Worker bundles the four small media assets so
+the production package contains no static client objects that can bypass its
+response headers. Its documentation links
 deliberately use absolute GitHub `main` URLs. No browser request should be made
 for analytics, cookies, web fonts, CDNs, or third-party scripts. Links to the
 public source repository and GitHub Releases are intentional user-initiated
@@ -50,26 +51,24 @@ decision. Before enabling public access:
    today and must remain valid at the release commit.
 3. Confirm the host does not inject analytics, cookie banners, remote fonts,
    or unreviewed scripts.
-4. Verify the deployed response headers. `public/_headers` defines a CSP
-   equivalent to `default-src 'self'; script-src 'self'; style-src 'self';
-   img-src 'self'; media-src 'self'; object-src 'none'; base-uri 'self';
-   frame-ancestors 'none'; form-action 'self'`, plus `X-Content-Type-Options:
-   nosniff`, a restrictive `Permissions-Policy`, and an appropriate
-   `Referrer-Policy`. Test the exact deployed headers rather than relying only
-   on the source declaration.
-   The production build deliberately removes the static client `index.html`
-   and generated active CSS/JavaScript. The Worker serves `/`, the referenced
-   CSS/JavaScript, and virtual media routes with the same seven headers; the
-   binary files remain as unreferenced backing assets for `ASSETS.fetch`.
-   The Worker also supplies a bounded single-range fallback for the small demo
-   video when a local or hosted asset layer ignores `Range`; verify playback and
-   seeking on the deployed version.
-   This routing is a workaround for private Sites previews that bypass the
-   Worker for existing static files, so verify `/`, every referenced virtual
-   route, a 404, and a disallowed method on the exact deployment. If the host
-   bypasses any referenced route, or policy requires protected headers on the
-   unreferenced backing-object URLs too, use a host that guarantees Worker-first
-   routing instead of treating this workaround as a public-launch control.
+4. Verify the deployed response headers. The Worker applies a CSP equivalent to
+   `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self';
+   media-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';
+   form-action 'self'`, plus `X-Content-Type-Options: nosniff`, a restrictive
+   `Permissions-Policy`, and `Referrer-Policy: no-referrer`. `public/_headers`
+   mirrors that policy for local host compatibility, but the production build
+   removes every static client file and leaves only the empty binding directory
+   because Sites can bypass the Worker for existing static files.
+   The Worker serves `/`, the referenced CSS/JavaScript, and bundled virtual
+   media routes with the same seven headers. Media is decoded lazily on first
+   use rather than during isolate startup, and the build fails if the gzipped
+   Worker exceeds the repository's conservative 2,400,000-byte budget. It also supplies bounded
+   single-range responses for the small demo video; verify playback and seeking
+   on the deployed version. Test `/`, every referenced virtual route, a 404, a
+   disallowed method, and the former `/assets/*`, `/_headers`, and
+   `/.assetsignore` paths on the exact deployment. Those former backing-object
+   paths must return the protected Worker 404; any `200` remains a public-launch
+   blocker.
 
    The HTML also carries an early CSP meta element and a referrer meta element
    as limited defense in depth when a private preview layer omits response

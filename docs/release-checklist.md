@@ -67,9 +67,10 @@ constitute a supported public release.
 - [ ] Build the pinned llama.cpp runtime twice in isolated roots and require
   byte-identical output plus a complete build manifest.
 - [ ] After acceptance only, configure `SIGNPATH_FOUNDATION_ENROLLMENT=approved`,
-  organization/project/policy/configuration slugs, `SIGNPATH_API_TOKEN`, and
-  `AIRWIKI_WINDOWS_SIGNER_SHA256` in protected `windows-signing`; keep Tauri
-  updater keys there too. Do not version or set SignPath configuration first.
+  organization/project/policy/configuration slugs, and `SIGNPATH_API_TOKEN` in
+  protected `windows-signing`; set `AIRWIKI_WINDOWS_SIGNER_SHA256` as a repository
+  variable after acceptance, and keep Tauri updater keys in the protected
+  environment. Do not version or set SignPath configuration first.
 - [ ] In the independently approved `windows-signing` environment, submit two
   origin-verified requests: the desktop, bridge, and firewall-helper PE files,
   then the two localized MSI containers. Retain SignPath's manual approval and

@@ -76,11 +76,11 @@ function Get-VerifiedSignPathSignature([string] $Path, [string] $Label) {
     }
     # signtool's indexed verification rejects a second primary signature. This
     # prevents an appended signer from being silently accepted by `/all`.
-    & $SignTool verify /pa /tw /ds 0 $Verified | Out-Null
+    & $SignTool verify /pa /all /tw /ds 0 $Verified | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "$Label has no independently verifiable primary Authenticode signature"
     }
-    & $SignTool verify /pa /tw /ds 1 $Verified | Out-Null
+    & $SignTool verify /pa /all /tw /ds 1 $Verified | Out-Null
     if ($LASTEXITCODE -eq 0) {
         throw "$Label must not contain more than one primary Authenticode signature"
     }

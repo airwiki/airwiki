@@ -16,8 +16,8 @@ foreach ($Required in @(
 }
 foreach ($Required in @(
     "verify /pa /all /tw",
-    "verify /pa /tw /ds 0",
-    "verify /pa /tw /ds 1",
+    "verify /pa /all /tw /ds 0",
+    "verify /pa /all /tw /ds 1",
     "Get-VerifiedWindowsSignTool",
     "Assert-ExpectedSignPathSigner"
 )) {

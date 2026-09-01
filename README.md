@@ -19,7 +19,8 @@
   <a href="FAQ.md">Beta FAQ</a> ·
   <a href="#run-from-source">Run from source</a> ·
   <a href="CONTRIBUTING.md">Contribute</a> ·
-  <a href="SUPPORT.md">Feedback</a>
+  <a href="SUPPORT.md">Feedback</a> ·
+  <a href="docs/code-signing-policy.md">Code signing policy</a>
 </p>
 
 AirWiki is an open-source desktop app that turns folders, [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundles, and assistant conversations into wikis you can search, review, and selectively share. Knowledge stays on the device that owns it by default. Local AI can organize and index it, but cannot publish it or grant access.

@@ -64,26 +64,21 @@ constitute a supported public release.
   enrollment gate before this review.
 - [ ] Put `Free code signing provided by SignPath.io, certificate by SignPath Foundation` and a link named [Code signing policy](code-signing-policy.md) in
   the stable release notes.
-
 - [ ] Build the pinned llama.cpp runtime twice in isolated roots and require
   byte-identical output plus a complete build manifest.
-- [ ] If ADR 0016 is rejected, complete SSL.com entity prevalidation and purchase the OV certificate plus
-  eSigner tier; provision the credential in the cloud HSM without exporting its
-  key.
-- [ ] In the second-approved `windows-signing` environment, verify hash-pinned
-  CKA from the reviewed `SSLcom/eSignerCKA` release and separately hash-pinned
-  CodeSignTool inputs plus the explicit `10.0.26100.0/x64` Windows SDK
-  `signtool`; pass the
-  CodeSignTool malware scan before signing the desktop, bridge, firewall helper,
-  and both localized MSI containers with timestamps.
-- [ ] Record SSL.com's written confirmation of the signing-secret transport, or
-  an explicit approver acceptance of its remaining risk, then set the protected
-  environment variable `AIRWIKI_ESIGNER_SECRET_TRANSPORT_APPROVED` to exactly
-  `sslcom-esigner-secret-transport-v1`. Any other value must stop signing before
-  CKA or CodeSignTool runs.
-- [ ] Validate Authenticode, code-signing EKU, durable publisher identity, PE
-  version metadata, helper elevation manifest, runtime imports, nested MSI
-  signatures, and exact payload.
+- [ ] After acceptance only, configure `SIGNPATH_FOUNDATION_ENROLLMENT=approved`,
+  organization/project/policy/configuration slugs, `SIGNPATH_API_TOKEN`, and
+  `AIRWIKI_WINDOWS_SIGNER_SHA256` in protected `windows-signing`; keep Tauri
+  updater keys there too. Do not version or set SignPath configuration first.
+- [ ] In the independently approved `windows-signing` environment, submit two
+  origin-verified requests: the desktop, bridge, and firewall-helper PE files,
+  then the two localized MSI containers. Retain SignPath's manual approval and
+  MFA as separate gates.
+- [ ] Validate pinned `signtool verify /pa /all /tw`, indexed signatures,
+  code-signing and timestamp EKUs, expected fingerprint, SignPath Foundation
+  publisher identity, PE version metadata, helper elevation manifest, runtime
+  imports, nested MSI signatures, and exact payload. SmartScreen acceptance is
+  not guaranteed by signing.
 - [ ] Build MCPB from the already signed bridge and compare its bytes with the
   MSI payload.
 - [ ] Install both localized MSIs under a clean standard user; verify the fixed
@@ -142,8 +137,9 @@ The official source repository is [airwiki/airwiki](https://github.com/airwiki/a
 The repository now contains fail-closed preparation and promotion workflows,
 and the protected environments plus macOS credentials are configured. No
 signed and notarized candidate has completed the protected workflow yet. Public
-release remains blocked on SSL.com entity onboarding, eSigner credentials and a
-protected signing run, installed Windows signing/update acceptance, validated
+release remains blocked on SignPath Foundation acceptance, maintainer terms and
+MFA confirmation, protected configuration and a manual approved signing run,
+installed Windows signing/update acceptance, validated
 updater-key recovery custody, a monitored Code of Conduct contact, legal review
 and the complete installed acceptance matrix. Clearing any one blocker does not waive the others. Follow the
 [public release process](release-process.md).

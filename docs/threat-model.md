@@ -242,9 +242,10 @@ Controls are not considered effective end to end until the
 ## Current development blockers and residual risks
 
 - No complete cross-platform public candidate has passed the protected release
-  workflows and installed acceptance matrix. SSL.com entity onboarding, eSigner
-  credentials, a protected cloud-HSM signing run, and a real installed update
-  test remain required before any supported stable release.
+  workflows and installed acceptance matrix. SignPath Foundation acceptance,
+  maintainer terms and MFA confirmation, protected configuration, a separately
+  manual-approved signing run, and a real installed update test remain required
+  before any supported stable release.
 - Public technical pre-releases have no native public trust: Windows MSI files
   are unsigned and the macOS application is ad-hoc signed and not notarized, so
   either platform can warn about or block the candidate. Their reviewed

@@ -233,7 +233,7 @@ only an exact private draft, uploads the closed set, re-downloads every asset
 and verifies it independently. Only then does it create or validate the
 immutable `v<version>-beta.<number>` tag at the workflow commit and publish the
 draft with GitHub pre-release enabled and Latest disabled. It never creates
-`latest.json`, enters signing environments, requests SSL.com signing, reads
+`latest.json`, enters signing environments, requests native signing, reads
 updater keys, rewrites an already public beta or promotes those bytes into the
 stable workflow. A failed attempt can resume only an exact private draft at the
 same immutable tag and commit with no unexpected assets. The GitHub attestation
@@ -328,7 +328,8 @@ before separate Tauri updater signing. Normal pull-request CI and
 The older `package-signed-windows.ps1` and `sign-windows-artifact.ps1` NSIS
 experiment targets Microsoft Artifact Signing and is not a release path. Both
 entry points fail closed unless a developer deliberately enables the legacy
-experiment; no active workflow does so. Its read-only verifier and destructive
+experiment; no active workflow does so. Use `windows-signpath.yml` for the
+proposed Windows stable-signing route. Its read-only verifier and destructive
 fixtures remain temporarily for transition coverage and are removed only after
 the installed MSI matrix passes.
 

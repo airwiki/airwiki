@@ -45,8 +45,9 @@ Attestations, the updater design, or the per-user MSI/data boundary.
 - The visible Windows publisher is SignPath Foundation, not AirWiki.
 - A stable Windows release remains blocked until acceptance, protected
   configuration, a signed rehearsal, and clean-machine acceptance evidence.
-- SignPath Foundation's terms, including its privacy alternative, must be linked
-  from the published signing policy before application and release use.
+- Before application and release use, maintainers must review SignPath
+  Foundation's then-current terms and privacy information; the published
+  signing policy already links AirWiki's [privacy policy](../../PRIVACY.md).
 - Rejection, a configuration mismatch, missing approval, or verification failure
   stops the release; unsigned technical prereleases remain the only fallback.
 

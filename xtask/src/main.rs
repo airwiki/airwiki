@@ -3426,8 +3426,15 @@ fn verify_windows_msi() -> Result<()> {
         .context("reading the Windows MSI packager configuration")?;
     let template = fs::read_to_string(root.join("packaging/windows/installer.wxs"))
         .context("reading the managed Windows MSI template")?;
+    let smoke = fs::read_to_string(root.join("packaging/smoke-windows-msi.ps1"))
+        .context("reading the Windows MSI smoke")?;
+    let smoke_test = fs::read_to_string(root.join("packaging/test-smoke-windows-msi.ps1"))
+        .context("reading the Windows MSI smoke static test")?;
+    let pilot = fs::read_to_string(root.join(".github/workflows/package-pilot.yml"))
+        .context("reading the technical candidate packaging workflow")?;
     verify_windows_msi_license_sources(&desktop_config, &template)?;
     verify_windows_msi_sources(&config, &template)?;
+    verify_windows_msi_smoke_sources(&smoke, &smoke_test, &pilot)?;
     let workflow = fs::read_to_string(root.join(".github/workflows/windows-signpath.yml"))
         .context("reading the SignPath Windows workflow")?;
     let binaries = fs::read_to_string(root.join(".signpath/windows-binaries.xml"))
@@ -3471,6 +3478,81 @@ fn verify_windows_msi() -> Result<()> {
         "Windows MSI packaging paths must validate the generated Apache-2.0 license dialog"
     );
     verify_windows_msi_update_handoff_sources(&template, &updater, &main)
+}
+
+fn verify_windows_msi_smoke_sources(smoke: &str, smoke_test: &str, pilot: &str) -> Result<()> {
+    for required in [
+        "[switch] $AuthorizeDestructiveMsiSmoke",
+        "New-Object -ComObject WindowsInstaller.Installer",
+        "Test-WebView2Present",
+        "Assert-CleanPreflight",
+        "[Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)",
+        "[Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)",
+        "[Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)",
+        "ConvertTo-MsiGuid",
+        "Assert-NoProductCodeRegistration",
+        "Assert-MsiProductNotInstalled",
+        "Assert-PathInsideRoot",
+        "ConvertTo-MsiCommandLine",
+        "[IO.FileMode]::CreateNew",
+        "$script:MarkerDirectories",
+        "New-OwnedMarkerDirectories",
+        "Remove-EmptyOwnedMarkerDirectories",
+        "RemoveAt($Index)",
+        "$script:ManualCleanupRequired = $true",
+        "Get-MsiOperationState",
+        "$null = Assert-InstalledProduct $Metadata",
+        "AUTOLAUNCHAPP=0",
+        "Assert-InstalledProduct",
+        "Assert-EssentialPayload",
+        "Assert-MarkersPreserved",
+        "Remove-ExactMarkers",
+        "ProductVersion -le $Base.ProductVersion",
+        "Invoke-MsiExec @(\"/x\", $Metadata.ProductCode, \"/qn\", \"/norestart\")",
+    ] {
+        ensure!(
+            smoke.contains(required),
+            "Windows MSI smoke is missing invariant `{required}`"
+        );
+    }
+    ensure!(
+        !smoke.contains("Win32_Product"),
+        "Windows MSI smoke must not query Win32_Product"
+    );
+    ensure!(
+        !smoke.contains("Start-Process -FilePath (Join-Path $InstallDirectory \"airwiki.exe\")"),
+        "Windows MSI smoke must not launch AirWiki"
+    );
+    ensure!(
+        smoke_test.contains("Windows MSI smoke static contract passed.")
+            && smoke_test.contains("Win32_Product")
+            && smoke_test.contains("AUTOLAUNCHAPP=0"),
+        "Windows MSI smoke needs a safe static PowerShell contract test"
+    );
+    ensure!(
+        pilot.contains("./packaging/test-smoke-windows-msi.ps1")
+            && pilot.contains("-Filter '*_x64_en-US.msi'")
+            && pilot.contains("-AuthorizeDestructiveMsiSmoke")
+            && !pilot.contains("-UpgradeInstaller"),
+        "technical candidate CI must run only the clean en-US MSI smoke"
+    );
+    const SMOKE_TARGET: &str = "windows-msi-smoke-no-artifact";
+    ensure!(
+        pilot.contains("          - windows-msi-smoke-no-artifact")
+            && pilot.contains("inputs.target == 'windows-msi-smoke-no-artifact'")
+            && pilot
+                .matches("if: inputs.target != 'windows-msi-smoke-no-artifact'")
+                .count()
+                == 3
+            && pilot
+                .matches("save-if: ${{ inputs.target != 'windows-msi-smoke-no-artifact' }}")
+                .count()
+                == 1
+            && pilot.contains("if: inputs.target == 'all-internal-candidates' || inputs.target == 'public-prerelease'")
+            && pilot.contains("if: inputs.target == 'public-prerelease'"),
+        "{SMOKE_TARGET} must run only the Windows smoke without artifact, attestation, or publication paths"
+    );
+    Ok(())
 }
 
 fn verify_windows_msi_license_sources(desktop_config: &str, template: &str) -> Result<()> {
@@ -10390,6 +10472,19 @@ policy:
                 && signed.contains("AIRWIKI_USE_PREBUILT_MCPB")
                 && signed.contains("Get-VerifiedWindowsRegularFile $Mcpb")
         );
+    }
+
+    #[test]
+    fn windows_msi_smoke_contract_remains_destructive_but_model_free() {
+        let root = workspace_root();
+        let smoke = fs::read_to_string(root.join("packaging/smoke-windows-msi.ps1")).unwrap();
+        let smoke_test =
+            fs::read_to_string(root.join("packaging/test-smoke-windows-msi.ps1")).unwrap();
+        let pilot = fs::read_to_string(root.join(".github/workflows/package-pilot.yml")).unwrap();
+
+        assert!(verify_windows_msi_smoke_sources(&smoke, &smoke_test, &pilot).is_ok());
+        assert!(!smoke.contains("Win32_Product"));
+        assert!(smoke.contains("AUTOLAUNCHAPP=0"));
     }
 
     #[test]

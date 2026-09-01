@@ -1,5 +1,11 @@
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import worker from "../dist/server/index.js";
 
+const siteRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const securityHeaders = new Map([
   [
     "content-security-policy",
@@ -16,32 +22,12 @@ const securityHeaders = new Map([
   ["x-frame-options", "DENY"],
 ]);
 const protectedPrefix = "/__airwiki-protected/";
-const assetBodies = new Map([
-  ["/assets/airwiki-demo-poster.png", new Uint8Array([1, 2, 3])],
-  ["/assets/airwiki-demo.mp4", new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])],
-  ["/assets/airwiki-mark.png", new Uint8Array([1, 2, 3])],
-  ["/assets/airwiki-review-flow.png", new Uint8Array([1, 2, 3])],
+const protectedAssets = new Map([
+  ["airwiki-demo-poster.png", "image/png"],
+  ["airwiki-demo.mp4", "video/mp4"],
+  ["airwiki-mark.png", "image/png"],
+  ["airwiki-review-flow.png", "image/png"],
 ]);
-const env = {
-  ASSETS: {
-    async fetch(request) {
-      const url = new URL(request.url);
-      const rangeHeader = request.headers.get("Range");
-      assert(
-        rangeHeader === null || /^bytes=(?:\d+-\d*|-\d+)$/.test(rangeHeader),
-        "unsupported Range reached the backing asset service",
-      );
-      const body = assetBodies.get(url.pathname);
-      if (!body) return new Response("Not found\n", { status: 404 });
-      return new Response(request.method === "HEAD" ? null : body, {
-        headers: {
-          "Content-Length": String(body.byteLength),
-          "Content-Type": url.pathname.endsWith(".mp4") ? "video/mp4" : "image/png",
-        },
-      });
-    },
-  },
-};
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -54,8 +40,16 @@ function assertSecurityHeaders(response, context) {
 }
 
 async function fetchWorker(path, init) {
-  return worker.fetch(new Request(`https://preview.invalid${path}`, init), env, {});
+  return worker.fetch(new Request(`https://preview.invalid${path}`, init), {}, {});
 }
+
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+const clientRoot = join(siteRoot, "dist", "client");
+assert(existsSync(clientRoot), "empty client root must exist for the local Worker binding");
+assert(readdirSync(clientRoot).length === 0, "static client output must be empty");
 
 const root = await fetchWorker("/");
 assert(root.status === 200, `root returned ${root.status}`);
@@ -88,6 +82,22 @@ const cssResponse = await fetchWorker("/__airwiki-protected/styles.css");
 const css = await cssResponse.text();
 assert(!/url\s*\(/i.test(css), "stylesheet contains an unverified url() reference");
 
+for (const [assetName, contentType] of protectedAssets) {
+  const route = `${protectedPrefix}assets/${assetName}`;
+  const sourcePath = join(siteRoot, "src", "assets", assetName);
+  const source = readFileSync(sourcePath);
+  const response = await fetchWorker(route);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  assert(response.status === 200, `${route} returned ${response.status}`);
+  assert(response.headers.get("content-type") === contentType, `${route} has invalid type`);
+  assert(
+    response.headers.get("content-length") === String(statSync(sourcePath).size),
+    `${route} has invalid length`,
+  );
+  assert(sha256(bytes) === sha256(source), `${route} differs from its bundled source`);
+  assertSecurityHeaders(response, route);
+}
+
 const head = await fetchWorker("/", { method: "HEAD" });
 assert(head.status === 200, `HEAD root returned ${head.status}`);
 assertSecurityHeaders(head, "HEAD root");
@@ -107,116 +117,68 @@ assert(options.status === 405, `OPTIONS root returned ${options.status}`);
 assert(options.headers.get("allow") === "GET, HEAD", "OPTIONS root has invalid Allow header");
 assertSecurityHeaders(options, "OPTIONS root");
 
-const directBacking = await fetchWorker("/assets/airwiki-demo.mp4");
-assert(directBacking.status === 404, `direct backing route returned ${directBacking.status}`);
-assertSecurityHeaders(directBacking, "direct backing route");
+for (const directPath of [
+  "/assets/airwiki-demo-poster.png",
+  "/assets/airwiki-demo.mp4",
+  "/assets/airwiki-mark.png",
+  "/assets/airwiki-review-flow.png",
+  "/_headers",
+  "/.assetsignore",
+]) {
+  const response = await fetchWorker(directPath);
+  assert(response.status === 404, `${directPath} returned ${response.status}`);
+  assertSecurityHeaders(response, directPath);
+}
 
+const videoSize = statSync(join(siteRoot, "src", "assets", "airwiki-demo.mp4")).size;
 const range = await fetchWorker("/__airwiki-protected/assets/airwiki-demo.mp4", {
   headers: { Range: "bytes=2-5" },
 });
 assert(range.status === 206, `video range returned ${range.status}`);
-assert(range.headers.get("content-range") === "bytes 2-5/10", "video range is invalid");
+assert(range.headers.get("content-range") === `bytes 2-5/${videoSize}`, "video range is invalid");
 assert(range.headers.get("content-length") === "4", "video range length is invalid");
 assertSecurityHeaders(range, "video range");
-const rangeBody = new Uint8Array(await range.arrayBuffer());
-assert(rangeBody.join(",") === "2,3,4,5", "video range body is invalid");
-
-const openRange = await fetchWorker("/__airwiki-protected/assets/airwiki-demo.mp4", {
-  headers: { Range: "bytes=7-" },
-});
-assert(openRange.status === 206, `open video range returned ${openRange.status}`);
-assert(openRange.headers.get("content-range") === "bytes 7-9/10", "open video range is invalid");
+assert((await range.arrayBuffer()).byteLength === 4, "video range body is invalid");
 
 const suffixRange = await fetchWorker("/__airwiki-protected/assets/airwiki-demo.mp4", {
   headers: { Range: "bytes=-3" },
 });
 assert(suffixRange.status === 206, `suffix video range returned ${suffixRange.status}`);
 assert(
-  suffixRange.headers.get("content-range") === "bytes 7-9/10",
+  suffixRange.headers.get("content-range") === `bytes ${videoSize - 3}-${videoSize - 1}/${videoSize}`,
   "suffix video range is invalid",
 );
+assert((await suffixRange.arrayBuffer()).byteLength === 3, "suffix range body is invalid");
 
 const unsatisfiableRange = await fetchWorker(
   "/__airwiki-protected/assets/airwiki-demo.mp4",
-  { headers: { Range: "bytes=20-30" } },
+  { headers: { Range: `bytes=${videoSize}-` } },
 );
+assert(unsatisfiableRange.status === 416, `unsatisfiable range returned ${unsatisfiableRange.status}`);
 assert(
-  unsatisfiableRange.status === 416,
-  `unsatisfiable video range returned ${unsatisfiableRange.status}`,
+  unsatisfiableRange.headers.get("content-range") === `bytes */${videoSize}`,
+  "unsatisfiable range is invalid",
 );
-assert(
-  unsatisfiableRange.headers.get("content-range") === "bytes */10",
-  "unsatisfiable video range is invalid",
-);
-assertSecurityHeaders(unsatisfiableRange, "unsatisfiable video range");
+assertSecurityHeaders(unsatisfiableRange, "unsatisfiable range");
 
-const multipleRange = await fetchWorker("/__airwiki-protected/assets/airwiki-demo.mp4", {
-  headers: { Range: "bytes=0-1,3-4" },
-});
-assert(multipleRange.status === 200, `multiple video range returned ${multipleRange.status}`);
-assert(multipleRange.headers.get("content-range") === null, "multiple video range was synthesized");
-assert((await multipleRange.arrayBuffer()).byteLength === 10, "multiple video range lost content");
-
-const malformedRange = await fetchWorker("/__airwiki-protected/assets/airwiki-demo.mp4", {
-  headers: { Range: "items=0-3" },
-});
-assert(malformedRange.status === 200, `malformed video range returned ${malformedRange.status}`);
-assert(malformedRange.headers.get("content-range") === null, "malformed video range was synthesized");
-assert((await malformedRange.arrayBuffer()).byteLength === 10, "malformed video range lost content");
+for (const rangeHeader of ["bytes=0-1,3-4", "items=0-3"]) {
+  const response = await fetchWorker("/__airwiki-protected/assets/airwiki-demo.mp4", {
+    headers: { Range: rangeHeader },
+  });
+  assert(response.status === 200, `${rangeHeader} returned ${response.status}`);
+  assert(response.headers.get("content-range") === null, `${rangeHeader} invented a range`);
+  assert((await response.arrayBuffer()).byteLength === videoSize, `${rangeHeader} lost content`);
+  assertSecurityHeaders(response, rangeHeader);
+}
 
 const headRange = await fetchWorker("/__airwiki-protected/assets/airwiki-demo.mp4", {
   method: "HEAD",
   headers: { Range: "bytes=2-5" },
 });
 assert(headRange.status === 206, `HEAD video range returned ${headRange.status}`);
-assert(headRange.headers.get("content-range") === "bytes 2-5/10", "HEAD video range is invalid");
+assert(
+  headRange.headers.get("content-range") === `bytes 2-5/${videoSize}`,
+  "HEAD video range is invalid",
+);
 assert((await headRange.text()) === "", "HEAD video range returned a body");
 assertSecurityHeaders(headRange, "HEAD video range");
-
-const headRangeWithoutLength = await worker.fetch(
-  new Request("https://preview.invalid/__airwiki-protected/assets/airwiki-demo.mp4", {
-    method: "HEAD",
-    headers: { Range: "bytes=2-5" },
-  }),
-  {
-    ASSETS: {
-      async fetch() {
-        return new Response(null, { headers: { "Content-Type": "video/mp4" } });
-      },
-    },
-  },
-  {},
-);
-assert(
-  headRangeWithoutLength.status === 200,
-  `lengthless HEAD range returned ${headRangeWithoutLength.status}`,
-);
-assert(
-  headRangeWithoutLength.headers.get("content-range") === null,
-  "lengthless HEAD range invented a Content-Range",
-);
-assertSecurityHeaders(headRangeWithoutLength, "lengthless HEAD range");
-
-const nativeRange = await worker.fetch(
-  new Request("https://preview.invalid/__airwiki-protected/assets/airwiki-demo.mp4", {
-    headers: { Range: "bytes=2-5" },
-  }),
-  {
-    ASSETS: {
-      async fetch() {
-        return new Response(new Uint8Array([2, 3, 4, 5]), {
-          status: 206,
-          headers: {
-            "Content-Length": "4",
-            "Content-Range": "bytes 2-5/10",
-            "Content-Type": "video/mp4",
-          },
-        });
-      },
-    },
-  },
-  {},
-);
-assert(nativeRange.status === 206, `native asset range returned ${nativeRange.status}`);
-assert(nativeRange.headers.get("content-range") === "bytes 2-5/10", "native asset range changed");
-assertSecurityHeaders(nativeRange, "native asset range");

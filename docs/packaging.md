@@ -190,6 +190,16 @@ through `latest.json`, or accepted by the signed promotion workflow. Select
 candidate are also required. Select `public-prerelease` only for the separately
 confirmed and protected publication path below.
 
+Select `windows-msi-smoke-no-artifact` for an internal, destructive validation
+of the freshly built `en-US` MSI without retaining a candidate. That dispatch
+runs only the exact-source validation and the Windows build/clean
+install-uninstall smoke; it skips Linux and macOS jobs, beta staging,
+`upload-artifact`, artifact summaries, attestation, signing, publication and
+release credentials. It does not create a downloadable artifact or release
+evidence, and must not be treated as a technical prerelease. The job may restore
+an existing Rust cache, but explicitly disables its post-job cache save so the
+new `target/packages/windows` MSI bytes are not retained through that cache.
+
 `prepare-unsigned-windows-beta.ps1` rejects input outside `target`, reparse
 points, unexpected files, a non-official repository identity, a mismatched
 version or commit shape, and anything other than exactly two MSI compound
@@ -287,6 +297,49 @@ arbitrary path. Existing `Programs` and `AirWiki` path components are rejected
 before costing if Windows marks either as a reparse point. Windows Installer
 owns only declared immutable files and never performs recursive
 application-data cleanup.
+
+### MSI install/uninstall smoke
+
+The Windows technical-candidate workflow runs a destructive, per-user smoke on
+the freshly packaged `en-US` MSI. It is deliberately narrower than the
+validated installer smoke: it does not start AirWiki, download WebView2, or
+prepare models. It requires an already-present WebView2 Runtime, a clean AirWiki
+installer/shortcut state, reads the MSI identity through the Windows Installer
+COM API, installs silently with `AUTOLAUNCHAPP=0`, validates ARP,
+`InstallLocation`, essential installed files and the Start Menu target, then
+uninstalls by the MSI `ProductCode`. It rejects malformed product identifiers,
+any pre-existing registration for either requested product code, and reparse
+points or paths outside the canonical Windows known-folder roots. The smoke
+revalidates the exact AirWiki identity, location and payload immediately before
+uninstalling; an incomplete or ambiguous state is preserved for manual cleanup.
+ARP is not the sole source of truth: the smoke also asks Windows Installer for
+the product state and rejects advertised, installed or otherwise non-absent
+product codes before installation.
+
+For a controlled Windows client, invoke it only with explicit authorization:
+
+```powershell
+.\packaging\smoke-windows-msi.ps1 `
+  -Installer '.\target\packages\windows\AirWiki_<version>_x64_en-US.msi' `
+  -AuthorizeDestructiveMsiSmoke
+```
+
+An optional `-UpgradeInstaller` exercises an upgrade only when it has the same
+`UpgradeCode` and a strictly higher `ProductVersion`. The smoke writes one
+hash-checked marker in each documented AirWiki data root, verifies that
+uninstall preserves both, and removes only unchanged markers it created. It
+never uses `Win32_Product` and never removes user data roots. If an MSI client
+times out or returns a partial state, the smoke rechecks registration, payload,
+shortcut and installer-process state; it does not assume terminating the client
+has stopped Windows Installer, and leaves affected state for a human to inspect.
+It records only marker-parent directories created by that invocation, then
+removes those directories leaf-to-root only when they remain empty; existing
+roots and directories are never deleted.
+
+This manual smoke is for a trusted, independently verified artifact from the
+reviewed build path. It validates installation behavior, not the provenance or
+intent of an arbitrary local MSI, and does not claim to defend a hostile local
+installer or compromised host.
 
 The release scripts generate a deterministic WiX fragment for the exact
 runtime, helper, bridge, MCPB and legal-resource payload. Every component below

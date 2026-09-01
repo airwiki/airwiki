@@ -11,64 +11,36 @@ truthful about its unsigned or unnotarized status. Prefer the stable release
 for broad promotion. Never present a beta as supported, safe for every
 environment, or equivalent to a signed installer.
 
-## Stable-release title and post
+The person who built the product must personally write the final Show HN title,
+post, and replies. Do not use generated text or AI-edited text for any of them.
+This document is a factual preflight, not reusable copy or a substitute for the
+author's own explanation of what they made and why.
 
-### Title
+## Facts the author must verify
 
-> Show HN: AirWiki – A private, reviewable wiki for local knowledge
+- The post identifies AirWiki accurately as an open-source desktop application
+  and explains its local ownership, human review, and separate sharing/AI
+  boundaries in the author's own words.
+- The post links to the canonical source repository and the exact released
+  artifact that a reader can try without an invitation or credential.
+- A stable post names only the verified stable version and supported platforms.
+- A beta post is visibly labelled as an unsupported technical evaluation and
+  states the applicable unsigned or unnotarized trust limits, manual-download
+  status, updater exclusion, and potential platform-policy blocking.
+- The post points security reports to the private route and does not invite
+  documents, diagnostics, credentials, or vulnerability details in public.
 
-### Post
-
-> Hi HN — we made AirWiki, an open-source desktop app for turning folders and
-> OKF bundles into a private, reviewable wiki.
->
-> The core design choice is to keep the authority boundaries separate. New
-> wikis are private by default. A person reviews draft knowledge before it is
-> searchable, decides independently whether to share a stable wiki, and decides
-> separately which AI apps may read it. Public search is off per connected app
-> until enabled.
->
-> AirWiki can search local knowledge, authorized nearby devices, and selected
-> public sources while keeping those origins visible in the results. It does not
-> provide cloud sync, accounts, automatic Git operations, web/mobile clients,
-> or automatic publication.
->
-> Source: https://github.com/airwiki/airwiki
-> Try it: [CONCRETE SELF-SERVICE STABLE ARTIFACT URL — direct GitHub Release
-> page or downloadable artifact; insert only after final verification]
-> Version: [STABLE VERSION]
-> Platforms: [VERIFIED PLATFORM LIST]
->
-> I would value direct feedback on whether the review and sharing boundaries are
-> understandable, and on the first-value path from a folder to a useful wiki.
-> Please use the private security-reporting route for security issues rather
-> than posting them here.
-
-## Technical-beta adaptation
-
-Use only if the release owner explicitly chooses a beta discussion and the
-channel rules permit it. Replace the stable-release lines with this concise
-disclosure and a verified self-service beta artifact marker; do not include a
-stable-download marker:
-
-> This is an unsupported technical beta for evaluation. Its macOS candidate is
-> ad-hoc signed and not notarized; its Windows MSI candidates are unsigned.
-> They are manual downloads, are not selected by the updater, and may be
-> blocked by platform policy. Current limits and installation details are in
-> the repository's installation guide.
->
-> Evaluation artifact: [CONCRETE SELF-SERVICE BETA ARTIFACT URL — verify it is
-> live and points to this exact beta immediately before posting]
-
-Keep the source link. Link technical candidates only as clearly labelled test
-artifacts, never with wording such as “download AirWiki” or “latest release.”
-If there is no live, self-service artifact that a reader can access without an
-invitation or credential, do not make a beta Show HN post.
+Use a technical beta only if the release owner explicitly chooses it and the
+channel rules permit it. Link technical candidates only as clearly labelled test
+artifacts, never as “download AirWiki” or “latest release.” If there is no
+live, self-service artifact that a reader can access without an invitation or
+credential, do not make a beta Show HN post.
 
 ## Before posting
 
-- [ ] Confirm whether this is a stable or technical-beta discussion and use only
-  the matching copy.
+- [ ] Confirm whether this is a stable or technical-beta discussion and prepare
+  the final post personally; do not generate, edit, translate, or polish it
+  with AI.
 - [ ] Confirm the exact self-service artifact URL is live, public, and usable
   without an invitation or credential. It must be the stable release for a
   stable post; for a beta post, it must be the exact, visibly labelled beta

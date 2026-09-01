@@ -1,13 +1,13 @@
 [CmdletBinding()]
 param(
-    [string] $OutputDirectory = "target\windows-signing\windows-binaries"
+    [string] $OutputDirectory = "target\signpath\windows-binaries"
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
-    throw "Windows signing binary preparation requires Windows"
+    throw "SignPath binary preparation requires Windows"
 }
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -25,7 +25,7 @@ $OutputRoot = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
 
 $TargetBoundary = [IO.Path]::GetFullPath($TargetRoot).TrimEnd('\') + '\'
 if (-not $OutputRoot.StartsWith($TargetBoundary, [StringComparison]::OrdinalIgnoreCase)) {
-    throw "Windows signing staging must remain below the repository target directory"
+    throw "SignPath staging must remain below the repository target directory"
 }
 
 Push-Location $Root
@@ -48,7 +48,7 @@ try {
     foreach ($Artifact in @($Desktop, $Bridge, $Helper)) {
         $Signature = Get-AuthenticodeSignature -LiteralPath $Artifact
         if ($Signature.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned) {
-            throw "Windows signing input binaries must be unsigned"
+            throw "SignPath input binaries must be unsigned"
         }
     }
 
@@ -56,7 +56,7 @@ try {
     Remove-AirWikiWindowsStagingPath `
         -Path $OutputRoot `
         -AllowedRoot $TargetRoot `
-        -Label "Windows signing binary staging"
+        -Label "SignPath Windows binary staging"
     New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
     foreach ($Artifact in @($Desktop, $Bridge, $Helper)) {
         Copy-Item -LiteralPath $Artifact -Destination $OutputRoot
@@ -64,12 +64,12 @@ try {
 
     $Files = @(Get-ChildItem -LiteralPath $OutputRoot -File)
     if ($Files.Count -ne 3) {
-        throw "Windows signing binary staging must contain exactly three executables"
+        throw "SignPath binary staging must contain exactly three executables"
     }
     foreach ($File in $Files) {
-        Assert-WindowsPeMachine $File.FullName 0x8664 "Windows signing binary input"
+        Assert-WindowsPeMachine $File.FullName 0x8664 "SignPath binary input"
     }
-    Write-Host "Prepared Windows signing binary input: $OutputRoot"
+    Write-Host "Prepared SignPath binary input: $OutputRoot"
 } finally {
     Pop-Location
 }

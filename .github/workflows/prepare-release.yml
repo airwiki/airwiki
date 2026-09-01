@@ -91,7 +91,7 @@ jobs:
   windows-release:
     name: Windows public-trust packages
     needs: validate-source
-    uses: ./.github/workflows/windows-esigner.yml
+    uses: ./.github/workflows/windows-signpath.yml
     with:
       version: ${{ inputs.version }}
       commit_sha: ${{ inputs.commit_sha }}
@@ -261,5 +261,6 @@ jobs:
             --prerelease \
             --target "$AIRWIKI_RELEASE_COMMIT" \
             --title "AirWiki v${AIRWIKI_RELEASE_VERSION}" \
+            --notes $'## Code signing policy\n\n[Code signing policy](https://github.com/airwiki/airwiki/blob/main/docs/code-signing-policy.md)\n\nFree code signing provided by SignPath.io, certificate by SignPath Foundation' \
             --generate-notes
           gh release view "v${AIRWIKI_RELEASE_VERSION}" --json url --jq '.url'

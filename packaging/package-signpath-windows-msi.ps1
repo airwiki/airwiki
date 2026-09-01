@@ -4,7 +4,7 @@ param(
     [ValidateNotNullOrEmpty()]
     [string] $SignedBinaryRoot,
 
-    [string] $OutputDirectory = "target\windows-signing\windows-msi",
+    [string] $OutputDirectory = "target\signpath\windows-msi",
 
     [string] $ExpectedVersion = $env:AIRWIKI_RELEASE_VERSION
 )
@@ -13,7 +13,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
-    throw "Signed Windows MSI packaging requires Windows"
+    throw "SignPath MSI packaging requires Windows"
 }
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -40,7 +40,7 @@ $CandidateSignedRoot = if ([IO.Path]::IsPathRooted($SignedBinaryRoot)) {
 . (Join-Path $PSScriptRoot "windows-payload.ps1")
 . (Join-Path $PSScriptRoot "windows-runtime.ps1")
 . (Join-Path $PSScriptRoot "windows-safe-staging.ps1")
-. (Join-Path $PSScriptRoot "windows-authenticode.ps1")
+. (Join-Path $PSScriptRoot "windows-signpath.ps1")
 . (Join-Path $PSScriptRoot "windows-wix.ps1")
 
 function Assert-TargetDescendant([string] $Path, [string] $Label) {
@@ -74,12 +74,12 @@ function Expand-WindowsMsi([string] $Installer, [string] $Destination) {
     }
 }
 
-Assert-TargetDescendant $OutputRoot "Windows signing MSI staging"
-Assert-TargetDescendant $CandidateSignedRoot "Windows signing signed-binary input"
+Assert-TargetDescendant $OutputRoot "SignPath MSI staging"
+Assert-TargetDescendant $CandidateSignedRoot "SignPath signed-binary input"
 if (-not (Test-Path -LiteralPath $CandidateSignedRoot -PathType Container)) {
-    throw "Windows signing signed-binary input is missing"
+    throw "SignPath signed-binary input is missing"
 }
-Assert-NoWindowsReparseAncestor $CandidateSignedRoot "Windows signing signed-binary input"
+Assert-NoWindowsReparseAncestor $CandidateSignedRoot "SignPath signed-binary input"
 
 $ExpectedNames = @(
     "airwiki.exe",
@@ -88,11 +88,11 @@ $ExpectedNames = @(
 )
 $SignedFiles = @(Get-ChildItem -LiteralPath $CandidateSignedRoot -File)
 if ($SignedFiles.Count -ne $ExpectedNames.Count) {
-    throw "Windows signing signed-binary input must contain exactly three executables"
+    throw "SignPath signed-binary input must contain exactly three executables"
 }
 foreach ($File in $SignedFiles) {
     if ($File.Name -cnotin $ExpectedNames) {
-        throw "Windows signing signed-binary input contains an unexpected file"
+        throw "SignPath signed-binary input contains an unexpected file"
     }
 }
 
@@ -105,14 +105,14 @@ $SignedBridge = Get-VerifiedWindowsRegularFile `
 $SignedHelper = Get-VerifiedWindowsRegularFile `
     (Join-Path $CandidateSignedRoot "airwiki-windows-firewall-helper.exe") `
     "signed Windows firewall helper"
-$DesktopSigner = Get-VerifiedWindowsAuthenticodeSignature $SignedDesktop "signed Windows desktop"
-$BridgeSigner = Get-VerifiedWindowsAuthenticodeSignature $SignedBridge "signed Windows MCP bridge"
-$HelperSigner = Get-VerifiedWindowsAuthenticodeSignature $SignedHelper "signed Windows firewall helper"
-Assert-ExpectedWindowsSigner $DesktopSigner
-Assert-ExpectedWindowsSigner $BridgeSigner
-Assert-ExpectedWindowsSigner $HelperSigner
-Assert-SameWindowsSigner $DesktopSigner $BridgeSigner "MCP bridge"
-Assert-SameWindowsSigner $DesktopSigner $HelperSigner "firewall helper"
+$DesktopSigner = Get-VerifiedSignPathSignature $SignedDesktop "signed Windows desktop"
+$BridgeSigner = Get-VerifiedSignPathSignature $SignedBridge "signed Windows MCP bridge"
+$HelperSigner = Get-VerifiedSignPathSignature $SignedHelper "signed Windows firewall helper"
+Assert-ExpectedSignPathSigner $DesktopSigner
+Assert-ExpectedSignPathSigner $BridgeSigner
+Assert-ExpectedSignPathSigner $HelperSigner
+Assert-SameSignPathSigner $DesktopSigner $BridgeSigner "MCP bridge"
+Assert-SameSignPathSigner $DesktopSigner $HelperSigner "firewall helper"
 Assert-WindowsMsiBundleType $SignedDesktop "signed Windows desktop"
 Assert-WindowsFirewallHelperManifest $SignedHelper "signed Windows firewall helper"
 
@@ -180,17 +180,17 @@ try {
     Remove-AirWikiWindowsStagingPath `
         -Path $OutputRoot `
         -AllowedRoot $TargetRoot `
-        -Label "Windows signing MSI staging"
+        -Label "SignPath MSI staging"
     New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
     foreach ($Installer in $Installers) {
         $Signature = Get-AuthenticodeSignature -LiteralPath $Installer.FullName
         if ($Signature.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned) {
-            throw "MSI submitted for signing must not already have an outer signature"
+            throw "MSI submitted to SignPath must not already have an outer signature"
         }
         Copy-Item -LiteralPath $Installer.FullName -Destination $OutputRoot
     }
 
-    $VerificationRoot = Join-Path $TargetRoot "windows-signing\windows-msi-payload-check"
+    $VerificationRoot = Join-Path $TargetRoot "signpath\windows-msi-payload-check"
     foreach ($Installer in @(Get-ChildItem -LiteralPath $OutputRoot -File -Filter *.msi)) {
         Remove-AirWikiWindowsStagingPath `
             -Path $VerificationRoot `
@@ -227,8 +227,7 @@ try {
         -Path $VerificationRoot `
         -AllowedRoot $TargetRoot `
         -Label "MSI payload verification staging"
-    Write-Host "Prepared MSI artifacts for Windows signing: $OutputRoot"
+    Write-Host "Prepared MSI artifacts for SignPath: $OutputRoot"
 } finally {
     Pop-Location
 }
-

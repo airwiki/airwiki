@@ -184,7 +184,7 @@ their Authenticode state is `NotSigned`, and stages only:
 
 The uploaded artifact is named
 `airwiki-windows-x64-unsigned-beta-<commit>` and expires after 30 days. It uses
-no SSL.com eSigner or updater credentials and is never attached to a release, exposed
+no SignPath or updater credentials and is never attached to a release, exposed
 through `latest.json`, or accepted by the signed promotion workflow. Select
 `all-internal-candidates` only when the Linux federation index and macOS
 candidate are also required. Select `public-prerelease` only for the separately
@@ -243,7 +243,7 @@ only an exact private draft, uploads the closed set, re-downloads every asset
 and verifies it independently. Only then does it create or validate the
 immutable `v<version>-beta.<number>` tag at the workflow commit and publish the
 draft with GitHub pre-release enabled and Latest disabled. It never creates
-`latest.json`, enters signing environments, requests SSL.com signing, reads
+`latest.json`, enters signing environments, requests native signing, reads
 updater keys, rewrites an already public beta or promotes those bytes into the
 stable workflow. A failed attempt can resume only an exact private draft at the
 same immutable tag and commit with no unexpected assets. The GitHub attestation
@@ -369,24 +369,20 @@ then install the new candidate; the two data roots remain intact by default.
 
 ### Windows open-source signing
 
-The `Windows eSigner MSI candidate` workflow implements the protected signing
-path but is not evidence that onboarding or an installed release has passed.
-After a secret-free build, it verifies hash-pinned CKA from the reviewed
-`SSLcom/eSignerCKA` release and separately hash-pinned CodeSignTool input,
-selects only the explicit `10.0.26100.0/x64` Windows SDK `signtool` with a
-valid native signature and matching file-version prefix,
-scans the exact AirWiki-owned PE and MSI set for malware, signs the desktop, MCP
-bridge, firewall helper, and localized MSI containers using the non-exportable
-eSigner cloud-HSM credential, and independently verifies the payload and
-`AIRWIKI_WINDOWS_SIGNER_SHA256`. Tauri updater signing is a separate final
-operation. Normal pull-request CI and `package-pilot.yml` remain unsigned and
-consume no signing secret. See the [code signing policy](code-signing-policy.md)
-and [ADR 0015](adr/0015-sslcom-esigner-and-github-releases-updates.md).
+The selected but inactive `Windows signed MSI candidate` workflow is secret-free until the
+protected SignPath Foundation submission job. It is fail-closed pending provider
+acceptance, MFA, manual approval, token/slugs and certificate fingerprint. It
+submits only the three AirWiki PE files and then the two localized MSI containers,
+and independently checks `signtool`, timestamp, EKUs, fingerprint and payload
+before separate Tauri updater signing. Normal pull-request CI and
+`package-pilot.yml` remain unsigned and consume no signing secret. See the
+[Code signing policy](code-signing-policy.md) and [ADR 0016](adr/0016-signpath-foundation-windows-signing.md).
 
 The older `package-signed-windows.ps1` and `sign-windows-artifact.ps1` NSIS
 experiment targets Microsoft Artifact Signing and is not a release path. Both
 entry points fail closed unless a developer deliberately enables the legacy
-experiment; no active workflow does so. Its read-only verifier and destructive
+experiment; no active workflow does so. Use `windows-signpath.yml` for the
+selected but inactive Windows stable-signing route. Its read-only verifier and destructive
 fixtures remain temporarily for transition coverage and are removed only after
 the installed MSI matrix passes.
 

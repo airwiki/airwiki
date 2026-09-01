@@ -1,9 +1,12 @@
 # ADR 0015: Use SSL.com eSigner cloud-HSM signing and GitHub Releases update transport
 
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-08-30
 - Supersedes: ADR 0009 (Windows signing provider decision)
 - Refines: ADR 0003 and ADR 0012
+
+> Historical decision. ADR 0016 supersedes only the Windows signing provider;
+> GitHub Releases and the updater transport remain in force.
 
 ## Context
 

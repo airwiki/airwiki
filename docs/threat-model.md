@@ -146,9 +146,9 @@ Controls are not considered effective end to end until the
 | Bundle is modified outside the app | Bounded tolerant inspector, normalized in-root paths, no symlinks, DB/filesystem health report, confirmed snapshot repair | A local writer already controls data; ambiguous history remains blocked |
 | Model grants permission | Enrichment schema excludes collection, grants, publication, and cloud policy | Review schemas and preserve human approval |
 | Runtime or model is replaced | Pinned revision/hash, temporary download, atomic move, build manifest | Upstream or build-host compromise remains possible |
-| Stable installer is altered | SSL.com cloud-HSM native publisher signature, independent Tauri updater signature, hashes/SBOM, platform gates | Signing-key service or CI compromise remains possible |
+| Stable installer is altered | Selected but inactive SignPath Foundation native publisher signature, independent Tauri updater signature, hashes/SBOM, platform gates; signing remains blocked until provider acceptance and protected configuration | Signing-key service or CI compromise remains possible |
 | An unsigned technical pre-release is altered or mistaken for stable | Exact clean `main` origin, all-platform build dependency, closed artifact names, legal payloads, SHA-256 inventory, GitHub Artifact Attestation over every final asset, protected private-draft publication, re-download plus attestation verification, immutable beta tag, GitHub pre-release state, Latest/updater fixed false and separate README/install guidance | Windows and macOS provide no public publisher identity and can warn or block the candidate; a compromised official workflow can attest harmful bytes, hosting or CI compromise remains possible, and a user can still ignore the visible warnings |
-| Release dependency captures credentials | Secret-free build, isolated signing/verification, hash-pinned CKA from the reviewed SSLcom release and separate CodeSignTool input, explicit `10.0.26100.0/x64` signed SDK `signtool`, commit-pinned Actions, protected environments, scoped credentials and non-exportable eSigner HSM key | Actions, scripts, JDK and Windows runner toolchains, signing service, and protected runner remain in the TCB |
+| Release dependency captures credentials | Secret-free build, isolated SignPath submission/verification, `signtool verify /pa /all /tw`, commit-pinned Actions, protected environments, MFA and manually approved requests; no SignPath token or slug exists until acceptance | Actions, runner toolchains, signing service, and protected runner remain in the TCB |
 | Elevated helper opens broad rules | Closed arguments, sibling app, same-publisher validation, Firewall COM API, Private/Domain `LocalSubnet`, no edge traversal | Admin or domain policy can override; conflict and cancellation keep local-only mode |
 | Untrusted executable invokes helper | Helper derives its sibling desktop and requires the same valid publisher | Compromised publisher key or build host breaks the guarantee |
 | Update metadata or artifact is substituted | The single stable GitHub Release hosts `latest.json` and assets only; it and redirects remain untrusted transport. Updater and native signatures, protected file handles, strict version increase and explicit installation confirmation protect the final bytes | GitHub still observes request metadata; compromised signing keys require incident response |
@@ -242,9 +242,10 @@ Controls are not considered effective end to end until the
 ## Current development blockers and residual risks
 
 - No complete cross-platform public candidate has passed the protected release
-  workflows and installed acceptance matrix. SSL.com entity onboarding, eSigner
-  credentials, a protected cloud-HSM signing run, and a real installed update
-  test remain required before any supported stable release.
+  workflows and installed acceptance matrix. SignPath Foundation acceptance,
+  maintainer terms and MFA confirmation, protected configuration, a separately
+  manual-approved signing run, and a real installed update test remain required
+  before any supported stable release.
 - Public technical pre-releases have no native public trust: Windows MSI files
   are unsigned and the macOS application is ad-hoc signed and not notarized, so
   either platform can warn about or block the candidate. Their reviewed

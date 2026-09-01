@@ -316,20 +316,20 @@ then install the new candidate; the two data roots remain intact by default.
 
 ### Windows open-source signing
 
-The proposed `Windows signed MSI candidate` workflow is secret-free until the
+The selected but inactive `Windows signed MSI candidate` workflow is secret-free until the
 protected SignPath Foundation submission job. It is fail-closed pending provider
 acceptance, MFA, manual approval, token/slugs and certificate fingerprint. It
 submits only the three AirWiki PE files and then the two localized MSI containers,
 and independently checks `signtool`, timestamp, EKUs, fingerprint and payload
 before separate Tauri updater signing. Normal pull-request CI and
 `package-pilot.yml` remain unsigned and consume no signing secret. See the
-[Code signing policy](code-signing-policy.md) and [ADR 0016](adr/0016-proposed-signpath-foundation-windows-signing.md).
+[Code signing policy](code-signing-policy.md) and [ADR 0016](adr/0016-signpath-foundation-windows-signing.md).
 
 The older `package-signed-windows.ps1` and `sign-windows-artifact.ps1` NSIS
 experiment targets Microsoft Artifact Signing and is not a release path. Both
 entry points fail closed unless a developer deliberately enables the legacy
 experiment; no active workflow does so. Use `windows-signpath.yml` for the
-proposed Windows stable-signing route. Its read-only verifier and destructive
+selected but inactive Windows stable-signing route. Its read-only verifier and destructive
 fixtures remain temporarily for transition coverage and are removed only after
 the installed MSI matrix passes.
 

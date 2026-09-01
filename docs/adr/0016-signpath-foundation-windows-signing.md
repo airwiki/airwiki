@@ -11,8 +11,8 @@ inputs. The project needs a no-cost Windows-native signing route suitable for a
 public Apache-2.0 repository, without exporting a private signing key. SignPath
 Foundation may provide that route, but acceptance, project configuration,
 certificate identity, manual request approval, and its current terms must first
-be confirmed by maintainers. This proposal does not assert that an application
-has been accepted or that a privacy notice, secret, slug, or certificate exists.
+be confirmed by maintainers. This decision does not assert that an application
+has been accepted or that any provider project, secret, slug, or certificate exists.
 
 ## Decision
 
@@ -60,4 +60,4 @@ project configuration, or confirmed MFA.
 - **Activating SignPath credentials before acceptance:** adds a trust boundary
   without verified provider configuration.
 - **Changing macOS signing or updater transport:** outside this Windows-only
-  proposal.
+  decision.

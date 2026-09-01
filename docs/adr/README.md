@@ -23,7 +23,7 @@ tests, operational runbooks or evaluation reports.
 | [0013](0013-connected-app-federated-search.md) | Let connected applications search accessible federated knowledge | Accepted | 2026-08-29 | Refines ADR 0002, ADR 0005 and ADR 0008 |
 | [0014](0014-github-attested-technical-prereleases.md) | Attest public technical prerelease assets with GitHub | Accepted | 2026-08-31 | Refines ADR 0012; defers stable native signing and updater activation |
 | [0015](0015-sslcom-esigner-and-github-releases-updates.md) | Use SSL.com eSigner cloud-HSM signing and GitHub Releases update transport | Superseded | 2026-08-30 | Superseded by ADR 0016 for the Windows provider only; transport remains |
-| [0016](0016-proposed-signpath-foundation-windows-signing.md) | Select SignPath Foundation for conditional Windows stable signing | Accepted | 2026-08-31 | Inactive pending external gates; supersedes ADR 0015 provider only; preserves ADR 0014 and transport |
+| [0016](0016-signpath-foundation-windows-signing.md) | Select SignPath Foundation for conditional Windows stable signing | Accepted | 2026-08-31 | Inactive pending external gates; supersedes ADR 0015 provider only; preserves ADR 0014 and transport |
 
 ## Policy
 

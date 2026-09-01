@@ -18,7 +18,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
   key; the attestation is explicitly not Authenticode, Developer ID,
   notarization, an updater channel or a guarantee of software safety.
 
-- Proposed a SignPath Foundation Windows signing route. It is fail-closed until
+- Selected an inactive SignPath Foundation Windows signing route. It is fail-closed until
   provider acceptance, protected configuration, independent manual approval and
   installed acceptance; technical prereleases remain unsigned.
 

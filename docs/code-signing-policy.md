@@ -10,11 +10,11 @@ Technical prereleases remain unsigned/manual-only, non-Latest and excluded from 
 
 ADR 0016 is accepted as the route selection, but remains inactive until acceptance and all release gates complete. Before application, maintainers must confirm current SignPath Foundation terms and the project's [privacy policy](../PRIVACY.md). The Windows publisher would be SignPath Foundation. Every stable release note and this policy must disclose exactly: `Free code signing provided by SignPath.io, certificate by SignPath Foundation`.
 
-Proposed GitHub roles: `machester4` is author/committer; `machester4` and `bryanTechera` are reviewers; both are signing approvers, except that the person who initiated a request never approves it. MFA is required before application and must be confirmed, not assumed. SignPath's manual approval is separate from GitHub environment approval.
+Required GitHub roles after the external gates: `machester4` is author/committer; `machester4` and `bryanTechera` are reviewers; both are signing approvers, except that the person who initiated a request never approves it. MFA is required before application and must be confirmed, not assumed. SignPath's manual approval is separate from GitHub environment approval.
 
 ## Controlled build and signing
 
-Normal builds are secret-free. After acceptance only, `windows-signing` may hold a SignPath API token, organization/project/policy/configuration slugs and the expected certificate fingerprint. It is main-only, has no self-review or admin bypass, and fails closed until enrollment is explicitly approved. No value is versioned. SignPath retains its signing key in its service/HSM; AirWiki submits only origin-verified AirWiki-owned binaries from GitHub Actions.
+Normal builds are secret-free. After acceptance only, the expected certificate fingerprint may be set as a non-secret repository variable; `windows-signing` may hold the SignPath API token, organization/project/policy/configuration slugs and enrollment gate. It is main-only, has no self-review or admin bypass, and fails closed until enrollment is explicitly approved. No value is versioned. SignPath retains its signing key in its service/HSM; AirWiki submits only origin-verified AirWiki-owned binaries from GitHub Actions.
 
 The protected job independently verifies Windows signatures with the pinned Microsoft `signtool`, `verify /pa /all /tw`, indexed-signature checks, code-signing and timestamp EKUs, certificate fingerprint and signer consistency. It signs updater artifacts only after native PE and MSI validation. SmartScreen and organization policy can still block a signed download; signing is not a reputation guarantee.
 

@@ -149,7 +149,7 @@ function Get-MsiProperties([string] $Path) {
     try {
         $InstallerCom = New-Object -ComObject WindowsInstaller.Installer
         $Database = $InstallerCom.OpenDatabase($Path, 0)
-        $View = $Database.OpenView("SELECT `Property`, `Value` FROM `Property`")
+        $View = $Database.OpenView('SELECT `Property`, `Value` FROM `Property`')
         $View.Execute()
         $Properties = @{}
         while ($true) {

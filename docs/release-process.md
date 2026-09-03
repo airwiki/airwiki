@@ -27,6 +27,57 @@ technical-testing channel. A protected run may publish them as a clearly marked
 `v<version>-beta.<number>` GitHub pre-release, but those assets are never inputs
 to this stable process, updater metadata or evidence that native signing passed.
 
+## Platform-split macOS RC and Windows technical beta
+
+ADR 0017 defines a separate, limited public channel while the Windows stable
+signing route remains unavailable. It is neither a global stable release nor an
+updater channel. **Package platform release candidate** (`package-platform-rc.yml`)
+creates a `v<version>-rc.<n>` GitHub prerelease containing only:
+
+- one macOS arm64 Developer ID signed, notarized and stapled DMG, labeled a
+  macOS release candidate; and
+- two Windows x64 per-user MSI installers (`en-US` and `es-ES`), labeled
+  unsigned technical betas.
+
+Linux is deliberately absent. The release is always a prerelease and never
+GitHub Latest. It creates no `latest.json`, updater assets or updater metadata.
+The Windows installers remain manual downloads; their hashes, provenance,
+GitHub Artifact Attestations and fresh-package MSI install/uninstall smoke do
+not establish a Windows publisher identity.
+
+The protected macOS job reuses the stable notarization script, so it creates
+and verifies an updater archive and signature transiently. The job excludes
+those files from the handoff and the ephemeral runner is discarded: only the
+notarized DMG and its verification receipt are uploaded, and no updater
+material reaches the GitHub release.
+
+Dispatch it only from `main` with the exact current 40-character tip SHA:
+
+```bash
+gh workflow run package-platform-rc.yml --ref main \
+  -f commit_sha=<current-main-40-character-sha> \
+  -f rc_number=<1-through-9999> \
+  -f publication_confirmation=publish-v<version>-rc.<rc_number>
+```
+
+Immediately before dispatch, an administrator must confirm GitHub release
+immutability is enabled for the repository. The workflow verifies the final
+published release reports `isImmutable: true`; a tag ruleset separately blocks
+updates and deletion for `v*` tags.
+
+The workflow derives `<version>` from the reviewed manifests and rejects a
+non-tip SHA, malformed number or non-exact confirmation. It revalidates the
+closed source and required checks, final asset inventory, hashes and
+provenance. `macos-signing` approval is required before any Apple secret is
+used. After macOS verification and the unsigned Windows MSI smoke complete,
+`public-release` requires a second, separate approval before the draft is
+created and published. Neither approval permits stable promotion.
+
+Do not add the unsigned MSI files to a stable Latest release, and do not
+relabel an RC as stable. A stable release still follows the process below and
+requires every applicable [public release checklist](release-checklist.md) gate,
+including Windows native signing, updater-key custody and installed acceptance.
+
 Users obtain the current stable version from
 [GitHub Releases](https://github.com/airwiki/airwiki/releases/latest):
 

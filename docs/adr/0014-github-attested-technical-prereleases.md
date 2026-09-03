@@ -47,10 +47,12 @@ gh attestation verify <asset> --repo airwiki/airwiki --signer-workflow airwiki/a
 closed-set verification. Neither mechanism is described as an operating-system
 publisher identity or a guarantee that the artifact is safe.
 
-This makes attested technical prereleases the only current public binary
-channel. Native stable signing and the updater remain deferred and inactive;
-activating or replacing either path requires a separate reviewed decision and
-does not weaken their release gates.
+This makes explicitly reviewed, attested prereleases the only current public
+binary channels. ADR 0017 refines this decision for its platform-split
+`v<version>-rc.<n>` channel while preserving the same closed-set, provenance and
+non-updater guarantees. Native stable signing and the updater remain deferred
+and inactive; activating or replacing either path requires a separate reviewed
+decision and does not weaken their release gates.
 
 ## Consequences
 

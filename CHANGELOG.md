@@ -4,6 +4,11 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Added a protected platform-split release-candidate channel. It can publish a
+  Developer ID signed and notarized Apple-silicon macOS RC beside two clearly
+  labeled unsigned Windows technical-beta MSIs, while remaining a non-Latest,
+  immutable GitHub prerelease with no updater or Linux assets.
+
 - Added public technical-beta support, privacy, FAQ, roadmap, and GitHub issue
   forms. They distinguish ordinary feedback from private vulnerability reports,
   require synthetic reproductions, and document current unsupported-release

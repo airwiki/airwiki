@@ -26,10 +26,11 @@ const ADR_REQUIRED_SECTIONS: [&str; 4] = [
     "## Consequences",
     "## Rejected alternatives",
 ];
-const ACTIVE_WORKFLOWS: [&str; 8] = [
+const ACTIVE_WORKFLOWS: [&str; 9] = [
     "ci.yml",
     "dco.yml",
     "macos-notarization-rehearsal.yml",
+    "package-platform-rc.yml",
     "package-pilot.yml",
     "pages.yml",
     "prepare-release.yml",

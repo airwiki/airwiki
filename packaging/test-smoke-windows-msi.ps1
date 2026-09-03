@@ -2,7 +2,21 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$Smoke = Get-Content -LiteralPath (Join-Path $Root "packaging\smoke-windows-msi.ps1") -Raw
+$SmokePath = Join-Path $Root "packaging\smoke-windows-msi.ps1"
+$Smoke = Get-Content -LiteralPath $SmokePath -Raw
+$Tokens = $null
+$ParseErrors = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile(
+    $SmokePath,
+    [ref]$Tokens,
+    [ref]$ParseErrors
+)
+if ($ParseErrors.Count -ne 0) {
+    $Details = ($ParseErrors | ForEach-Object {
+        "$($_.Extent.StartLineNumber):$($_.Extent.StartColumnNumber): $($_.Message)"
+    }) -join "; "
+    throw "MSI smoke script has PowerShell parser errors: $Details"
+}
 
 foreach ($Required in @(
     '[switch] $AuthorizeDestructiveMsiSmoke',

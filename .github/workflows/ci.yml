@@ -132,6 +132,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: ./packaging/test-windows-signpath-source-contract.ps1
+      - name: Windows MSI smoke syntax and static contract
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: ./packaging/test-smoke-windows-msi.ps1
       - name: macOS beta bootstrap packaging policy
         if: runner.os == 'macOS'
         shell: bash

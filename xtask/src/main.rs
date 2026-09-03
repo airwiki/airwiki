@@ -3524,7 +3524,7 @@ fn verify_windows_msi_smoke_sources(smoke: &str, smoke_test: &str, pilot: &str) 
         "Windows MSI smoke must not launch AirWiki"
     );
     ensure!(
-        smoke_test.contains("Windows MSI smoke static contract passed.")
+        smoke_test.contains("Windows MSI smoke syntax, host policy, and static contract passed.")
             && smoke_test.contains("Win32_Product")
             && smoke_test.contains("AUTOLAUNCHAPP=0"),
         "Windows MSI smoke needs a safe static PowerShell contract test"

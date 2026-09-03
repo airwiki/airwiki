@@ -16,6 +16,11 @@ Artifact Attestations, the Windows MSI install/uninstall smoke, and two
 separate protected approvals: `macos-signing` before Apple credentials and
 `public-release` before publication.
 
+The automated MSI lifecycle smoke may use only the exact GitHub-hosted Windows
+Server 2022 exception documented in [development packaging](packaging.md). It
+does not add Windows Server support or satisfy the Windows 10/11 manual
+acceptance items below.
+
 - [ ] Immediately before dispatch, confirm GitHub release immutability is
   enabled; after publication, require `isImmutable: true` for the exact RC.
 

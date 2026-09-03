@@ -45,6 +45,17 @@ The Windows installers remain manual downloads; their hashes, provenance,
 GitHub Artifact Attestations and fresh-package MSI install/uninstall smoke do
 not establish a Windows publisher identity.
 
+The automated lifecycle smoke uses the ephemeral GitHub-hosted
+`windows-2022` runner because the standard hosted x64 images are Windows
+Server. A workflow-only opt-in accepts exactly that Server 2022 job after its
+official repository, event, `main` ref, workflow, job and release SHA context
+match; other Server hosts fail closed. Those environment checks prevent
+accidental use outside the intended job; they are not cryptographic runner
+attestation, so workflow integrity and the GitHub-hosted runner remain trusted.
+This exercises per-user MSI
+installation and removal but neither adds Windows Server support nor completes
+the separate Windows 10/11 installed-acceptance gate.
+
 The protected macOS job reuses the stable notarization script, so it creates
 and verifies an updater archive and signature transiently. The job excludes
 those files from the handoff and the ephemeral runner is discarded: only the

@@ -5,7 +5,9 @@ param(
 
     [string] $UpgradeInstaller,
 
-    [switch] $AuthorizeDestructiveMsiSmoke
+    [switch] $AuthorizeDestructiveMsiSmoke,
+
+    [switch] $AllowGitHubHostedWindowsServer2022
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,6 +28,7 @@ $script:InstalledProduct = $null
 $script:ManualCleanupRequired = $false
 $script:Markers = [Collections.Generic.List[object]]::new()
 $script:MarkerDirectories = [Collections.Generic.List[object]]::new()
+. (Join-Path $PSScriptRoot "windows-msi-smoke-host-policy.ps1")
 
 function Assert-RegularFile([string] $Path, [string] $Label) {
     $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
@@ -118,19 +121,37 @@ function Remove-EmptyOwnedMarkerDirectories {
 }
 
 function Assert-WindowsMsiSmokeHost {
-    if (-not $AuthorizeDestructiveMsiSmoke) {
-        throw "the MSI smoke test requires explicit destructive authorization"
-    }
-    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
-        -not [Environment]::Is64BitProcess) {
-        throw "the MSI smoke test requires 64-bit Windows"
-    }
     $Os = Get-CimInstance Win32_OperatingSystem
     $Processors = @(Get-CimInstance Win32_Processor)
-    if ([int]$Os.ProductType -ne 1 -or [version]$Os.Version -lt [version]"10.0" -or
-        $Processors.Count -eq 0 -or @($Processors | Where-Object Architecture -ne 9).Count -ne 0) {
-        throw "the MSI smoke test requires native x64 Windows 10 or 11 client"
+    $HostEnvironment = @{}
+    foreach ($Name in @(
+        "GITHUB_ACTIONS",
+        "RUNNER_ENVIRONMENT",
+        "RUNNER_OS",
+        "RUNNER_ARCH",
+        "GITHUB_SERVER_URL",
+        "GITHUB_REPOSITORY",
+        "GITHUB_EVENT_NAME",
+        "GITHUB_REF",
+        "GITHUB_REF_TYPE",
+        "GITHUB_REF_NAME",
+        "GITHUB_JOB",
+        "GITHUB_WORKFLOW_REF",
+        "GITHUB_SHA",
+        "AIRWIKI_RELEASE_COMMIT"
+    )) {
+        $HostEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name)
     }
+    Assert-WindowsMsiSmokeHostPolicy `
+        -HasDestructiveAuthorization $AuthorizeDestructiveMsiSmoke.IsPresent `
+        -AllowGitHubHostedWindowsServer2022 $AllowGitHubHostedWindowsServer2022.IsPresent `
+        -IsWindows ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) `
+        -Is64BitProcess ([Environment]::Is64BitProcess) `
+        -ProductType ([int]$Os.ProductType) `
+        -OperatingSystemVersion ([version]$Os.Version) `
+        -BuildNumber ([string]$Os.BuildNumber) `
+        -ProcessorArchitectures ([int[]]@($Processors | ForEach-Object { [int]$_.Architecture })) `
+        -Environment $HostEnvironment
     if ([string]::IsNullOrWhiteSpace($LocalDataRoot) -or
         [string]::IsNullOrWhiteSpace($RoamingDataRoot) -or
         [string]::IsNullOrWhiteSpace($ProgramsRoot)) {

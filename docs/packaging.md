@@ -353,6 +353,20 @@ For a controlled Windows client, invoke it only with explicit authorization:
   -AuthorizeDestructiveMsiSmoke
 ```
 
+Manual invocations remain restricted to native x64 Windows 10 or 11 clients
+and must not pass the workflow-only server switch. GitHub's standard hosted x64
+Windows image is Windows Server, so the protected platform-RC workflow alone
+passes `-AllowGitHubHostedWindowsServer2022` for its ephemeral `windows-2022`
+job. The script accepts that exception only when the server build, official
+GitHub-hosted runner, repository, `workflow_dispatch` event, `main` ref, exact
+workflow/job and release SHA context all match. Every other Server context
+fails closed. Matching those environment values is an operational safeguard
+against accidental misuse, not cryptographic proof of runner identity; the
+reviewed workflow and GitHub-hosted runner remain inside the trust boundary.
+This verifies the MSI install/uninstall lifecycle; it does not
+make Windows Server supported or replace clean-machine acceptance on Windows
+10 and 11.
+
 An optional `-UpgradeInstaller` exercises an upgrade only when it has the same
 `UpgradeCode` and a strictly higher `ProductVersion`. The smoke writes one
 hash-checked marker in each documented AirWiki data root, verifies that

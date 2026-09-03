@@ -246,18 +246,28 @@ Controls are not considered effective end to end until the
   maintainer terms and MFA confirmation, protected configuration, a separately
   manual-approved signing run, and a real installed update test remain required
   before any supported stable release.
-- Public technical pre-releases have no native public trust: Windows MSI files
-  are unsigned and the macOS application is ad-hoc signed and not notarized, so
-  either platform can warn about or block the candidate. Their reviewed
-  GitHub-hosted build, exact commit and workflow provenance, GitHub Artifact
-  Attestation over every final asset, cross-platform SHA-256 inventory,
-  protected non-latest pre-release publication and exclusion from the updater
-  reduce accidental substitution but do not establish software safety or
-  replace native publisher identity. A compromised official workflow can
-  produce validly attested harmful bytes, so pinned Actions and reviewed `main`
-  remain part of the trust boundary. Testers never disable platform or
-  organization policy to run them. The Linux asset is only the federation index
-  server, not Desktop.
+- The automated Windows MSI lifecycle smoke may run on an ephemeral official
+  GitHub-hosted Windows Server 2022 worker only when the exact repository,
+  manual-dispatch event, `main` ref, workflow, job and release SHA context
+  match. This infrastructure exception does not add Windows Server support or
+  replace clean Windows 10/11 installed acceptance; every other Server context
+  fails closed. Its environment matching is an operational safeguard, not
+  cryptographic runner attestation; a compromised workflow, runner or
+  privileged process remains inside the release trust boundary.
+- Limited platform-split public RCs have asymmetric native trust: the Windows
+  MSI files are unsigned, while the macOS arm64 DMG contains a Developer
+  ID-signed application and is notarized and stapled. Windows can therefore
+  warn about or block its candidate; native macOS verification still does not
+  establish software safety. Their reviewed GitHub-hosted build, exact commit
+  and workflow provenance, GitHub Artifact Attestation over every final asset,
+  cross-platform SHA-256 inventory, protected non-latest pre-release
+  publication and exclusion from the updater reduce accidental substitution
+  but do not supply the missing Windows publisher identity. A compromised
+  official workflow can produce validly attested harmful bytes, so pinned
+  Actions and reviewed `main` remain part of the trust boundary. Testers never
+  disable platform or organization policy to run them. If a separate technical
+  prerelease includes Linux, that asset is only the federation index server,
+  not Desktop.
 - Trust and grants are per device, not per individual user.
 - LAN assumes one private subnet and cannot overcome router multicast policy.
 - OCR and advanced malicious-file analysis are out of scope.

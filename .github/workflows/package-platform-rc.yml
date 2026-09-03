@@ -357,9 +357,14 @@ jobs:
       - name: Smoke unsigned en-US MSI install and uninstall
         shell: powershell
         run: |
+          $Commit = (git rev-parse HEAD).Trim()
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          $Main = (git rev-parse origin/main).Trim()
+          if ($Commit -cne $env:AIRWIKI_RELEASE_COMMIT -or $Commit -cne $env:GITHUB_SHA -or $Commit -cne $Main) { throw "Windows MSI smoke source no longer matches the exact current main tip" }
+          if (-not [string]::IsNullOrWhiteSpace((git status --porcelain))) { throw "Windows MSI smoke source checkout is not clean" }
           $Installer = @(Get-ChildItem target\packages\windows -File -Filter '*_x64_en-US.msi')
           if ($Installer.Count -ne 1) { throw "expected exactly one en-US MSI installer for the smoke test" }
-          ./packaging/smoke-windows-msi.ps1 -Installer $Installer[0].FullName -AuthorizeDestructiveMsiSmoke
+          ./packaging/smoke-windows-msi.ps1 -Installer $Installer[0].FullName -AuthorizeDestructiveMsiSmoke -AllowGitHubHostedWindowsServer2022
       - name: Verify unsigned installers and prepare the technical beta artifact
         shell: powershell
         run: |

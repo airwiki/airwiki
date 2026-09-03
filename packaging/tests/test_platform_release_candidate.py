@@ -255,13 +255,6 @@ class PlatformReleaseCandidateWorkflowTests(unittest.TestCase):
         ):
             self.assertEqual(self.workflow.count(check), 1)
         self.assertEqual(self.workflow.count("gh api --paginate"), 5)
-        self.assertEqual(
-            self.workflow.count(
-                "git fetch --no-tags origin "
-                "+refs/heads/main:refs/remotes/origin/main"
-            ),
-            6,
-        )
 
     def test_windows_beta_keeps_unsigned_and_installed_smoke_boundaries(self) -> None:
         windows = self.workflow.split("  windows-x64-unsigned-beta:", 1)[1].split(
@@ -269,8 +262,40 @@ class PlatformReleaseCandidateWorkflowTests(unittest.TestCase):
         )[0]
         self.assertIn("test-smoke-windows-msi.ps1", windows)
         self.assertIn("-AuthorizeDestructiveMsiSmoke", windows)
+        self.assertEqual(self.workflow.count("-AllowGitHubHostedWindowsServer2022"), 1)
+        self.assertIn("runs-on: windows-2022", windows)
+        self.assertIn("persist-credentials: false", windows)
+        self.assertIn("$Commit -cne $env:AIRWIKI_RELEASE_COMMIT", windows)
+        self.assertIn("$Commit -cne $env:GITHUB_SHA", windows)
+        self.assertIn("$Commit -cne $Main", windows)
+        self.assertIn("git status --porcelain", windows)
+        self.assertIsNone(
+            re.search(r"(?m)^    (?:environment|permissions|secrets):", windows)
+        )
         self.assertIn("SignatureStatus]::NotSigned", windows)
         self.assertIn("prepare-unsigned-windows-beta.ps1", windows)
+        smoke_step = windows.split(
+            "      - name: Smoke unsigned en-US MSI install and uninstall", 1
+        )[1].split(
+            "      - name: Verify unsigned installers and prepare the technical beta artifact",
+            1,
+        )[0]
+        self.assertEqual(smoke_step.count("-AllowGitHubHostedWindowsServer2022"), 1)
+        fetch = smoke_step.index(
+            "git fetch --no-tags origin "
+            "+refs/heads/main:refs/remotes/origin/main"
+        )
+        main = smoke_step.index("$Main = (git rev-parse origin/main).Trim()")
+        source_revalidation = smoke_step.index(
+            "Windows MSI smoke source no longer matches the exact current main tip"
+        )
+        clean = smoke_step.index("git status --porcelain")
+        installer = smoke_step.index("Get-ChildItem target\\packages\\windows")
+        smoke = smoke_step.index("./packaging/smoke-windows-msi.ps1 -Installer")
+        self.assertEqual(
+            [fetch, main, source_revalidation, clean, installer, smoke],
+            sorted([fetch, main, source_revalidation, clean, installer, smoke]),
+        )
 
     def test_publication_is_closed_non_latest_and_updater_free(self) -> None:
         self.assertIn("platform_release_candidate.py prepare", self.publish)

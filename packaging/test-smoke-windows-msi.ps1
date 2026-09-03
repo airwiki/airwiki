@@ -54,21 +54,38 @@ Assert-PowerShellParses $RecordAccessPath "Windows Installer record access helpe
 . $HostPolicyPath
 . $RecordAccessPath
 
+function Set-WindowsInstallerRecordStringDataForTest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Record,
+
+        [Parameter(Mandatory = $true)]
+        [int] $Field,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Value
+    )
+
+    [void] $Record.GetType().InvokeMember(
+        "StringData",
+        [System.Reflection.BindingFlags]::SetProperty,
+        $null,
+        $Record,
+        [object[]]@($Field, $Value)
+    )
+}
+
 function Assert-WindowsInstallerRecordAccess {
     $InstallerCom = $null
     $Record = $null
     try {
         $InstallerCom = New-Object -ComObject WindowsInstaller.Installer
         $Record = $InstallerCom.CreateRecord(2)
-        $StringData = $Record.PSObject.Members["StringData"]
-        if ($null -eq $StringData -or
-            $StringData.MemberType -ne [System.Management.Automation.PSMemberTypes]::ParameterizedProperty -or
-            -not $StringData.IsGettable -or
-            -not $StringData.IsSettable) {
-            throw "Windows Installer StringData is not an accessible parameterized property"
-        }
-        $StringData.InvokeSet("ProductCode", [object[]]@([int] 1))
-        $StringData.InvokeSet("{00000000-0000-0000-0000-000000000001}", [object[]]@([int] 2))
+        Set-WindowsInstallerRecordStringDataForTest -Record $Record -Field 1 -Value "ProductCode"
+        Set-WindowsInstallerRecordStringDataForTest `
+            -Record $Record `
+            -Field 2 `
+            -Value "{00000000-0000-0000-0000-000000000001}"
 
         $Name = Get-WindowsInstallerRecordStringData -Record $Record -Field 1
         $Value = Get-WindowsInstallerRecordStringData -Record $Record -Field 2

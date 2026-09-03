@@ -3547,8 +3547,10 @@ fn verify_windows_msi_smoke_sources(
             && smoke_test.contains("AUTOLAUNCHAPP=0")
             && smoke_test.contains("windows-installer-record.ps1")
             && smoke_test.contains("Assert-WindowsInstallerRecordAccess")
+            && smoke_test.contains("Set-WindowsInstallerRecordStringDataForTest")
             && smoke_test.contains("CreateRecord(2)")
-            && smoke_test.matches(".InvokeSet(").count() == 2,
+            && smoke_test.contains("[System.Reflection.BindingFlags]::SetProperty")
+            && smoke_test.contains("[object[]]@($Field, $Value)"),
         "Windows MSI smoke needs a safe PowerShell COM and static contract test"
     );
     ensure!(

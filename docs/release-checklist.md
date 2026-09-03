@@ -4,6 +4,26 @@ AirWiki remains an internal development candidate until every applicable
 item below is complete. Internal packaging and an Apache-2.0 source tree do not
 constitute a supported public release.
 
+## Limited platform-split release candidate (not stable)
+
+ADR 0017 permits a separately reviewed `v<version>-rc.<n>` GitHub prerelease
+while the stable Windows signing route remains unavailable. Its limited set is
+a Developer ID signed, notarized and stapled macOS arm64 DMG plus two unsigned
+Windows x64 MSI technical betas. It is never Latest, contains no `latest.json`
+or updater assets, and excludes Linux. It requires the exact current green
+`main` SHA, a closed final asset inventory with hashes, provenance and GitHub
+Artifact Attestations, the Windows MSI install/uninstall smoke, and two
+separate protected approvals: `macos-signing` before Apple credentials and
+`public-release` before publication.
+
+- [ ] Immediately before dispatch, confirm GitHub release immutability is
+  enabled; after publication, require `isImmutable: true` for the exact RC.
+
+This channel is not a stable checklist shortcut. In particular, it does not
+complete the Windows signing, updater, legal, governance or installed-acceptance
+items below. A macOS signing/notarization rehearsal is similarly limited
+evidence of the credentialed path, not completion of a stable macOS gate.
+
 ## Project identity and community
 
 - [x] Select [airwiki/airwiki](https://github.com/airwiki/airwiki) as the official

@@ -6,6 +6,20 @@ This policy describes the selected but inactive Windows signing route for future
 
 Technical prereleases remain unsigned/manual-only, non-Latest and excluded from the updater. GitHub Artifact Attestations establish build provenance, not a Windows publisher identity. Keep platform protections enabled and stop if a device blocks a candidate.
 
+## Platform-split release candidate boundary
+
+ADR 0017 permits a `v<version>-rc.<n>` prerelease whose macOS arm64 DMG is
+Developer ID signed, notarized and stapled. That macOS status does not change
+the Windows status: its `en-US` and `es-ES` MSIs remain unsigned technical
+betas, manual-only, non-Latest and excluded from the updater. The release has
+no `latest.json` or updater assets and is not a global stable release.
+
+The protected workflow requires a macOS signing approval before Apple
+credentials and a separate public-release approval before publication. Hashes,
+provenance, GitHub Artifact Attestations and the MSI install/uninstall smoke
+are required controls, but none is an Authenticode signature or publisher
+identity. Unsigned MSI files must never be included in a stable Latest release.
+
 ## Selected SignPath Foundation route (inactive)
 
 ADR 0016 is accepted as the route selection, but remains inactive until acceptance and all release gates complete. Before application, maintainers must confirm current SignPath Foundation terms and the project's [privacy policy](../PRIVACY.md). The Windows publisher would be SignPath Foundation. Every stable release note and this policy must disclose exactly: `Free code signing provided by SignPath.io, certificate by SignPath Foundation`.

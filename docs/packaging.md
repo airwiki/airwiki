@@ -13,6 +13,11 @@ the updater channel. ADR 0012 defines that boundary, and ADR 0014 adds
 GitHub-hosted build-provenance attestations for the exact final assets without
 claiming native publisher identity.
 
+ADR 0017 additionally defines a platform-split `v<version>-rc.<n>` channel:
+one notarized macOS arm64 DMG is a release candidate while the two Windows x64
+MSIs remain unsigned technical betas. It is not a global stable release, is
+never Latest, carries no `latest.json` or updater asset, and excludes Linux.
+
 Installers contain the desktop application, local MCP bridge, platform runtime,
 licenses, and platform-specific integration assets. Model weights and future
 multimodal projectors are downloaded and verified at first start; they are not
@@ -126,6 +131,30 @@ copy into the application. The public desktop build pins the exact SHA-256 of
 that signed `llama-server`, while contributor and ad-hoc builds retain the
 upstream trust anchor. Windows keeps the source-built runtime identity and does
 not re-sign it as AirWiki.
+
+### Package a platform-split macOS RC and Windows technical beta
+
+Use **Package platform release candidate** only after the exact current `main`
+tip has its required checks. It accepts no selected platform: the closed output
+is one Developer ID signed, notarized and stapled macOS arm64 DMG plus the two
+unsigned Windows x64 MSI installers. It omits Linux, `latest.json` and all
+updater assets.
+
+```bash
+gh workflow run package-platform-rc.yml --ref main \
+  -f commit_sha=<current-main-40-character-sha> \
+  -f rc_number=<1-through-9999> \
+  -f publication_confirmation=publish-v<version>-rc.<rc_number>
+```
+
+The release tag is `v<version>-rc.<rc_number>`, always a GitHub prerelease and
+never Latest. Confirm repository release immutability is enabled immediately
+before dispatch; the workflow requires the published release to report itself
+as immutable. The workflow also requires `macos-signing` approval before Apple
+credentials and a separate `public-release` approval before publication. It
+produces final hashes, bounded provenance and GitHub Artifact Attestations; the
+Windows MSI smoke remains required. These controls do not sign Windows files,
+make the package updater-eligible or complete any stable-release gate.
 
 ## Windows x64 candidate
 

@@ -29,6 +29,7 @@ $script:ManualCleanupRequired = $false
 $script:Markers = [Collections.Generic.List[object]]::new()
 $script:MarkerDirectories = [Collections.Generic.List[object]]::new()
 . (Join-Path $PSScriptRoot "windows-msi-smoke-host-policy.ps1")
+. (Join-Path $PSScriptRoot "windows-installer-record.ps1")
 
 function Assert-RegularFile([string] $Path, [string] $Label) {
     $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
@@ -176,8 +177,13 @@ function Get-MsiProperties([string] $Path) {
         while ($true) {
             $Record = $View.Fetch()
             if ($null -eq $Record) { break }
-            $Properties[[string]$Record.StringData(1)] = [string]$Record.StringData(2)
-            [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($Record)
+            try {
+                $PropertyName = Get-WindowsInstallerRecordStringData -Record $Record -Field 1
+                $PropertyValue = Get-WindowsInstallerRecordStringData -Record $Record -Field 2
+                $Properties[$PropertyName] = $PropertyValue
+            } finally {
+                [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($Record)
+            }
         }
         return $Properties
     } finally {

@@ -3428,13 +3428,15 @@ fn verify_windows_msi() -> Result<()> {
         .context("reading the managed Windows MSI template")?;
     let smoke = fs::read_to_string(root.join("packaging/smoke-windows-msi.ps1"))
         .context("reading the Windows MSI smoke")?;
+    let record_access = fs::read_to_string(root.join("packaging/windows-installer-record.ps1"))
+        .context("reading the Windows Installer record access helper")?;
     let smoke_test = fs::read_to_string(root.join("packaging/test-smoke-windows-msi.ps1"))
-        .context("reading the Windows MSI smoke static test")?;
+        .context("reading the Windows MSI smoke contract test")?;
     let pilot = fs::read_to_string(root.join(".github/workflows/package-pilot.yml"))
         .context("reading the technical candidate packaging workflow")?;
     verify_windows_msi_license_sources(&desktop_config, &template)?;
     verify_windows_msi_sources(&config, &template)?;
-    verify_windows_msi_smoke_sources(&smoke, &smoke_test, &pilot)?;
+    verify_windows_msi_smoke_sources(&smoke, &record_access, &smoke_test, &pilot)?;
     let workflow = fs::read_to_string(root.join(".github/workflows/windows-signpath.yml"))
         .context("reading the SignPath Windows workflow")?;
     let binaries = fs::read_to_string(root.join(".signpath/windows-binaries.xml"))
@@ -3480,9 +3482,16 @@ fn verify_windows_msi() -> Result<()> {
     verify_windows_msi_update_handoff_sources(&template, &updater, &main)
 }
 
-fn verify_windows_msi_smoke_sources(smoke: &str, smoke_test: &str, pilot: &str) -> Result<()> {
+fn verify_windows_msi_smoke_sources(
+    smoke: &str,
+    record_access: &str,
+    smoke_test: &str,
+    pilot: &str,
+) -> Result<()> {
     for required in [
         "[switch] $AuthorizeDestructiveMsiSmoke",
+        "windows-installer-record.ps1",
+        "Get-WindowsInstallerRecordStringData",
         "New-Object -ComObject WindowsInstaller.Installer",
         "Test-WebView2Present",
         "Assert-CleanPreflight",
@@ -3524,10 +3533,25 @@ fn verify_windows_msi_smoke_sources(smoke: &str, smoke_test: &str, pilot: &str) 
         "Windows MSI smoke must not launch AirWiki"
     );
     ensure!(
-        smoke_test.contains("Windows MSI smoke syntax, host policy, and static contract passed.")
-            && smoke_test.contains("Win32_Product")
-            && smoke_test.contains("AUTOLAUNCHAPP=0"),
-        "Windows MSI smoke needs a safe static PowerShell contract test"
+        !smoke.contains(".StringData(")
+            && record_access.contains("function Get-WindowsInstallerRecordStringData")
+            && record_access.contains(".InvokeMember(")
+            && record_access.contains("[System.Reflection.BindingFlags]::GetProperty")
+            && record_access.contains("[object[]]@($Field)"),
+        "Windows MSI metadata reads must use the explicit indexed COM property accessor"
+    );
+    ensure!(
+        smoke_test.contains(
+            "Windows MSI smoke COM access, host policy, syntax, and static contract passed."
+        ) && smoke_test.contains("Win32_Product")
+            && smoke_test.contains("AUTOLAUNCHAPP=0")
+            && smoke_test.contains("windows-installer-record.ps1")
+            && smoke_test.contains("Assert-WindowsInstallerRecordAccess")
+            && smoke_test.contains("Set-WindowsInstallerRecordStringDataForTest")
+            && smoke_test.contains("CreateRecord(2)")
+            && smoke_test.contains("[System.Reflection.BindingFlags]::SetProperty")
+            && smoke_test.contains("[object[]]@($Field, $Value)"),
+        "Windows MSI smoke needs a safe PowerShell COM and static contract test"
     );
     ensure!(
         pilot.contains("./packaging/test-smoke-windows-msi.ps1")
@@ -10478,12 +10502,17 @@ policy:
     fn windows_msi_smoke_contract_remains_destructive_but_model_free() {
         let root = workspace_root();
         let smoke = fs::read_to_string(root.join("packaging/smoke-windows-msi.ps1")).unwrap();
+        let record_access =
+            fs::read_to_string(root.join("packaging/windows-installer-record.ps1")).unwrap();
         let smoke_test =
             fs::read_to_string(root.join("packaging/test-smoke-windows-msi.ps1")).unwrap();
         let pilot = fs::read_to_string(root.join(".github/workflows/package-pilot.yml")).unwrap();
 
-        assert!(verify_windows_msi_smoke_sources(&smoke, &smoke_test, &pilot).is_ok());
+        assert!(
+            verify_windows_msi_smoke_sources(&smoke, &record_access, &smoke_test, &pilot).is_ok()
+        );
         assert!(!smoke.contains("Win32_Product"));
+        assert!(!smoke.contains(".StringData("));
         assert!(smoke.contains("AUTOLAUNCHAPP=0"));
     }
 

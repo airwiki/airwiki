@@ -4,10 +4,12 @@ Set-StrictMode -Version Latest
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $SmokePath = Join-Path $Root "packaging\smoke-windows-msi.ps1"
 $HostPolicyPath = Join-Path $Root "packaging\windows-msi-smoke-host-policy.ps1"
+$RecordAccessPath = Join-Path $Root "packaging\windows-installer-record.ps1"
 $ReleaseWorkflowPath = Join-Path $Root ".github\workflows\package-platform-rc.yml"
 $CiWorkflowPath = Join-Path $Root ".github\workflows\ci.yml"
 $Smoke = Get-Content -LiteralPath $SmokePath -Raw
 $HostPolicy = Get-Content -LiteralPath $HostPolicyPath -Raw
+$RecordAccess = Get-Content -LiteralPath $RecordAccessPath -Raw
 $ReleaseWorkflow = Get-Content -LiteralPath $ReleaseWorkflowPath -Raw
 $CiWorkflow = Get-Content -LiteralPath $CiWorkflowPath -Raw
 
@@ -48,13 +50,68 @@ function Copy-Hashtable([hashtable] $Source) {
 
 Assert-PowerShellParses $SmokePath "MSI smoke script"
 Assert-PowerShellParses $HostPolicyPath "MSI smoke host policy"
+Assert-PowerShellParses $RecordAccessPath "Windows Installer record access helper"
 . $HostPolicyPath
+. $RecordAccessPath
+
+function Set-WindowsInstallerRecordStringDataForTest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object] $Record,
+
+        [Parameter(Mandatory = $true)]
+        [int] $Field,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Value
+    )
+
+    [void] $Record.GetType().InvokeMember(
+        "StringData",
+        [System.Reflection.BindingFlags]::SetProperty,
+        $null,
+        $Record,
+        [object[]]@($Field, $Value)
+    )
+}
+
+function Assert-WindowsInstallerRecordAccess {
+    $InstallerCom = $null
+    $Record = $null
+    try {
+        $InstallerCom = New-Object -ComObject WindowsInstaller.Installer
+        $Record = $InstallerCom.CreateRecord(2)
+        Set-WindowsInstallerRecordStringDataForTest -Record $Record -Field 1 -Value "ProductCode"
+        Set-WindowsInstallerRecordStringDataForTest `
+            -Record $Record `
+            -Field 2 `
+            -Value "{00000000-0000-0000-0000-000000000001}"
+
+        $Name = Get-WindowsInstallerRecordStringData -Record $Record -Field 1
+        $Value = Get-WindowsInstallerRecordStringData -Record $Record -Field 2
+        if ($Name -cne "ProductCode" -or
+            $Value -cne "{00000000-0000-0000-0000-000000000001}") {
+            throw "Windows Installer StringData returned unexpected field values"
+        }
+    } finally {
+        if ($null -ne $Record) {
+            [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($Record)
+        }
+        if ($null -ne $InstallerCom) {
+            [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($InstallerCom)
+        }
+    }
+}
+
+Assert-WindowsInstallerRecordAccess
 
 foreach ($Required in @(
     '[switch] $AuthorizeDestructiveMsiSmoke',
     '[switch] $AllowGitHubHostedWindowsServer2022',
     'windows-msi-smoke-host-policy.ps1',
+    'windows-installer-record.ps1',
     'Assert-WindowsMsiSmokeHostPolicy',
+    'Get-WindowsInstallerRecordStringData',
     'New-Object -ComObject WindowsInstaller.Installer',
     'AUTOLAUNCHAPP=0',
     'Test-WebView2Present',
@@ -107,6 +164,18 @@ foreach ($Required in @(
 foreach ($Forbidden in @('Win32_Product', 'Start-Process -FilePath (Join-Path $InstallDirectory "airwiki.exe")')) {
     if ($Smoke.Contains($Forbidden)) {
         throw "MSI smoke contract contains forbidden behavior: $Forbidden"
+    }
+}
+if ($Smoke.Contains('.StringData(')) {
+    throw "MSI smoke contract must use the explicit Windows Installer record accessor"
+}
+foreach ($Required in @(
+    'function Get-WindowsInstallerRecordStringData',
+    '[System.Reflection.BindingFlags]::GetProperty',
+    '[object[]]@($Field)'
+)) {
+    if (-not $RecordAccess.Contains($Required)) {
+        throw "Windows Installer record access contract is missing: $Required"
     }
 }
 
@@ -259,4 +328,4 @@ $OldWindows = Copy-Hashtable $ClientCase
 $OldWindows.OperatingSystemVersion = [version]"6.3.9600"
 Assert-Rejected { Assert-WindowsMsiSmokeHostPolicy @OldWindows } "pre-Windows-10 client"
 
-Write-Host "Windows MSI smoke syntax, host policy, and static contract passed."
+Write-Host "Windows MSI smoke COM access, host policy, syntax, and static contract passed."

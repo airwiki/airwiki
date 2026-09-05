@@ -1,6 +1,6 @@
 <script lang="ts">
   import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
-  import BookOpen from '@lucide/svelte/icons/book-open';
+  import WikiIcon from './components/WikiIcon.svelte';
   import Bot from '@lucide/svelte/icons/bot';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import Globe2 from '@lucide/svelte/icons/globe-2';
@@ -209,7 +209,7 @@
     onclick={runKnowledgeAction}
   >
     <span class={`journey-compact-icon ${knowledgeTone()}`} aria-hidden="true">
-      {#if knowledgeTone() === 'working'}<Spinner size="small" />{:else if knowledgeTone() === 'attention'}<AlertTriangle size={15} />{:else}<BookOpen size={15} />{/if}
+      {#if knowledgeTone() === 'working'}<Spinner size="small" />{:else if knowledgeTone() === 'attention'}<AlertTriangle size={15} />{:else}<WikiIcon size={15} />{/if}
     </span>
     <span class="journey-compact-identity-copy">
       <strong>{wiki.name}</strong>

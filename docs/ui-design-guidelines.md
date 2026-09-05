@@ -63,7 +63,9 @@ behavior; do not replace it with decorative WebView chrome.
 ## Appearance roles
 
 The compact palette below defines roles, not a license to scatter raw values
-through components. Components consume the existing CSS custom properties.
+through components. Components consume the CSS custom properties in
+`apps/desktop/ui/src/tokens.css`, which owns appearance, platform typography,
+control geometry, motion and shared spacing roles.
 
 | Role | Dark | Light |
 | --- | --- | --- |
@@ -133,6 +135,11 @@ reading order. Keep reading widths comfortable, support continuous window
 resizing, and avoid nested scroll regions. Never put the only critical action at
 the bottom edge of a macOS window.
 
+The concept index has its own bounded scroll region beside the article at the
+supported 1024-pixel minimum width. A long index must never push the selected
+article below the entire list. At enlarged scales that require a single column,
+bound the index height and keep the article reachable with one reading scroll.
+
 ## Controls and targets
 
 - Use 28 by 28 logical pixels as the normal macOS control target.
@@ -150,6 +157,11 @@ the bottom edge of a macOS window.
 AirWiki uses its cross-platform icon system by default. SF Symbols can inform
 icon semantics, weight, and alignment but must not be copied into unsupported
 platforms or used outside Apple terms.
+
+Wikis use the linked-W geometry in `WikiIcon.svelte`, consistently across local
+and remote libraries, page indexes and empty states. It inherits text color and
+is decorative beside a named control; labels convey identity and access state.
+The official application logo remains a separate brand asset.
 
 ## Windows and Fluent adaptation
 

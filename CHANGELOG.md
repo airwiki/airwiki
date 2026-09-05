@@ -4,6 +4,13 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Began the reading-focused desktop redesign: the linked-W symbol identifies
+  local and remote Wikis, and a long concept index no longer pushes the reader
+  below the list at the supported 1024-pixel window width. The index scrolls
+  independently while the article retains a single reading scroll region.
+  Trust, freshness and warnings stay near the title; expanded metadata follows
+  the content. Appearance and typography roles now share one token file.
+
 - Added a protected platform-split release-candidate channel. It can publish a
   Developer ID signed and notarized Apple-silicon macOS RC beside two clearly
   labeled unsigned Windows technical-beta MSIs, while remaining a non-Latest,

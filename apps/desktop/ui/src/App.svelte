@@ -2,7 +2,7 @@
   import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
   import ArrowLeft from '@lucide/svelte/icons/arrow-left';
   import Bot from '@lucide/svelte/icons/bot';
-  import BookOpen from '@lucide/svelte/icons/book-open';
+  import WikiIcon from './components/WikiIcon.svelte';
   import CheckCircle2 from '@lucide/svelte/icons/circle-check-big';
   import FileText from '@lucide/svelte/icons/file-text';
   import History from '@lucide/svelte/icons/history';
@@ -2632,7 +2632,7 @@
                   <button class:active={libraryFilter === 'shared'} aria-pressed={libraryFilter === 'shared'} onclick={() => { libraryFilter = 'shared'; }}>{t('desktop-library-filter-shared')}<b>{sharedWikiCount}</b></button>
                 </div>
                 <div class="library-command-status">
-                  <span><BookOpen size={15} aria-hidden="true" />{t('desktop-library-concept-count', { count: publishedConceptCount })}</span>
+                  <span><WikiIcon size={15} />{t('desktop-library-concept-count', { count: publishedConceptCount })}</span>
                   <button class="text-action" onclick={refreshHealth} disabled={wikiHealthRequestId !== null}><RefreshCw size={14} aria-hidden="true" />{t(wikiHealthRequestId !== null ? 'desktop-library-checking' : 'desktop-library-check-status')}</button>
                 </div>
               </section>
@@ -2699,7 +2699,7 @@
                   </div>
                 </section>
               {:else}
-                <div class="search-welcome"><BookOpen size={32} aria-hidden="true" /><h2>{t('desktop-search-welcome-title')}</h2><p>{t('desktop-search-welcome-body')}</p></div>
+                <div class="search-welcome"><WikiIcon size={32} /><h2>{t('desktop-search-welcome-title')}</h2><p>{t('desktop-search-welcome-body')}</p></div>
               {/if}
             {:else if libraryScope === 'public'}
               <div class="public-library-toolbar">
@@ -2722,7 +2722,7 @@
                 {#if publicCatalogWikis.length > 0}
                   <PublicWikiTable wikis={publicCatalogWikis} {t} onopen={openPublicCatalogWiki} />
                 {:else}
-                  <section class="public-library-state" role="status"><BookOpen size={24} aria-hidden="true" /><div><strong>{t('desktop-public-library-empty-title')}</strong><p>{t('desktop-public-library-empty-body')}</p></div></section>
+                  <section class="public-library-state" role="status"><WikiIcon size={24} /><div><strong>{t('desktop-public-library-empty-title')}</strong><p>{t('desktop-public-library-empty-body')}</p></div></section>
                 {/if}
               {/if}
             {:else}
@@ -2733,7 +2733,7 @@
                 <WikiTable wikis={filteredLibraryWikis} scans={snapshot.wikiScans} {sourceIssueCounts} applications={snapshot.applicationAccess} peers={snapshot.peers} {t} onopen={openWiki} oncreate={() => { newWikiMenuOpen = true; }} />
               {:else}
                 <section class="library-filter-empty" role="status">
-                  <BookOpen size={27} aria-hidden="true" />
+                  <WikiIcon size={27} />
                   <div><strong>{t('desktop-library-filter-empty-title')}</strong><p>{t('desktop-library-filter-empty-body')}</p></div>
                   <button class="secondary" onclick={() => { libraryFilter = 'all'; }}>{t('desktop-library-filter-clear')}</button>
                 </section>
@@ -2820,7 +2820,7 @@
                     {#if snapshot.knowledge?.wikiId === selectedWiki.id}
                       {#each snapshot.knowledge.reservedPages as reserved (pageKey(reserved.page))}
                         <button aria-label={`${reserved.page.kind === 'index' ? t('knowledge-index-title') : t('knowledge-recovery-history')}, ${reserved.page.kind}.md`} class:active={knowledgePageIsActive(reserved.page)} aria-current={knowledgePageIsActive(reserved.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => openKnowledgePage(reserved.page, reserved.fingerprint)}>
-                          {#if reserved.page.kind === 'index'}<BookOpen size={17} aria-hidden="true" />{:else}<History size={17} aria-hidden="true" />{/if}
+                          {#if reserved.page.kind === 'index'}<WikiIcon size={17} />{:else}<History size={17} aria-hidden="true" />{/if}
                           <span><strong>{reserved.page.kind === 'index' ? t('knowledge-index-title') : t('knowledge-recovery-history')}</strong><small>{reserved.page.kind}.md</small></span>
                         </button>
                       {/each}
@@ -2853,22 +2853,22 @@
                       {@const reviewState = concept ? conceptReviewState(concept) : null}
                       <header><p class="section-label">{reviewState ? t(`desktop-review-state-${reviewState}`) : t('desktop-verified-page')}</p><h2>{snapshot.knowledgePage.title}</h2>{#if concept && reviewState !== 'reviewed'}<button class="primary compact-review-action" onclick={() => openConceptReview(concept.conceptId)}>{t(reviewState === 'excluded' ? 'review-review-excluded' : 'review-open-draft')}</button>{/if}</header>
                       {#if concept}
-                        <aside class="concept-assurance" aria-label={t('desktop-concept-assurance-title')}>
-                          <div><span>{t('desktop-concept-type')}</span><strong>{concept.conceptType}</strong></div>
-                          <div><span>{t('desktop-concept-trust')}</span><strong>{assuranceLabel(concept)}</strong></div>
-                          <div><span>{t('desktop-concept-freshness')}</span><strong>{t(`desktop-freshness-${concept.assurance.freshness}`)}</strong></div>
-                          <div><span>{t('desktop-concept-lifecycle')}</span><strong>{t(`desktop-review-state-${reviewState}`)}</strong></div>
-                          {#if concept.generatedBy}<div><span>{t('desktop-concept-generated-by')}</span><strong>{concept.generatedBy}</strong></div>{/if}
-                          {#if concept.sources.length > 0}<details><summary>{t('desktop-concept-sources', { count: concept.sources.length })}</summary><ul>{#each concept.sources as source, sourceIndex (source.id ?? source.resource ?? sourceIndex)}<li><strong>{source.title ?? source.id ?? t('desktop-concept-source-unnamed')}</strong>{#if source.author}<small>{source.author}</small>{/if}{#if source.lastModified}<small>{source.lastModified}</small>{/if}</li>{/each}</ul></details>{/if}
+                        <div class="concept-reading-status" role="group" aria-label={t('desktop-concept-assurance-title')}><span>{assuranceLabel(concept)}</span><span>{t(`desktop-freshness-${concept.assurance.freshness}`)}</span></div>
                           {#if concept.warnings.length > 0}<p class="metadata-warning"><AlertTriangle size={15} aria-hidden="true" />{t('desktop-concept-metadata-warning', { count: concept.warnings.length })}</p>{/if}
-                          {#if canVerifyConcept(selectedWiki, concept)}<button class="secondary concept-verify" onclick={() => verifyConcept(selectedWiki, concept)} disabled={actionBusy}>{t('desktop-concept-verify')}</button>{/if}
-                        </aside>
                       {/if}
                       {#if snapshot.knowledgePage.truncated}<p class="evidence-warning">{t('knowledge-page-truncated')}</p>{/if}
                       <div class="knowledge-blocks">{#each snapshot.knowledgePage.blocks as block, blockIndex (blockIndex)}{#if block.kind === 'heading'}<h3 class:minor={block.level > 2}>{block.text}</h3>{:else if block.kind === 'paragraph'}<p>{block.text}</p>{:else if block.kind === 'listItem'}<div class="safe-list-item"><span>{block.ordered ? '—' : '•'}</span><p>{block.text}</p></div>{:else if block.kind === 'code'}<pre><code>{block.text}</code></pre>{:else if block.kind === 'quote'}<blockquote>{block.text}</blockquote>{:else}<hr />{/if}{/each}</div>
+                      {#if concept}
+                        <aside class="concept-assurance" aria-label={t('desktop-concept-assurance-title')}>
+                          <div><span>{t('desktop-concept-type')}</span><strong>{concept.conceptType}</strong></div>
+                          {#if concept.generatedBy}<div><span>{t('desktop-concept-generated-by')}</span><strong>{concept.generatedBy}</strong></div>{/if}
+                          {#if concept.sources.length > 0}<details><summary>{t('desktop-concept-sources', { count: concept.sources.length })}</summary><ul>{#each concept.sources as source, sourceIndex (source.id ?? source.resource ?? sourceIndex)}<li><strong>{source.title ?? source.id ?? t('desktop-concept-source-unnamed')}</strong>{#if source.author}<small>{source.author}</small>{/if}{#if source.lastModified}<small>{source.lastModified}</small>{/if}</li>{/each}</ul></details>{/if}
+                          {#if canVerifyConcept(selectedWiki, concept)}<button class="secondary concept-verify" onclick={() => verifyConcept(selectedWiki, concept)} disabled={actionBusy}>{t('desktop-concept-verify')}</button>{/if}
+                        </aside>
+                      {/if}
                     {:else if snapshot.knowledgePage?.wikiId === selectedWiki.id && snapshot.knowledgePage.status === 'failed'}
                       <div class="file-empty" role="status"><AlertTriangle size={28} aria-hidden="true" /><h2>{t('knowledge-page-load-failed-title')}</h2><p>{t('knowledge-page-load-failed')}</p></div>
-                    {:else}<div class="file-empty"><BookOpen size={28} aria-hidden="true" /><h2>{t('knowledge-select-page')}</h2><p>{t('desktop-verified-only')}</p></div>{/if}
+                    {:else}<div class="file-empty"><WikiIcon size={28} /><h2>{t('knowledge-select-page')}</h2><p>{t('desktop-verified-only')}</p></div>{/if}
                   </section>
                 </div>
               {/if}
@@ -3024,7 +3024,7 @@
                     </div>
                     <IntegrationList integrations={snapshot.integrations?.integrations ?? []} busy={integrationRequestId !== null} pendingAction={integrationPendingAction} {publicSearchBusyAppId} {publicSearchErrorAppId} {t} onaction={runIntegrationAction} onpublicsearch={changeApplicationPublicSearch} oncopy={copyMcpSetup} />
                   </section>
-                  {#if snapshot.projectMemoryRequests.length > 0}<section aria-labelledby="project-memory-requests-title"><div class="section-heading"><div><h2 id="project-memory-requests-title">{t('desktop-project-memory-requests-title')}</h2><p>{t('desktop-project-memory-requests-body')}</p></div><button class="text-action" onclick={refreshApplicationAccess}>{t('action-refresh')}</button></div><div class="computation-list">{#each snapshot.projectMemoryRequests as request (request.requestId)}<article><span class="pending-icon project-memory-link" aria-hidden="true"><BookOpen size={17} /></span><div><strong>{t(request.kind === 'initialize' ? 'desktop-project-memory-initialize-request' : 'desktop-project-memory-attach-request', { application: request.applicationName })}</strong><p>{t('desktop-project-memory-request-folder', { folder: request.folderName })}</p>{#if request.requestedName}<small>{request.requestedName}</small>{/if}</div><div class="row-actions"><button class="secondary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, false)}>{t('action-reject')}</button><button class="primary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, true)}>{t('action-approve')}</button></div></article>{/each}</div></section>{/if}
+                  {#if snapshot.projectMemoryRequests.length > 0}<section aria-labelledby="project-memory-requests-title"><div class="section-heading"><div><h2 id="project-memory-requests-title">{t('desktop-project-memory-requests-title')}</h2><p>{t('desktop-project-memory-requests-body')}</p></div><button class="text-action" onclick={refreshApplicationAccess}>{t('action-refresh')}</button></div><div class="computation-list">{#each snapshot.projectMemoryRequests as request (request.requestId)}<article><span class="pending-icon project-memory-link" aria-hidden="true"><WikiIcon size={17} /></span><div><strong>{t(request.kind === 'initialize' ? 'desktop-project-memory-initialize-request' : 'desktop-project-memory-attach-request', { application: request.applicationName })}</strong><p>{t('desktop-project-memory-request-folder', { folder: request.folderName })}</p>{#if request.requestedName}<small>{request.requestedName}</small>{/if}</div><div class="row-actions"><button class="secondary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, false)}>{t('action-reject')}</button><button class="primary" disabled={actionBusy} onclick={() => decideProjectMemoryRequest(request.requestId, true)}>{t('action-approve')}</button></div></article>{/each}</div></section>{/if}
                   {#if snapshot.pendingComputations.length > 0}<section aria-labelledby="computations-title"><div class="section-heading"><div><h2 id="computations-title">{t('desktop-computation-requests-title')}</h2><p>{t('desktop-computation-requests-body')}</p></div><button class="text-action" onclick={refreshComputations}>{t('action-refresh')}</button></div><div class="computation-list">{#each snapshot.pendingComputations as computation (computation.runId)}<article><span class="pending-icon"><Sparkles size={17} aria-hidden="true" /></span><div><strong>{t('desktop-computation-request-title', { application: computation.applicationName })}</strong><p>{t('desktop-computation-request-body', { wiki: computation.wikiName, path: computation.logicalPath })}</p>{#if computation.parameters.length > 0}<ul class="computation-parameters">{#each computation.parameters as parameter (`${parameter.name}:${parameter.parameterType}`)}<li><code>{parameter.name}</code><span>{parameter.parameterType}</span></li>{/each}</ul>{/if}</div><div class="row-actions"><button class="secondary" disabled={actionBusy} onclick={() => decideComputation(computation.runId, 'reject')}>{t('action-reject')}</button><button class="primary" disabled={actionBusy} onclick={() => decideComputation(computation.runId, 'execute')}>{t('desktop-computation-review-run')}</button></div></article>{/each}</div></section>{/if}
                   {#if snapshot.completedComputations.length > 0}<section aria-labelledby="completed-computations-title"><div class="section-heading"><div><h2 id="completed-computations-title">{t('desktop-computation-results-title')}</h2><p>{t('desktop-computation-results-body')}</p></div><button class="text-action" onclick={refreshComputations}>{t('action-refresh')}</button></div><div class="computation-list">{#each snapshot.completedComputations as computation (computation.runId)}<article><span class="pending-icon"><CheckCircle2 size={17} aria-hidden="true" /></span><div><strong>{t('desktop-computation-result-title', { application: computation.applicationName })}</strong><p>{t('desktop-computation-result-body', { wiki: computation.wikiName, path: computation.logicalPath })}</p></div>{#if computation.verdict === 'accepted'}<div class="row-actions computation-save-actions"><SelectField label={t('desktop-computation-save-target')} value={computationSaveTargets[computation.runId] ?? ''} onchange={(value) => { computationSaveTargets = { ...computationSaveTargets, [computation.runId]: value }; }} options={[{ value: '', label: t('desktop-computation-save-select') }, ...snapshot.wikis.filter((wiki) => wiki.origin === 'aiMemory').map((wiki) => ({ value: wiki.id, label: wiki.name }))]} /><button class="primary" disabled={actionBusy || !computationSaveTargets[computation.runId]} onclick={() => saveAcceptedComputation(computation.runId)}>{t('desktop-computation-save')}</button></div>{:else}<span class="status-pill warning">{t('desktop-computation-rejected')}</span>{/if}</article>{/each}</div></section>{/if}
                 {/if}

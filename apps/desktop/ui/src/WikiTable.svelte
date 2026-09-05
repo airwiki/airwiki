@@ -1,5 +1,5 @@
 <script lang="ts">
-  import BookOpen from '@lucide/svelte/icons/book-open';
+  import WikiIcon from './components/WikiIcon.svelte';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import ShimmerText from './components/ShimmerText.svelte';
   import Spinner from './components/Spinner.svelte';
@@ -137,7 +137,7 @@
       <div class="wiki-row-item" role="listitem">
         <button class={`wiki-row status-${statusTone(wiki)}`} aria-busy={scanning} aria-label={rowLabel(wiki)} onclick={() => onopen(wiki.id)}>
           <span class="wiki-name">
-            <span class="wiki-icon"><BookOpen size={17} aria-hidden="true" /></span>
+            <span class="wiki-icon"><WikiIcon size={17} /></span>
             <span><strong>{wiki.name}</strong><small>{originLabel(wiki)}</small></span>
           </span>
 
@@ -167,7 +167,7 @@
         </button>
       </div>
     {:else}
-      <div class="table-empty"><BookOpen size={28} aria-hidden="true" /><strong>{t('desktop-wiki-empty-title')}</strong><p>{t('desktop-wiki-empty-body')}</p><button class="primary" onclick={oncreate}>{t('desktop-wiki-empty-action')}</button></div>
+      <div class="table-empty"><WikiIcon size={28} /><strong>{t('desktop-wiki-empty-title')}</strong><p>{t('desktop-wiki-empty-body')}</p><button class="primary" onclick={oncreate}>{t('desktop-wiki-empty-action')}</button></div>
     {/each}
   </div>
 </div>

@@ -3,10 +3,14 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 function desktopStyles(): string {
-  return readFileSync(
+  const stylesheet = readFileSync(
     resolve(process.cwd(), 'src/styles.css'),
     'utf8',
   );
+  return stylesheet.replace("@import './tokens.css';", readFileSync(
+    resolve(process.cwd(), 'src/tokens.css'),
+    'utf8',
+  ));
 }
 
 type Rgb = [number, number, number];
@@ -191,7 +195,7 @@ describe('desktop style tokens', () => {
 
     expect(stylesheet).not.toMatch(/body\s*{[^}]*min-width:\s*1020px/);
     expect(stylesheet).toContain('html, body, #app { min-width: 0; }');
-    expect(stylesheet).toContain(':root[data-platform=\'windows\'] { --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;');
+    expect(stylesheet).toMatch(/:root\[data-platform='windows'\]\s*{[^}]*--font-ui:\s*"Segoe UI Variable", "Segoe UI", system-ui, sans-serif;/);
     expect(stylesheet).toMatch(/@media \(max-width: 1040px\)[\s\S]*?\.top-bar\s*{[^}]*grid-template-rows: auto auto/);
     expect(stylesheet).toMatch(/@media \(max-width: 1040px\)[\s\S]*?\.wiki-row\s*{[^}]*'knowledge knowledge'/);
   });

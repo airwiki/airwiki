@@ -103,6 +103,22 @@ writeFileSync(join(okfFixture, 'architecture', 'verified.md'), [
   ''
 ].join('\n'));
 
+// Exercise a real, scrollable index through import and IPC, including long names.
+for (let index = 1; index <= 48; index += 1) {
+  const number = String(index).padStart(2, '0');
+  writeFileSync(join(okfFixture, 'architecture', `reference-${number}.md`), [
+    '---',
+    'type: Reference',
+    `title: Synthetic reference ${number} with a deliberately long descriptive title`,
+    'status: stable',
+    '---',
+    `# Synthetic reference ${number}`,
+    '',
+    'The selected article remains readable beside a long concept index.',
+    ''
+  ].join('\n'));
+}
+
 async function waitForWebDriver(child) {
   const deadline = Date.now() + 30_000;
   let lastError;

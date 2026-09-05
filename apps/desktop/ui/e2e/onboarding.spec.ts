@@ -433,7 +433,7 @@ async function importOkfWiki(): Promise<void> {
   await $('button*=Import OKF folder').click();
   await $('#import-okf-title').waitForDisplayed();
   await expect($('.create-wiki-dialog')).toHaveText(expect.stringContaining('OKF v0.2'));
-  await expect($('.create-wiki-dialog')).toHaveText(expect.stringContaining('2'));
+  await expect($('.create-wiki-dialog')).toHaveText(expect.stringContaining('50'));
   const name = await $('.create-wiki-dialog input:not([type="checkbox"])');
   await name.setValue('E2E imported wiki');
   await $('button*=Import wiki').click();
@@ -480,35 +480,81 @@ async function importOkfWiki(): Promise<void> {
       })
     };
   });
+  if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') {
+    await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-access-bar-review-${captureTheme}.png`));
+  }
   expect(statusBarLayout.statusLeft).toBeGreaterThanOrEqual(statusBarLayout.pageLeft);
   expect(statusBarLayout.statusRight).toBeLessThanOrEqual(statusBarLayout.pageRight);
   expect(statusBarLayout.essentialTextVisible).toBe(true);
   expect(statusBarLayout.controlsOperable).toBe(true);
-  if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') {
-    await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-access-bar-review-${captureTheme}.png`));
-  }
   await expect($('.file-list')).toHaveText(expect.stringContaining('architecture/decision.md'));
   await expect($('.file-list')).toHaveText(expect.stringContaining('architecture/verified.md'));
 
   await $('.file-list').$('button*=Synthetic architecture decision').click();
   await browser.waitUntil(
-    () => browser.execute(() => document.querySelector('.concept-assurance')?.textContent?.includes('Unverified') === true),
+    () => browser.execute(() => document.querySelector('.concept-reading-status')?.textContent?.includes('Unverified') === true),
     { timeout: 10_000, timeoutMsg: 'unverified concept assurance did not load' }
   );
   await expect($('.concept-assurance')).toHaveText(expect.stringContaining('Decision'));
 
   await $('.file-list').$('button*=Verified architecture reference').click();
   await browser.waitUntil(
-    () => browser.execute(() => document.querySelector('.concept-assurance')?.textContent?.includes('Human-reviewed') === true),
+    () => browser.execute(() => document.querySelector('.concept-reading-status')?.textContent?.includes('Human-reviewed') === true),
     { timeout: 10_000, timeoutMsg: 'verified concept assurance did not replace the previous page atomically' }
   );
+  for (const [width, height] of [[1024, 720], [1180, 760], [1440, 900]] as const) {
+    await setCssViewport(width, height);
+    await browser.execute(() => {
+      const last = Array.from(document.querySelectorAll<HTMLButtonElement>('.file-list button'))
+        .find((button) => button.textContent?.includes('Synthetic reference 48'));
+      last?.focus();
+    });
+    // This driver dispatches synthetic KeyboardEvents, which cannot trigger a
+    // native button's Enter default action. Check focus/scroll here and use its
+    // semantic activation; installed keyboard acceptance remains a manual gate.
+    await $('.file-list').$('button*=Synthetic reference 48').click();
+    await expect($('.file-preview h2')).toHaveText('Synthetic reference 48 with a deliberately long descriptive title');
+    const reading = await browser.execute(() => {
+      const page = document.querySelector<HTMLElement>('.drive-page');
+      if (page) page.scrollTop = 0;
+      const list = document.querySelector<HTMLElement>('.file-list');
+      const heading = document.querySelector<HTMLElement>('.file-preview h2');
+      const paragraph = document.querySelector<HTMLElement>('.file-preview .knowledge-blocks p');
+      const preview = document.querySelector<HTMLElement>('.file-preview');
+      const listRect = list?.getBoundingClientRect();
+      const focusRect = document.activeElement?.getBoundingClientRect();
+      const previewRect = preview?.getBoundingClientRect();
+      return {
+        headingVisible: !!heading && heading.getBoundingClientRect().top >= 0 && heading.getBoundingClientRect().bottom < innerHeight,
+        paragraphVisible: !!paragraph && paragraph.getBoundingClientRect().top < innerHeight,
+        readerBesideIndex: !!listRect && !!previewRect && previewRect.left >= listRect.right - 1,
+        indexScrolled: (list?.scrollTop ?? 0) > 0,
+        focusedSelection: document.activeElement?.getAttribute('aria-current') === 'page',
+        focusVisible: !!focusRect && !!listRect && focusRect.top >= listRect.top && focusRect.bottom <= Math.min(listRect.bottom, innerHeight),
+        horizontalOverflow: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') {
+      await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-reading-${width}-${captureTheme}.png`));
+    }
+    expect(reading).toEqual({
+      headingVisible: true,
+      paragraphVisible: true,
+      readerBesideIndex: true,
+      indexScrolled: true,
+      focusedSelection: true,
+      focusVisible: true,
+      horizontalOverflow: false,
+    });
+  }
+  await setCssViewport(1180, 760);
+  await $('.file-list').$('button*=Verified architecture reference').click();
   const workspaceLayout = await browser.execute(() => {
     const page = document.querySelector<HTMLElement>('.drive-page');
     const topBar = document.querySelector<HTMLElement>('.top-bar');
     const heading = document.querySelector<HTMLElement>('.wiki-route > .wiki-heading');
     const detail = document.querySelector<HTMLElement>('.wiki-detail-body');
     const browserPanel = document.querySelector<HTMLElement>('.wiki-detail-body > .file-browser');
-    const list = browserPanel?.querySelector<HTMLElement>('.file-list');
     const preview = browserPanel?.querySelector<HTMLElement>('.file-preview');
     const sticky = document.querySelector<HTMLElement>('.wiki-content-sticky');
     const pageRect = page?.getBoundingClientRect();
@@ -520,7 +566,6 @@ async function importOkfWiki(): Promise<void> {
       pageScrollTop: page?.scrollTop ?? -1,
       pageOverflowY: page ? getComputedStyle(page).overflowY : '',
       detailOverflowY: detail ? getComputedStyle(detail).overflowY : '',
-      listOverflowY: list ? getComputedStyle(list).overflowY : '',
       previewOverflowY: preview ? getComputedStyle(preview).overflowY : '',
       headingTop: headingRect?.top ?? -1,
       pageTop: pageRect?.top ?? -1,
@@ -534,7 +579,6 @@ async function importOkfWiki(): Promise<void> {
   expect(workspaceLayout.pageScrollTop).toBeGreaterThan(0);
   expect(workspaceLayout.pageOverflowY).toBe('auto');
   expect(workspaceLayout.detailOverflowY).toBe('visible');
-  expect(workspaceLayout.listOverflowY).toBe('visible');
   expect(workspaceLayout.previewOverflowY).toBe('visible');
   expect(workspaceLayout.headingTop).toBeLessThan(workspaceLayout.pageTop);
   expect(workspaceLayout.topBarTop).toBeGreaterThanOrEqual(0);
@@ -589,9 +633,9 @@ async function importOkfWiki(): Promise<void> {
   }
   const assurance = await $('.concept-assurance');
   await expect(assurance).toHaveText(expect.stringContaining('Reference'));
-  await expect(assurance).toHaveText(expect.stringContaining('Current'));
+  await expect($('.concept-reading-status')).toHaveText(expect.stringContaining('Current'));
   await expect(assurance).toHaveText(expect.stringContaining('process:e2e'));
-  await expect(assurance).not.toHaveText(expect.stringContaining('Unverified'));
+  await expect($('.concept-reading-status')).not.toHaveText(expect.stringContaining('Unverified'));
 }
 
 async function genericMcpArticle() {
@@ -860,7 +904,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
     expect(readable.bodyMarkdown).toBe('# Portable agent memory updated\n\nUpdated synthetic decision.');
     expect(targetedRead.nextCursor).toBeNull();
     await $('.file-list').$('button*=Portable agent memory updated').click();
-    await expect($('.concept-assurance')).toHaveText(expect.stringContaining('Reviewed'));
+    await expect($('.file-preview > header .section-label')).toHaveText('Reviewed');
 
     const deprecated = await client.callTool('deprecate_airwiki_memory', {
       wiki_id: wikiId,
@@ -873,7 +917,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
       { timeout: 10_000, timeoutMsg: 'the open AI-memory page was not invalidated after deprecation' }
     );
     await $('.file-list').$('button*=Portable agent memory updated').click();
-    await expect($('.concept-assurance')).toHaveText(expect.stringContaining('Deprecated'));
+    await expect($('.file-preview > header .section-label')).toHaveText('Deprecated');
 
     await openAiAppsSettings();
     await clickGenericMcpAction('Disconnect');

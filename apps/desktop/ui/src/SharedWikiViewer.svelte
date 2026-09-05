@@ -1,7 +1,7 @@
 <script lang="ts">
   import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
   import ArrowLeft from '@lucide/svelte/icons/arrow-left';
-  import BookOpen from '@lucide/svelte/icons/book-open';
+  import WikiIcon from './components/WikiIcon.svelte';
   import FileText from '@lucide/svelte/icons/file-text';
   import History from '@lucide/svelte/icons/history';
   import List from '@lucide/svelte/icons/list';
@@ -248,11 +248,11 @@
           <aside class="file-list" aria-label={t('knowledge-pages')}>
             {#each descriptors as descriptor (pageKey(descriptor.page))}
               <button class:active={selectedDescriptor && samePage(selectedDescriptor.page, descriptor.page)} aria-current={selectedDescriptor && samePage(selectedDescriptor.page, descriptor.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage(descriptor)} disabled={pageLoading}>
-                {#if descriptor.page.kind === 'index'}<BookOpen size={17} aria-hidden="true" />{:else if descriptor.page.kind === 'log'}<History size={17} aria-hidden="true" />{:else}<FileText size={17} aria-hidden="true" />{/if}
+                {#if descriptor.page.kind === 'index'}<WikiIcon size={17} />{:else if descriptor.page.kind === 'log'}<History size={17} aria-hidden="true" />{:else}<FileText size={17} aria-hidden="true" />{/if}
                 <span><strong>{pageTitle(descriptor)}</strong><small>{descriptor.logicalPath}</small></span>
               </button>
             {:else}
-              <div class="shared-file-empty"><BookOpen size={20} aria-hidden="true" /><span>{t('desktop-shared-empty-title')}</span></div>
+              <div class="shared-file-empty"><WikiIcon size={20} /><span>{t('desktop-shared-empty-title')}</span></div>
             {/each}
             {#if structureLoading}<LoadingState label={t('desktop-shared-loading-structure')} compact />{/if}
             {#if browse.appendFailed}<div class="shared-more-warning" role="status"><AlertTriangle size={15} aria-hidden="true" /><span>{t('desktop-shared-structure-failed')}</span></div>{/if}
@@ -265,23 +265,23 @@
               <div class="table-empty shared-target-unavailable" role="alert"><AlertTriangle size={20} aria-hidden="true" /><div><strong>{t('desktop-shared-target-unavailable-title')}</strong><p>{t('desktop-shared-target-unavailable-body')}</p></div></div>
             {:else if selectedDocument}
               <header><p class="section-label">{selectedDocument.descriptor.logicalPath}</p><h2>{pageTitle(selectedDocument.descriptor)}</h2></header>
-              {#if selectedConcept}
-                <aside class="concept-assurance shared-concept-assurance" aria-label={t('desktop-concept-assurance-title')}>
-                  <div><span>{t('desktop-concept-type')}</span><strong>{selectedConcept.conceptType}</strong></div>
-                  <div><span>{t('desktop-concept-trust')}</span><strong>{metadata(selectedConcept)}</strong></div>
-                  <div class="shared-source-assurance"><span>{t('desktop-shared-source')}</span><DeviceIdentity name={sourceName} platform={sourcePlatform} platformLabel={sourceLabel ?? sourceName} source={source === 'public' ? 'public' : 'device'} compact /></div>
-                </aside>
-              {/if}
+              {#if selectedConcept}<div class="concept-reading-status" role="group" aria-label={t('desktop-concept-trust')}>{metadata(selectedConcept)}</div>{/if}
               <div class="knowledge-blocks">
                 {#each selectedDocument.blocks as block, blockIndex (blockIndex)}
                   {#if block.kind === 'heading'}<h3 class:minor={block.level > 2}>{block.text}</h3>{:else if block.kind === 'paragraph'}<p>{block.text}</p>{:else if block.kind === 'listItem'}<div class="safe-list-item"><span>{block.ordered ? '—' : '•'}</span><p>{block.text}</p></div>{:else if block.kind === 'code'}<pre><code>{block.text}</code></pre>{:else if block.kind === 'quote'}<blockquote>{block.text}</blockquote>{:else}<hr />{/if}
                 {/each}
               </div>
+              {#if selectedConcept}
+                <aside class="concept-assurance shared-concept-assurance" aria-label={t('desktop-concept-assurance-title')}>
+                  <div><span>{t('desktop-concept-type')}</span><strong>{selectedConcept.conceptType}</strong></div>
+                  <div class="shared-source-assurance"><span>{t('desktop-shared-source')}</span><DeviceIdentity name={sourceName} platform={sourcePlatform} platformLabel={sourceLabel ?? sourceName} source={source === 'public' ? 'public' : 'device'} compact /></div>
+                </aside>
+              {/if}
               {#if selectedDocument.metadata.length > 0}
                 <details class="advanced-disclosure shared-metadata"><summary>{t('desktop-shared-published-metadata')}</summary><dl>{#each selectedDocument.metadata as entry, metadataIndex (`${metadataIndex}:${entry[0]}`)}<div><dt>{entry[0]}</dt><dd>{entry[1]}</dd></div>{/each}</dl></details>
               {/if}
             {:else if selectedDescriptor}
-              <div class="file-empty"><BookOpen size={28} aria-hidden="true" /><h2>{t('knowledge-select-page')}</h2><p>{t('desktop-shared-open-page-body')}</p></div>
+              <div class="file-empty"><WikiIcon size={28} /><h2>{t('knowledge-select-page')}</h2><p>{t('desktop-shared-open-page-body')}</p></div>
             {:else}
               <div class="table-empty"><strong>{t('desktop-shared-empty-title')}</strong><p>{t('desktop-shared-empty-body')}</p></div>
             {/if}
@@ -297,7 +297,7 @@
           {/each}
         </aside>
         <section class="file-preview shared-file-preview">
-          {#if selectedConcept}<header><p class="section-label">{t('desktop-shared-summary-label')}</p><h2>{selectedConcept.title}</h2></header><p>{selectedConcept.summary}</p>{:else}<div class="file-empty"><BookOpen size={28} aria-hidden="true" /><h2>{t('knowledge-select-page')}</h2></div>{/if}
+          {#if selectedConcept}<header><p class="section-label">{t('desktop-shared-summary-label')}</p><h2>{selectedConcept.title}</h2></header><p>{selectedConcept.summary}</p>{:else}<div class="file-empty"><WikiIcon size={28} /><h2>{t('knowledge-select-page')}</h2></div>{/if}
         </section>
       </div>
     {/if}

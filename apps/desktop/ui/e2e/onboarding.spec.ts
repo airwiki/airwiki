@@ -614,6 +614,25 @@ async function importOkfWiki(): Promise<void> {
     index: document.querySelector('.file-list')?.scrollTop ?? 0,
   }));
   expect(afterSettings).toEqual(beforeSettings);
+  await $('.wiki-picker').click();
+  await expect($('.sidebar-wikis')).toBeDisplayed();
+  await $('.wiki-picker').click();
+  expect(await browser.execute(() => document.querySelector('.file-list')?.scrollTop ?? 0)).toBe(beforeSettings.index);
+  const historySecondTitle = 'Synthetic reference 48 with a deliberately long descriptive title';
+  await $('.file-list').$('button*=Synthetic reference 48').click();
+  await expect($('.file-preview h2')).toHaveText(historySecondTitle);
+  await browser.execute(() => window.history.back());
+  await expect($('.file-preview h2')).toHaveText('Verified architecture reference');
+  await browser.waitUntil(
+    () => browser.execute((expected) => document.querySelector('.drive-page')?.scrollTop === expected.page
+      && document.querySelector('.file-list')?.scrollTop === expected.index, beforeSettings),
+    { timeout: 5_000, timeoutMsg: 'Back did not restore the article and index positions' }
+  );
+  await browser.execute(() => window.history.forward());
+  await expect($('.file-preview h2')).toHaveText(historySecondTitle);
+  await expect($('.file-list button[aria-current="page"]')).toHaveText(expect.stringContaining(historySecondTitle));
+  await browser.execute(() => window.history.back());
+  await expect($('.file-preview h2')).toHaveText('Verified architecture reference');
   const contentToolbarGeometry = await browser.execute(() => {
     const sticky = document.querySelector<HTMLElement>('.wiki-content-sticky');
     const summary = sticky?.querySelector<HTMLElement>('.wiki-journey-compact');

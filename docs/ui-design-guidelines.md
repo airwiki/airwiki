@@ -154,6 +154,18 @@ browse; current unavailability still hides its content. If navigation requires
 discarding edited preferences, continue the action the person requested after
 that decision. Cancelling keeps the edits and the current Settings section.
 
+Local Back/Forward navigation and the Wiki picker retain the page, view, filter
+and reading/index positions within the session. The app keeps at most 100
+history entries and 100 recent Wiki contexts in memory. Browser history stores
+only opaque entry IDs; it never stores queries, article content or revisions.
+Restoration loads the current bundle, resolves the page and requests its current
+fingerprint. Only the matching worker completion restores the article and scroll.
+A missing page leaves the current index usable; a missing Wiki or expired
+history entry returns to Library. Failed loads retain the selection for retry.
+Back/Forward supports Command/Control with `[` / `]`, and Alt with Left/Right,
+outside editable fields and dialogs. These session controls do not implement
+the planned SQLite persistence across application restarts.
+
 The concept index has its own bounded scroll region beside the article at the
 supported 1024-pixel minimum width. A long index must never push the selected
 article below the entire list. The article retains one reading scroll surface.

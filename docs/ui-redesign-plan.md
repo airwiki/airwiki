@@ -324,9 +324,20 @@ Al descartar preferencias editadas se continúa el destino o acción solicitada,
 incluidos Por revisar, Nueva wiki y el atajo de búsqueda. Cancelar conserva las
 ediciones. La disponibilidad remota actual sigue prevaleciendo sobre la selección.
 
-Siguen pendientes el historial de navegación local entre wikis y páginas, la
-conservación de contexto entre wikis distintas, la reducción de la
-cabecera de lectura en fase 3, el editor dedicado y la persistencia de geometría.
+El historial local distingue wikis y páginas dentro de la sesión y restaura
+selección, vista, filtro y desplazamiento tras obtener el bundle y la página
+vigentes. El navegador guarda únicamente identificadores opacos; las
+coordenadas se conservan en memoria acotada. La restauración usa request IDs
+desde antes del envío y no reutiliza fingerprints antiguos. Una wiki ausente
+o entrada caducada vuelve a Biblioteca; una página ausente conserva el índice
+usable y un fallo permite reintentar. El selector conserva el índice al abrirse.
+El recorrido con IPC real en macOS también comprueba Atrás/Adelante entre
+artículos y sus posiciones de lectura. Esta entrega pasa 251 pruebas de UI;
+incluyen revisión cambiada, respuesta fuera de orden, fallo con reintento,
+selección eliminada y salida de Ajustes con edición pendiente.
+
+Siguen pendientes la reducción de la cabecera de lectura en fase 3, el contexto
+completo de resultados de búsqueda, el editor dedicado y la persistencia local.
 La base visual y sus pruebas no completan por sí solas la aceptación instalada.
 
 - [ ] Fase 1: ventana mínima, W enlazada y base visual.

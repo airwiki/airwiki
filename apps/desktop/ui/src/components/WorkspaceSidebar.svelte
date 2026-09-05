@@ -21,6 +21,7 @@
   export let onreview: () => void;
   export let onsettings: () => void;
   export let onwiki: (id: string) => void;
+  export let onopenwikis: () => void;
   export let oncreate: () => void;
   export let newWikiMenuOpen: boolean;
 
@@ -36,6 +37,11 @@
     choosingWiki = false;
     onwiki(id);
   }
+
+  function toggleWikiPicker() {
+    if (!choosingWiki) onopenwikis();
+    choosingWiki = !choosingWiki;
+  }
 </script>
 
 <aside class="workspace-sidebar" aria-label={t('desktop-sidebar-navigation')}>
@@ -47,7 +53,7 @@
     {#if destination === 'settings'}
       {@render context()}
     {:else}
-      <button class="wiki-picker" aria-expanded={choosingWiki || !contextLabel} onclick={() => { choosingWiki = !choosingWiki; }} disabled={!contextLabel}>
+      <button class="wiki-picker" aria-expanded={choosingWiki || !contextLabel} onclick={toggleWikiPicker} disabled={!contextLabel}>
         <WikiIcon size={20} /><strong>{contextLabel ?? t('desktop-sidebar-wikis')}</strong>{#if contextLabel}<ChevronDown size={15} aria-hidden="true" />{/if}
       </button>
       {#if choosingWiki || !contextLabel}
@@ -56,9 +62,8 @@
             <button class:active={wiki.id === wikiId} aria-current={wiki.id === wikiId ? 'page' : undefined} onclick={() => chooseWiki(wiki.id)} title={wiki.name}><WikiIcon size={16} /><span>{wiki.name}</span>{#if wiki.needsReviewCount > 0}<small>{wiki.needsReviewCount}</small>{/if}</button>
           {/each}
         </nav>
-      {:else}
-        {@render context()}
       {/if}
+      {#if contextLabel}<div class="sidebar-index" hidden={choosingWiki}>{@render context()}</div>{/if}
     {/if}
   </div>
   <footer>
@@ -77,6 +82,8 @@
   button > :global(svg) { flex: none; }
   small { flex: none; font-size: 11px; font-variant-numeric: tabular-nums; }
   .sidebar-context { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+  .sidebar-index { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+  .sidebar-index[hidden] { display: none; }
   .wiki-picker { flex: none; margin-bottom: 8px; color: var(--strong); }
   .wiki-picker strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
   .wiki-picker:disabled { opacity: 1; cursor: default; }

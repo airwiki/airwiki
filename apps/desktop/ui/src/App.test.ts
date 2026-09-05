@@ -137,6 +137,50 @@ async function openSettingsSection(section: 'general' | 'connections' | 'apps') 
   return screen.findByRole('heading', { name: section === 'general' ? 'General' : section === 'connections' ? 'Conexiones' : 'Apps de IA', level: 1 });
 }
 
+function readingHistoryFixture() {
+  const wiki = snapshot.wikis[0];
+  const first = {
+    conceptId: 'first', page: { kind: 'concept' as const, path: 'first.md' }, title: 'First article',
+    description: '', conceptType: 'Reference', tags: [], lifecycle: 'stable', generatedBy: null,
+    verifiedBy: [], sources: [], staleAfter: null,
+    assurance: { trust: 'unverified' as const, freshness: 'notDeclared' as const, verificationOutdated: false },
+    warnings: [], executionAvailable: false, fingerprint: 'a'.repeat(64)
+  };
+  const second = { ...first, conceptId: 'second', page: { kind: 'concept' as const, path: 'second.md' }, title: 'Second article', fingerprint: 'b'.repeat(64) };
+  const bundle: NonNullable<AppSnapshot['knowledge']> = {
+    wikiId: wiki.id, wikiName: wiki.name, version: 'reading-history', status: 'ready',
+    reservedPages: [], concepts: [first, second], links: [], errorCount: 0, warningCount: 0
+  };
+  const page = (concept = first): NonNullable<AppSnapshot['knowledgePage']> => ({
+    wikiId: wiki.id, page: concept.page, concept, title: concept.title, status: 'ready',
+    blocks: [{ kind: 'paragraph', text: `${concept.title} body` }], metadata: [], backlinks: [], truncated: false
+  });
+  snapshot.knowledge = bundle;
+  snapshot.knowledgePage = page();
+  window.history.replaceState(null, '', `#wikis/${wiki.id}`);
+  return { wiki, first, second, bundle, page };
+}
+
+async function deliverSnapshot(requestId: string | null = null, update: Partial<AppSnapshot> = {}) {
+  snapshot = { ...snapshot, ...update, sequence: snapshot.sequence + 1 };
+  await act(() => snapshotListener?.({
+    schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence,
+    requestId, kind: 'stateChanged', snapshot
+  }));
+}
+
+async function completeHistoryBundle(bundle: NonNullable<AppSnapshot['knowledge']>) {
+  const requestId = vi.mocked(loadWikiBundle).mock.calls.at(-1)?.[1];
+  expect(requestId).toEqual(expect.any(String));
+  await deliverSnapshot(requestId, { knowledge: bundle });
+}
+
+async function completeHistoryPage(page: NonNullable<AppSnapshot['knowledgePage']>) {
+  const requestId = vi.mocked(loadWikiPage).mock.calls.at(-1)?.[3];
+  expect(requestId).toEqual(expect.any(String));
+  await deliverSnapshot(requestId, { knowledgePage: page });
+}
+
 async function openFirstSearchMatch(scope: ParentNode = document) {
   const button = scope.querySelector<HTMLButtonElement>('.wiki-search-matches button');
   expect(button).not.toBeNull();
@@ -228,7 +272,7 @@ describe('AirWiki wiki workspace', () => {
   });
 
   beforeEach(() => {
-    window.location.hash = '';
+    window.history.replaceState(null, '', window.location.pathname);
     snapshot = readySnapshot();
     snapshotListener = null;
     tauriListeners.clear();
@@ -1739,7 +1783,7 @@ describe('AirWiki wiki workspace', () => {
     await openFirstSearchMatch();
 
     expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id);
-    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'guides/atlas.md' }, 'a'.repeat(64));
+    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'guides/atlas.md' }, 'a'.repeat(64), expect.any(String));
     expect(window.location.hash).toBe('#library/wiki');
     expect(window.location.hash).not.toContain('Evidencia');
   });
@@ -1848,7 +1892,8 @@ describe('AirWiki wiki workspace', () => {
     expect(loadWikiPage).toHaveBeenCalledWith(
       wiki.id,
       { kind: 'concept', path: 'guide.md' },
-      fingerprint
+      fingerprint,
+      expect.any(String)
     );
   });
 
@@ -2876,7 +2921,7 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(await screen.findByRole('button', { name: 'Atlas concept' }));
 
     expect(graphButton).toHaveClass('active');
-    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'architecture/atlas.md' }, 'a'.repeat(64));
+    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'architecture/atlas.md' }, 'a'.repeat(64), expect.any(String));
     await fireEvent.click(screen.getByRole('button', { name: /^Configuración\./ }));
     expect(await screen.findByRole('button', { name: 'Guardar preferencias' })).toBeDisabled();
   });
@@ -2901,6 +2946,175 @@ describe('AirWiki wiki workspace', () => {
 
     expect(verifyWikiConcept).toHaveBeenCalledWith(wiki.id, 'memory/decision.md', fingerprint);
     expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id);
+  });
+
+  it('restores Back and Forward with fresh fingerprints and reading coordinates', async () => {
+    const { wiki, first, second, bundle, page } = readingHistoryFixture();
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (this: HTMLElement, options: ScrollToOptions | number) {
+      if (typeof options === 'object') this.scrollTop = options.top ?? 0;
+    });
+    try {
+      const { container } = render(App);
+      await screen.findByRole('heading', { name: first.title });
+      const main = container.querySelector<HTMLElement>('.drive-page')!;
+      const index = container.querySelector<HTMLElement>('.file-list')!;
+      main.scrollTop = 318;
+      index.scrollTop = 87;
+      const firstEntry = window.history.state;
+      await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+      expect(window.history.state).not.toEqual(firstEntry);
+      expect(Object.keys(window.history.state)).toEqual(['airwikiNavigation']);
+      expect(JSON.stringify(window.history.state)).not.toMatch(/first|second|article|\.md|Atlas/);
+      await completeHistoryPage(page(second));
+      await screen.findByRole('heading', { name: second.title });
+      main.scrollTop = 144;
+      index.scrollTop = 55;
+      await fireEvent.keyDown(window, { key: '[', metaKey: true });
+      await waitFor(() => expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id, expect.any(String)));
+      expect(screen.queryByRole('heading', { name: second.title })).not.toBeInTheDocument();
+      const refreshed = { ...first, fingerprint: 'c'.repeat(64) };
+      await completeHistoryBundle({ ...bundle, concepts: [refreshed, second] });
+      expect(loadWikiPage).toHaveBeenLastCalledWith(wiki.id, first.page, refreshed.fingerprint, expect.any(String));
+      // A matching page in an unrelated snapshot is not this request's completion.
+      await deliverSnapshot('unrelated-request', { knowledgePage: page(refreshed) });
+      expect(screen.queryByRole('heading', { name: first.title })).not.toBeInTheDocument();
+      await completeHistoryPage(page(refreshed));
+      expect(await screen.findByRole('heading', { name: first.title })).toBeInTheDocument();
+      expect(main.scrollTop).toBe(318);
+      expect(index.scrollTop).toBe(87);
+      const bundleCalls = vi.mocked(loadWikiBundle).mock.calls.length;
+      await fireEvent.keyDown(window, { key: 'ArrowRight', altKey: true });
+      await waitFor(() => expect(loadWikiBundle).toHaveBeenCalledTimes(bundleCalls + 1));
+      await completeHistoryBundle(bundle);
+      await completeHistoryPage(page(second));
+      expect(await screen.findByRole('heading', { name: second.title })).toBeInTheDocument();
+      expect(main.scrollTop).toBe(144);
+      expect(index.scrollTop).toBe(55);
+    } finally {
+      scroll.mockRestore();
+    }
+  });
+
+  it('resumes each local wiki after switching through the sidebar', async () => {
+    const { wiki, first, second, bundle, page } = readingHistoryFixture();
+    const otherWiki = { ...wiki, id: 'other-wiki', name: 'Boreal', needsReviewCount: 0 };
+    snapshot.wikis.push(otherWiki);
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+    await completeHistoryPage(page(second));
+    await fireEvent.click(screen.getByRole('button', { name: 'Grafo' }));
+    const index = document.querySelector<HTMLElement>('.file-list')!;
+    index.scrollTop = 87;
+    await fireEvent.click(screen.getByRole('button', { name: 'Atlas', expanded: false }));
+    expect(index.closest('[hidden]')).not.toBeNull();
+    await fireEvent.click(within(screen.getByRole('navigation', { name: 'Mis wikis' })).getByRole('button', { name: 'Boreal' }));
+    expect(loadWikiBundle).toHaveBeenLastCalledWith(otherWiki.id);
+    await deliverSnapshot(null, { knowledge: { ...bundle, wikiId: otherWiki.id, wikiName: otherWiki.name }, knowledgePage: null });
+    await fireEvent.click(screen.getByRole('button', { name: 'Boreal', expanded: false }));
+    await fireEvent.click(within(screen.getByRole('navigation', { name: 'Mis wikis' })).getByRole('button', { name: /Atlas/ }));
+    await completeHistoryBundle(bundle);
+    await completeHistoryPage(page(second));
+    expect(screen.getByRole('button', { name: 'Grafo' })).toHaveAttribute('aria-pressed', 'true');
+    expect(document.querySelector('.file-list')?.scrollTop).toBe(87);
+    await fireEvent.click(screen.getByRole('button', { name: 'Lista' }));
+    expect(await screen.findByRole('heading', { name: second.title })).toBeInTheDocument();
+    expect(browseNearbyWiki).not.toHaveBeenCalled();
+    expect(browsePublicWiki).not.toHaveBeenCalled();
+  });
+
+  it('keeps a removed historical page hidden and leaves its current index usable', async () => {
+    const { first, second, bundle, page } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+    await completeHistoryPage(page(second));
+    window.history.back();
+    await waitFor(() => expect(loadWikiBundle).toHaveBeenCalled());
+    const pageCalls = vi.mocked(loadWikiPage).mock.calls.length;
+    await completeHistoryBundle({ ...bundle, concepts: [second] });
+    expect(loadWikiPage).toHaveBeenCalledTimes(pageCalls);
+    expect(screen.queryByRole('heading', { name: first.title })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: second.title })).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+    await completeHistoryPage(page(second));
+    expect(await screen.findByRole('heading', { name: second.title })).toBeInTheDocument();
+  });
+
+  it('abandons a historical restore when a newer page is selected', async () => {
+    const { first, second, bundle, page } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+    await completeHistoryPage(page(second));
+    window.history.back();
+    await waitFor(() => expect(loadWikiBundle).toHaveBeenCalled());
+    await completeHistoryBundle(bundle);
+    const obsoleteRequest = vi.mocked(loadWikiPage).mock.calls.at(-1)?.[3];
+    await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+    await deliverSnapshot(obsoleteRequest, { knowledgePage: page(first) });
+    expect(screen.queryByRole('heading', { name: first.title })).not.toBeInTheDocument();
+    await completeHistoryPage(page(second));
+    expect(await screen.findByRole('heading', { name: second.title })).toBeInTheDocument();
+  });
+
+  it('returns to the library when the historical wiki has been removed', async () => {
+    const { wiki, first } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await fireEvent.click(within(screen.getByRole('navigation', { name: 'Navegación' })).getByRole('button', { name: 'Biblioteca' }));
+    await deliverSnapshot(null, { wikis: snapshot.wikis.filter((candidate) => candidate.id !== wiki.id) });
+    window.history.back();
+    await waitFor(() => expect(window.location.hash).toBe('#library'));
+    expect(loadWikiBundle).not.toHaveBeenCalled();
+    expect(loadWikiPage).not.toHaveBeenCalled();
+    expect(screen.queryByRole('heading', { name: first.title })).not.toBeInTheDocument();
+  });
+
+  it('retains the requested historical page when discarding edited Settings', async () => {
+    const { first, bundle, page } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await fireEvent.click(screen.getByRole('button', { name: /^Configuración\./ }));
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Al cerrar' }), { target: { value: 'hide_to_tray' } });
+    window.history.back();
+    const dialog = await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' });
+    expect(loadWikiBundle).not.toHaveBeenCalled();
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Descartar cambios' }));
+    await waitFor(() => expect(loadWikiBundle).toHaveBeenCalled());
+    await completeHistoryBundle(bundle);
+    await completeHistoryPage(page(first));
+    expect(await screen.findByRole('heading', { name: first.title })).toBeInTheDocument();
+    expect(updatePreferences).not.toHaveBeenCalled();
+  });
+
+  it('returns to Library for a history entry from an expired session', async () => {
+    const { first } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    window.history.pushState({ airwikiNavigation: 'expired-session-entry' }, '', '#library/wiki');
+    await fireEvent(window, new PopStateEvent('popstate'));
+    expect(await screen.findByRole('heading', { name: 'Tus wikis' })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#library');
+    expect(loadWikiBundle).not.toHaveBeenCalled();
+  });
+
+  it('retries a failed history load without revealing its old page', async () => {
+    const { first, second, bundle, page } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+    await completeHistoryPage(page(second));
+    vi.mocked(loadWikiBundle).mockRejectedValueOnce(new Error('synthetic dispatch failure'));
+    window.history.back();
+    const retry = await screen.findByRole('button', { name: 'Volver a intentar' });
+    expect(screen.queryByRole('heading', { name: second.title })).not.toBeInTheDocument();
+    await deliverSnapshot('unrelated-status-refresh');
+    expect(retry).toBeInTheDocument();
+    await fireEvent.click(retry);
+    await completeHistoryBundle(bundle);
+    await completeHistoryPage(page(first));
+    expect(await screen.findByRole('heading', { name: first.title })).toBeInTheDocument();
   });
 
   it('keeps concept assurance atomic with the loaded page', async () => {

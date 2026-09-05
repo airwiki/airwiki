@@ -4,6 +4,13 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Added a shared contextual sidebar for Library, local and remote Wiki indexes,
+  and Settings, with a visible reading-mode toggle and keyboard resizing. The
+  To review destination groups current proposals by Wiki using the existing
+  evidence checks. Library rows show content and access more simply; Settings
+  now uses a named control with textual warnings. A pending search no longer
+  interrupts the review queue when the local model becomes available.
+
 - Began the reading-focused desktop redesign: the linked-W symbol identifies
   local and remote Wikis, and a long concept index no longer pushes the reader
   below the list at the supported 1024-pixel window width. The index scrolls

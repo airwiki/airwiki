@@ -303,6 +303,26 @@ independiente, la matriz de baselines y las comprobaciones instaladas, incluido
 teclado real y Windows. El runner emite eventos de teclado sintéticos que no
 ejecutan la activación nativa de un botón, por lo que no certifican ese recorrido.
 
+La base de la fase 2 incorpora un marco compartido para lectura local y remota,
+barra lateral plegable y redimensionable, selector de wiki e índice contextual,
+filas de biblioteca simplificadas y acceso a Ajustes con avisos textuales. Por
+revisar abre una cola real agrupada por wiki, todavía con el editor de evidencia
+existente. Al plegar se conserva el índice y su posición; Enter en el separador
+restaura el foco en el control de lectura. Un modelo que termina de prepararse
+no reanuda búsquedas pendientes mientras el usuario está revisando.
+
+La base de navegación pasa 239 pruebas en 18 archivos, `check`, `lint` y
+`check:e2e`. El recorrido de IPC real en macOS cubre la biblioteca, el índice de
+50 conceptos, artículo corto y largo, plegado sin perder el desplazamiento y
+ajuste con flechas. Se inspeccionaron capturas del lector en claro y oscuro y
+se corrigió la alineación de descripciones en la biblioteca. La comparación de
+baselines permanece desactivada hasta consolidar las superficies del rediseño.
+
+Siguen pendientes el historial de navegación local entre wikis y páginas, la
+conservación completa del contexto al cambiar de destino, la reducción de la
+cabecera de lectura en fase 3, el editor dedicado y la persistencia de geometría.
+La base visual y sus pruebas no completan por sí solas la aceptación instalada.
+
 - [ ] Fase 1: ventana mínima, W enlazada y base visual.
 - [ ] Fase 2: navegación y biblioteca.
 - [ ] Fase 3: lector, fuentes y detalles.

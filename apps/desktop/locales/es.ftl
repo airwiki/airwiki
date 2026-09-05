@@ -1670,3 +1670,15 @@ settings-login-title = Inicio de sesión
 settings-login-heading = Inicio automático
 updates-install-confirm = La actualización fue descargada y su firma fue verificada. Se instalará únicamente después de tu confirmación.
 updates-stable-title = Canal estable firmado
+
+# Reading workspace navigation
+desktop-sidebar-navigation = Navegación
+desktop-sidebar-wikis = Mis wikis
+desktop-sidebar-show = Mostrar barra lateral
+desktop-sidebar-hide = Ocultar barra lateral
+desktop-sidebar-resize = Ancho de la barra lateral
+desktop-review-queue-title = Por revisar
+desktop-review-queue-body = Revisa las propuestas y su evidencia antes de incorporarlas a tus wikis.
+desktop-wiki-reviewed-count = { $count } conceptos revisados
+desktop-wiki-pending-count = { $count } por revisar
+desktop-sidebar-shared = Wiki compartida

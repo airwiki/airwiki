@@ -100,7 +100,8 @@ writeFileSync(join(okfFixture, 'architecture', 'verified.md'), [
   '# Verified architecture reference',
   '',
   'This concept proves that assurance changes atomically with the selected page.',
-  ''
+  '',
+  ...Array.from({ length: 20 }, (_, index) => `Synthetic reading section ${index + 1}. A long article scrolls independently of the navigation index and keeps its final source metadata reachable.\n`)
 ].join('\n'));
 
 // Exercise a real, scrollable index through import and IPC, including long names.

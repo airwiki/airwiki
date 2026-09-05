@@ -196,8 +196,6 @@ describe('desktop style tokens', () => {
     expect(stylesheet).not.toMatch(/body\s*{[^}]*min-width:\s*1020px/);
     expect(stylesheet).toContain('html, body, #app { min-width: 0; }');
     expect(stylesheet).toMatch(/:root\[data-platform='windows'\]\s*{[^}]*--font-ui:\s*"Segoe UI Variable", "Segoe UI", system-ui, sans-serif;/);
-    expect(stylesheet).toMatch(/@media \(max-width: 1040px\)[\s\S]*?\.top-bar\s*{[^}]*grid-template-rows: auto auto/);
-    expect(stylesheet).toMatch(/@media \(max-width: 1040px\)[\s\S]*?\.wiki-row\s*{[^}]*'knowledge knowledge'/);
   });
 
   it('keeps programmatically focused headings quiet without hiding control focus', () => {

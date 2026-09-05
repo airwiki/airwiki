@@ -1670,3 +1670,15 @@ settings-login-title = Sign-in
 settings-login-heading = Automatic startup
 updates-install-confirm = The update was downloaded and its signature verified. It will install only after you confirm.
 updates-stable-title = Signed stable channel
+
+# Reading workspace navigation
+desktop-sidebar-navigation = Navigation
+desktop-sidebar-wikis = My wikis
+desktop-sidebar-show = Show sidebar
+desktop-sidebar-hide = Hide sidebar
+desktop-sidebar-resize = Sidebar width
+desktop-review-queue-title = To review
+desktop-review-queue-body = Review proposals and their evidence before adding them to your wikis.
+desktop-wiki-reviewed-count = { $count } reviewed concepts
+desktop-wiki-pending-count = { $count } to review
+desktop-sidebar-shared = Shared wiki

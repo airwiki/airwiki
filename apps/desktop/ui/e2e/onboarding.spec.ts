@@ -274,7 +274,7 @@ async function navigateToDestination(index: number): Promise<void> {
   );
   const persistentChrome = await browser.execute((route) => Array.from(
     document.querySelectorAll<HTMLElement>(route === 'library'
-      ? '.top-brand, .global-search, .top-actions'
+      ? '.top-brand, .global-search, .workspace-sidebar'
       : '.settings-top-bar')
   ).map((element) => {
     const bounds = element.getBoundingClientRect();
@@ -293,7 +293,7 @@ async function navigateToDestination(index: number): Promise<void> {
   ))).toBe(true);
   expect(await browser.execute((route) => route === 'library'
     ? document.querySelector('.settings-top-bar') === null
-    : document.querySelector('.top-bar, .global-search, .system-status-button') === null, expected)).toBe(true);
+    : document.querySelector('.top-bar, .global-search') === null, expected)).toBe(true);
 }
 
 async function waitForVisualPaint(route: 'library' | 'settings'): Promise<void> {
@@ -547,8 +547,22 @@ async function importOkfWiki(): Promise<void> {
       horizontalOverflow: false,
     });
   }
+  const indexScrollBeforeFocusMode = await browser.execute(() => document.querySelector('.file-list')?.scrollTop ?? 0);
+  await $('.sidebar-toggle').click();
+  expect(await $('.file-list').isDisplayed()).toBe(false);
+  await expect($('.file-preview h2')).toHaveText('Synthetic reference 48 with a deliberately long descriptive title');
+  await $('.sidebar-toggle').click();
+  expect(await $('.file-list').isDisplayed()).toBe(true);
+  expect(await browser.execute(() => document.querySelector('.file-list')?.scrollTop ?? 0)).toBe(indexScrollBeforeFocusMode);
+  await browser.execute(() => document.querySelector<HTMLElement>('.sidebar-resizer')?.focus());
+  await browser.keys(['ArrowRight']);
+  await expect($('.sidebar-resizer')).toHaveAttribute('aria-valuenow', '240');
+  await browser.keys(['ArrowLeft']);
+  await expect($('.sidebar-resizer')).toHaveAttribute('aria-valuenow', '224');
   await setCssViewport(1180, 760);
   await $('.file-list').$('button*=Verified architecture reference').click();
+  await expect($('.file-preview h2')).toHaveText('Verified architecture reference');
+  await expect($('.file-preview .knowledge-blocks')).toHaveText(expect.stringContaining('Synthetic reading section 20.'));
   const workspaceLayout = await browser.execute(() => {
     const page = document.querySelector<HTMLElement>('.drive-page');
     const topBar = document.querySelector<HTMLElement>('.top-bar');
@@ -1014,7 +1028,7 @@ describe('AirWiki real IPC journey', () => {
     await expect($('button*=New wiki')).toBeDisplayed();
     await expect($('.system-status-button')).toBeDisplayed();
     expect(await $('.system-status-button').getAttribute('aria-label')).toContain('Settings');
-    expect(await $$('.status-segment')).toHaveLength(3);
+    await expect($('.system-status-button')).toHaveText(expect.stringContaining('Settings'));
     expect(await $('.system-status-bar').isExisting()).toBe(false);
     expect(await measureNavigationPaintP95()).toBeLessThanOrEqual(100);
 
@@ -1065,8 +1079,8 @@ describe('AirWiki real IPC journey', () => {
       dimensions = required(dimensions, 'responsive viewport dimensions');
       expect(dimensions.clientWidth).toBeGreaterThanOrEqual(viewport.width);
       expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
-      expect(dimensions.statusWidth).toBe(44);
-      expect(dimensions.statusHeight).toBe(44);
+      expect(dimensions.statusWidth).toBeGreaterThanOrEqual(160);
+      expect(dimensions.statusHeight).toBeGreaterThanOrEqual(32);
       expect(dimensions.headerBottom).toBeLessThanOrEqual(dimensions.viewportHeight);
     }
 
@@ -1079,7 +1093,7 @@ describe('AirWiki real IPC journey', () => {
         documentScrollTop: document.scrollingElement?.scrollTop ?? -1,
         mainScrollTop: main?.scrollTop ?? -1,
         topBarTop: topBar?.getBoundingClientRect().top ?? -1,
-        ordinaryHeaderPresent: document.querySelector('.top-bar, .global-search, .system-status-button') !== null,
+        ordinaryHeaderPresent: document.querySelector('.top-bar, .global-search') !== null,
         sidebarPresent: document.querySelector('.settings-sidebar') !== null
       };
     });
@@ -1178,22 +1192,28 @@ describe('AirWiki real IPC journey', () => {
       const icon = row.querySelector<HTMLElement>('.wiki-icon');
       return {
         height: row.getBoundingClientRect().height,
-        summaryParts: row.querySelectorAll('.wiki-row-summary > *').length,
-        exposureItems: row.querySelectorAll('.wiki-row-exposure-text > span').length,
+        contentSummary: row.querySelector('.wiki-row-summary')?.textContent ?? '',
+        accessSummary: row.querySelector('.wiki-row-exposure')?.textContent ?? '',
         hasOpenLabel: row.querySelector('.wiki-row-open')?.textContent?.includes('Open Wiki') === true,
         shelfRadius: shelf ? Number.parseFloat(getComputedStyle(shelf).borderTopLeftRadius) : null,
         iconShadow: icon ? getComputedStyle(icon).boxShadow : null,
+        descriptionBelowTitle: (() => {
+          const title = row.querySelector('.wiki-name > span > strong')?.getBoundingClientRect();
+          const description = row.querySelector('.wiki-description')?.getBoundingClientRect();
+          return !!title && !!description && description.top >= title.bottom - 1;
+        })(),
       };
     }));
     for (const row of libraryRows) {
       expect(row.height).toBeGreaterThanOrEqual(68);
-      expect(row.height).toBeLessThanOrEqual(78);
-      expect(row.summaryParts).toBe(2);
-      expect(row.exposureItems).toBe(3);
+      expect(row.height).toBeLessThanOrEqual(200);
+      expect(row.contentSummary).toContain('reviewed concepts');
+      expect(row.accessSummary.length).toBeGreaterThan(0);
       expect(row.hasOpenLabel).toBe(false);
       expect(row.shelfRadius).not.toBeNull();
       expect(row.shelfRadius ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(6);
       expect(row.iconShadow).toBe('none');
+      expect(row.descriptionBelowTitle).toBe(true);
     }
     await $('.library-scope-tabs').$('button*=Public').click();
     await browser.waitUntil(

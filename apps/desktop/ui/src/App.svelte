@@ -6,13 +6,15 @@
   import CheckCircle2 from '@lucide/svelte/icons/circle-check-big';
   import FileText from '@lucide/svelte/icons/file-text';
   import History from '@lucide/svelte/icons/history';
-  import Plus from '@lucide/svelte/icons/plus';
+  import PanelLeft from '@lucide/svelte/icons/panel-left';
+  import WorkspaceFrame from './components/WorkspaceFrame.svelte';
+  import WorkspaceSidebar from './components/WorkspaceSidebar.svelte';
   import RadioTower from '@lucide/svelte/icons/radio-tower';
   import RefreshCw from '@lucide/svelte/icons/refresh-cw';
   import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
   import Sparkles from '@lucide/svelte/icons/sparkles';
   import { listen } from '@tauri-apps/api/event';
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, type Snippet } from 'svelte';
   import { addFederationIndex, addWiki, allowPeerPairingAgain, approveProjectMemoryRequest, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmLegacyLanAiGrants, confirmPairing, connect, createProjectMemory, deleteWiki, detachProjectMemory, dialPeer, downloadUpdate, executeComputation, executeGuidedWikiRepair, explorePublicWikis, hideToTray, importOkf, installModels, installUpdate, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openExternalLink, openSystemDestination, pairPeer, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, refreshApplicationAccess, refreshAutostart, refreshComputations, refreshConnectivity, refreshWikiHealth, rejectComputation, rejectProjectMemoryRequest, rejectReview, relinkWiki, removeFederationIndex, rescanWiki, revokePeer, saveComputationResult, searchKnowledge, setApplicationWikiRole, setAutostart, setPublicPublisherBlocked, setWikiGrant, setWikiIndexing, updatePreferences, updatePublicWikiProfile, updateWikiPolicy, validateOkfImport, verifyWikiConcept, type AppSnapshot, type ApplicationWikiRoleInput, type CloseBehavior, type EnrichmentDraft, type FolderSelection, type IntegrationActionInput, type KnowledgeConceptSummary, type KnowledgePageInput, type LanPreference, type LocalePreference, type OkfImportSummary, type PublicCatalogWikiSummary, type PublicConceptSummaryDto, type RemoteWikiPageInput, type ReviewSummary, type SearchCoverage, type SearchHitSummary, type SourceIssueSummary, type SystemDestination, type ThemePreference, type UpdaterIssue, type WikiPolicyInput, type WikiSearchResultSummary, type WikiSummary } from './api';
   import { setModelProfile, type ModelProfile } from './api';
   import { applicationClientFor } from './aiClientIdentity';
@@ -30,7 +32,6 @@
   import AiClientIcon from './components/identity/AiClientIcon.svelte';
   import DeviceIdentity from './components/identity/DeviceIdentity.svelte';
   import PlatformIcon from './components/identity/PlatformIcon.svelte';
-  import SystemStatusButton from './SystemStatusButton.svelte';
   import WikiJourney from './WikiJourney.svelte';
   import WikiTable from './WikiTable.svelte';
   import Checkbox from './components/controls/Checkbox.svelte';
@@ -44,7 +45,7 @@
   import { wikiRequiresAttention } from './wikiHealth';
   import airwikiMark from './assets/airwiki-mark-transparent.png';
 
-  type Destination = 'library' | 'settings';
+  type Destination = 'library' | 'review' | 'settings';
   type SharedWikiSource = 'nearby' | 'public';
   type SettingsSection = 'general' | 'connections' | 'apps';
   type SearchFilter = 'all' | 'local' | 'nearby' | 'public';
@@ -61,6 +62,8 @@
   const SEARCH_DEBOUNCE_MS = 400;
 
   let destination: Destination = 'library';
+  let sidebarCollapsed = false;
+  let sidebarWidth = 224;
   let settingsSection: SettingsSection = 'general';
   let lastSettingsSection: SettingsSection = 'general';
   let settingsReturnContext: { hash: string; scrollTop: number } | null = null;
@@ -663,6 +666,14 @@
         settingsLeavePending = true;
         return;
       }
+      if (rawRoute === 'review') {
+        destination = 'review';
+        selectedWikiId = null;
+        dismissSharedBrowse();
+        cancelScheduledSearch();
+        scrollMainTo(settingsReturnContext?.scrollTop ?? 0);
+        return;
+      }
       destination = 'library';
       if (rawRoute === 'wikis' && section && section !== 'wiki') {
         selectedWikiId = section;
@@ -799,7 +810,9 @@
       if (
         searchPending
         && event.snapshot.model?.active === true
-        && destination !== 'settings'
+        && destination === 'library'
+        && selectedWikiId === null
+        && !sharedBrowseOpen
         && searchDebounceTimeout === null
       ) scheduleSearch();
       observePendingRequests(event.snapshot);
@@ -901,14 +914,15 @@
       if (!canLeaveSettings()) return;
       selectedWikiId = null;
       dismissSharedBrowse();
-      destination = 'library';
+      destination = next;
       libraryScope = 'device';
       settingsReturnContext = null;
-      pushHash('#library');
+      pushHash(next === 'review' ? '#review' : '#library');
+      if (next === 'review') cancelScheduledSearch();
       scrollMainTo(0);
       void refreshHealth();
       focusRouteHeading();
-      resumePendingSearch();
+      if (next === 'library') resumePendingSearch();
     }
   }
 
@@ -974,13 +988,13 @@
 
   function restoreLibraryContext() {
     const context = settingsReturnContext ?? { hash: '#library', scrollTop: 0 };
-    destination = 'library';
+    destination = context.hash === '#review' ? 'review' : 'library';
     settingsLeavePending = false;
     settingsReturnContext = null;
-    pushHash(context.hash.startsWith('#library') ? context.hash : '#library');
+    pushHash(context.hash === '#review' || context.hash.startsWith('#library') ? context.hash : '#library');
     scrollMainTo(context.scrollTop);
     focusRouteHeading();
-    resumePendingSearch();
+    if (destination === 'library') resumePendingSearch();
   }
 
   function requestSettingsBack() {
@@ -2389,6 +2403,9 @@
   }
 
   async function openWiki(wikiId: string, tab: 'content' | 'pending' = 'content') {
+    if (!canLeaveSettings()) return;
+    cancelScheduledSearch();
+    dismissSharedBrowse();
     destination = 'library';
     selectedWikiId = wikiId;
     wikiTab = 'content';
@@ -2538,63 +2555,73 @@
   }
 </script>
 
-<svelte:head><meta name="theme-color" content="#101012" /></svelte:head>
 
-{#if snapshot?.phase === 'failed'}
-  <main class="onboarding startup startup-failed" role="alert">
-    <div class="onboarding-mark">A</div>
-    <p class="eyebrow">AirWiki</p>
-    <h1>{t('desktop-startup-failed-title')}</h1>
-    <p class="lede">{t('desktop-startup-failed-body')}</p>
-    <button class="primary" onclick={() => quitCompletely()}>{t('desktop-quit')}</button>
-  </main>
-{:else if !snapshot || snapshot.phase !== 'ready' || !snapshot.preferences}
-  <main class="onboarding startup" aria-busy="true">
-    <div class="onboarding-mark">A</div>
-    <p class="eyebrow">AirWiki</p>
-    <h1><ShimmerText text={t('status-working')} /></h1>
-    <p class="lede" aria-live="polite">{t(runtimeMessageId)}</p>
-  </main>
-{:else if snapshot.preferences.completedOnboardingVersion == null}
-  <OnboardingFlow {snapshot} bind:locale bind:modelLicensesConfirmed {actionBusy} {actionMessage} onpickfolder={pickOnboardingFolder} oncreatewiki={createOnboardingWiki} onprepare={prepareLocalModel} onopenmodelsettings={finishOnboardingAndOpenModelSettings} onfinish={() => savePreferences(true)} />
-{:else}
-<div class="shell drive-shell" inert={activeDialogId !== null} aria-hidden={activeDialogId !== null ? 'true' : undefined}>
-  <main class="drive-main">
-    {#if destination === 'settings'}
-      <header class="settings-top-bar">
-        <button class="settings-back" onclick={requestSettingsBack}><ArrowLeft size={18} aria-hidden="true" />{t('action-back')}</button>
-        <h1 tabindex="-1">{t(settingsSections.find((section) => section.id === settingsSection)?.labelId ?? 'desktop-settings-general')}</h1>
-      </header>
-    {:else}
-      <header class="top-bar">
-        <button class="top-brand" onclick={() => select('library')} aria-label={t('desktop-library-title')}><img class="top-brand-logo" src={airwikiMark} alt="" aria-hidden="true" /><span>AirWiki</span></button>
-        <GlobalSearch
-          {question}
-          {includePublic}
-          busy={searchBusy}
-          ready={snapshot.model?.active === true}
-          platform={snapshot.platform}
-          privateScopeLabel={privateSearchScope}
-          {t}
-          onquestion={updateSearchQuestion}
-          oncompositionstart={beginSearchComposition}
-          oncompositionend={endSearchComposition}
-          onpublic={updatePublicSearch}
-          onsearch={submitGlobalSearch}
-          onopen={openGlobalSearch}
-          onopenmodelsettings={() => openSettings('general')}
-        />
-        <div class="top-actions"><button class="secondary new-wiki-command" aria-label={t('desktop-new-wiki')} title={t('desktop-new-wiki')} aria-haspopup="dialog" aria-expanded={newWikiMenuOpen} onclick={requestNewWikiSource}><Plus size={17} aria-hidden="true" />{t('desktop-new-wiki')}</button><SystemStatusButton {snapshot} {t} onclick={() => openSettings(lastSettingsSection)} /></div>
-      </header>
-    {/if}
+{#snippet localNavigation()}
+  {#if snapshot && destination === 'settings'}
+              <nav class="settings-sidebar" aria-label={t('desktop-nav-system')}>
+                {#each settingsSections as section (section.id)}
+                  {@const status = settingsStatuses.find((candidate) => candidate.id === section.id)}
+                  <a href={`#settings/${section.id}`} class:active={settingsSection === section.id} aria-current={settingsSection === section.id ? 'page' : undefined} onclick={(event) => openSettingsSection(event, section.id)}>
+                    <span class="settings-nav-icon" aria-hidden="true">{#if section.id === 'general'}<SlidersHorizontal size={16} />{:else if section.id === 'connections'}<RadioTower size={16} />{:else}<Bot size={16} />{/if}</span>
+                    <span class="settings-nav-label">{t(section.labelId)}</span>
+                    {#if status}<small><span class={`settings-status-dot ${status.tone}`} aria-hidden="true"></span>{status.detail}</small>{/if}
+                    {#if section.id === 'apps' && pendingApprovalCount(snapshot) > 0}<b>{pendingApprovalCount(snapshot) > 9 ? '9+' : pendingApprovalCount(snapshot)}</b>{/if}
+                  </a>
+                {/each}
+              </nav>
+  {:else if snapshot && selectedWiki && destination === 'library'}
+              <div class="content-tabs content-filters" aria-label={t('desktop-wiki-content-filter-label')}>
+                {#each ['all', 'draft', 'reviewed', 'excluded'] as filter (filter)}
+                  <button aria-pressed={contentFilter === filter} class:active={contentFilter === filter} onclick={() => setContentFilter(filter as ContentFilter)}>{t(`desktop-wiki-content-filter-${filter}`)}<span>{contentFilterCounts[filter as ContentFilter]}</span></button>
+                {/each}
+              </div>
+                  <aside class="file-list" aria-label={t('knowledge-pages')}>
+                    {#if snapshot.knowledge?.wikiId === selectedWiki.id}
+                      {#each snapshot.knowledge.reservedPages as reserved (pageKey(reserved.page))}
+                        <button aria-label={`${reserved.page.kind === 'index' ? t('knowledge-index-title') : t('knowledge-recovery-history')}, ${reserved.page.kind}.md`} class:active={knowledgePageIsActive(reserved.page)} aria-current={knowledgePageIsActive(reserved.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => openKnowledgePage(reserved.page, reserved.fingerprint)}>
+                          {#if reserved.page.kind === 'index'}<WikiIcon size={17} />{:else}<History size={17} aria-hidden="true" />{/if}
+                          <span><strong>{reserved.page.kind === 'index' ? t('knowledge-index-title') : t('knowledge-recovery-history')}</strong><small>{reserved.page.kind}.md</small></span>
+                        </button>
+                      {/each}
+                      {#each filteredKnowledgeConcepts as concept (pageKey(concept.page))}
+                        {@const reviewState = conceptReviewState(concept)}
+                        <button aria-label={`${concept.title}, ${concept.page.kind === 'concept' ? concept.page.path : concept.description}, ${t(`desktop-review-state-${reviewState}`)}`} class:active={knowledgePageIsActive(concept.page)} aria-current={knowledgePageIsActive(concept.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => openKnowledgePage(concept.page, concept.fingerprint)}>
+                          {#if reviewState === 'reviewed'}<CheckCircle2 size={17} aria-hidden="true" />{:else}<FileText size={17} aria-hidden="true" />{/if}
+                          <span><strong>{concept.title}</strong><small>{concept.page.kind === 'concept' ? concept.page.path : concept.description}</small></span>
+                          <em class={`concept-review-state ${reviewState}`}>{t(`desktop-review-state-${reviewState}`)}</em>
+                        </button>
+                      {/each}
+                    {/if}
+                    {#each filteredReviewOnlyItems as review (`review-only:${review.conceptId}:${review.sourceRevision}`)}
+                      <button aria-label={`${review.sourceName}, ${t(review.excluded ? 'desktop-review-state-excluded' : 'desktop-review-state-draft')}`} onclick={() => openReview(review)}>
+                        <FileText size={17} aria-hidden="true" />
+                        <span><strong>{review.draft.title}</strong><small>{review.sourceName}</small></span>
+                        <em class={`concept-review-state ${review.excluded ? 'excluded' : 'draft'}`}>{t(review.excluded ? 'desktop-review-state-excluded' : 'desktop-review-state-draft')}</em>
+                      </button>
+                    {/each}
+                    {#if filteredKnowledgeConcepts.length === 0 && filteredReviewOnlyItems.length === 0}
+                      <div class="file-list-empty"><strong>{t(`desktop-wiki-content-filter-${contentFilter}-empty-title`)}</strong><small>{t(`desktop-wiki-content-filter-${contentFilter}-empty-body`)}</small></div>
+                    {/if}
+                  </aside>
+  {/if}
+{/snippet}
 
-    {#if approvalNotice}
-      <aside class="approval-notice" role="status" aria-live="polite">
-        <div><strong>{t('desktop-approval-notice-title', { count: approvalNotice.count })}</strong><p>{t('desktop-approval-notice-body')}</p></div>
-        <div class="row-actions"><button class="primary" onclick={reviewPendingRequests}>{t('desktop-approval-notice-review')}</button><button class="text-action" onclick={() => { approvalNotice = null; }}>{t('desktop-approval-notice-dismiss')}</button></div>
-      </aside>
-    {/if}
-
+{#snippet workspaceLayout(index: Snippet, content: Snippet)}
+  {#if snapshot}
+    <WorkspaceFrame bind:width={sidebarWidth} collapsed={sidebarCollapsed} resizeLabel={t('desktop-sidebar-resize')} oncollapse={() => {
+      sidebarCollapsed = true;
+      void tick().then(() => document.querySelector<HTMLButtonElement>('.sidebar-toggle')?.focus());
+    }}>
+      {#snippet sidebar()}
+        {#if snapshot}
+        <WorkspaceSidebar {snapshot} wikis={orderedWikis} {destination} wikiId={selectedWikiId}
+          contextKey={`${destination}:${sharedBrowseOpen ? `shared:${sharedBrowseGeneration}` : selectedWikiId ?? ''}`}
+          contextLabel={destination === 'library' ? sharedBrowseOpen ? sharedBrowseLoading ? t('desktop-sidebar-shared') : (sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse?.wikiName : snapshot.publicBrowse?.wikiName) ?? t('desktop-sidebar-shared') : selectedWiki?.name ?? null : null}
+          context={index} {t} onlibrary={() => select('library')} onreview={() => select('review')}
+          onsettings={() => openSettings(lastSettingsSection)} onwiki={openWiki}
+          oncreate={requestNewWikiSource} {newWikiMenuOpen} />
+        {/if}
+      {/snippet}
     <section
       class="drive-page"
       class:wiki-open={destination === 'library' && selectedWiki !== null}
@@ -2602,6 +2629,18 @@
       class:settings-open={destination === 'settings'}
       bind:this={mainScrollRegion}
     >
+        {#if sharedBrowseOpen && destination === 'library'}
+          <div class="route-page drive-route shared-wiki-route" data-route="library">{@render content()}</div>
+        {:else}
+          {@render content()}
+        {/if}
+    </section>
+    </WorkspaceFrame>
+  {/if}
+{/snippet}
+
+{#snippet localContent()}
+  {#if snapshot}
       {#key `${destination}:${libraryScope}:${selectedWikiId ?? ''}:${wikiTab}:${settingsSection}:${sharedBrowseOpen}`}
         <div
           class="route-page drive-route"
@@ -2610,11 +2649,12 @@
           class:settings-route={destination === 'settings'}
           data-route={destination}
         >
-          {#if destination === 'library' && sharedBrowseOpen}
-            <SharedWikiViewer source={sharedBrowseSource} sourceName={sharedBrowseSourceName} sourcePlatform={sharedBrowsePlatform} sourceLabel={sharedBrowseSource === 'public' ? t('desktop-public-network') : platformLabel(sharedBrowsePlatform)} browse={sharedBrowseLoading ? null : sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse : snapshot.publicBrowse} loading={sharedBrowseLoading} structureLoading={sharedBrowseStructureLoading} pageLoading={sharedBrowsePageLoading} initialConceptId={sharedBrowseInitialConceptId} {t} metadata={publicConceptMetadata} onback={closeSharedBrowse} onopenpage={openSharedWikiPage} onblock={sharedBrowseSource === 'public' ? (publisherId) => changePublisherBlock(publisherId, true) : null} />
-          {:else if destination === 'library' && !selectedWiki}
+          {#if destination === 'library' && !selectedWiki}
             <header class="page-heading library-heading">
-              <div><p class="section-label">{t(question.trim() ? 'desktop-library-search-kicker' : libraryScope === 'public' ? 'desktop-public-library-kicker' : 'desktop-library-kicker')}</p><h1 tabindex="-1">{t(question.trim() ? 'desktop-library-search-title' : libraryScope === 'public' ? 'desktop-public-library-title' : 'desktop-wiki-list-title')}</h1><p>{question.trim() ? t('desktop-library-search-body') : t(libraryScope === 'public' ? 'desktop-public-library-body' : 'desktop-library-body')}</p></div>
+              <div>
+                <h1 tabindex="-1">{t(question.trim() ? 'desktop-library-search-title' : libraryScope === 'public' ? 'desktop-public-library-title' : 'desktop-wiki-list-title')}</h1>
+                {#if question.trim() || libraryScope === 'public'}<p>{t(question.trim() ? 'desktop-library-search-body' : 'desktop-public-library-body')}</p>{/if}
+              </div>
             </header>
             {#if !question.trim()}
               <nav class="library-scope-tabs" aria-label={t('desktop-library-scope-label')}>
@@ -2740,31 +2780,32 @@
               {/if}
             {/if}
           {:else if destination === 'library' && selectedWiki}
-            {@const selectedWikiIssues = snapshot.sourceIssues.filter((issue) => issue.wikiId === selectedWiki.id)}
+            {@const wiki = selectedWiki}
+            {@const selectedWikiIssues = snapshot.sourceIssues.filter((issue) => issue.wikiId === wiki.id)}
             <header class="page-heading wiki-heading">
-              <div class="wiki-heading-copy"><nav class="breadcrumb" aria-label={t('desktop-library-title')}><button onclick={() => select('library')}>{t('desktop-library-title')}</button><span aria-hidden="true">/</span><span>{selectedWiki.name}</span></nav><div class="wiki-title-line"><h1 tabindex="-1">{selectedWiki.name}</h1><span>{t('desktop-wiki-detail-body', { published: selectedWiki.publishedCount })}</span></div></div>
+              <div class="wiki-heading-copy"><nav class="breadcrumb" aria-label={t('desktop-library-title')}><button onclick={() => select('library')}>{t('desktop-library-title')}</button><span aria-hidden="true">/</span><span>{wiki.name}</span></nav><div class="wiki-title-line"><h1 tabindex="-1">{wiki.name}</h1><span>{t('desktop-wiki-detail-body', { published: wiki.publishedCount })}</span></div></div>
             </header>
 
             <div class="wiki-detail-body">
-            {#if selectedWiki.memoryKind === 'project' && selectedWiki.projectMemoryHealth !== 'active'}
+            {#if wiki.memoryKind === 'project' && wiki.projectMemoryHealth !== 'active'}
               <section class="project-memory-strip" aria-labelledby="project-memory-alert-title">
                 <AlertTriangle size={18} aria-hidden="true" />
                 <div>
                   <strong id="project-memory-alert-title">{t('desktop-journey-knowledge-project-blocked')}</strong>
-                  <small>{t(`desktop-project-memory-health-${selectedWiki.projectMemoryHealth ?? 'invalid'}`)}</small>
+                  <small>{t(`desktop-project-memory-health-${wiki.projectMemoryHealth ?? 'invalid'}`)}</small>
                 </div>
-                <button class="text-action" onclick={() => showWikiDetails(selectedWiki.id)}>{t('desktop-details')}</button>
+                <button class="text-action" onclick={() => showWikiDetails(wiki.id)}>{t('desktop-details')}</button>
               </section>
             {/if}
 
-            {#if selectedWiki.okfCompatibility.kind === 'futureRestricted' || selectedWiki.okfCompatibility.kind === 'legacyV01' || selectedWiki.staleConceptCount > 0 || selectedWiki.outdatedVerificationCount > 0 || selectedWiki.metadataWarningCount > 0}
+            {#if wiki.okfCompatibility.kind === 'futureRestricted' || wiki.okfCompatibility.kind === 'legacyV01' || wiki.staleConceptCount > 0 || wiki.outdatedVerificationCount > 0 || wiki.metadataWarningCount > 0}
               <section class="wiki-assurance-strip" aria-label={t('desktop-okf-status-title')}>
-                <div><strong>{compatibilityLabel(selectedWiki)}</strong><small>{selectedWiki.okfCompatibility.kind === 'futureRestricted' ? t('desktop-okf-future-restriction-body') : selectedWiki.okfCompatibility.kind === 'legacyV01' ? t('desktop-okf-legacy-restriction-body') : t('desktop-okf-status-summary', { stale: selectedWiki.staleConceptCount, outdated: selectedWiki.outdatedVerificationCount, warnings: selectedWiki.metadataWarningCount })}</small></div>
-                <button class="text-action" onclick={() => showWikiDetails(selectedWiki.id)}>{t('desktop-details')}</button>
+                <div><strong>{compatibilityLabel(wiki)}</strong><small>{wiki.okfCompatibility.kind === 'futureRestricted' ? t('desktop-okf-future-restriction-body') : wiki.okfCompatibility.kind === 'legacyV01' ? t('desktop-okf-legacy-restriction-body') : t('desktop-okf-status-summary', { stale: wiki.staleConceptCount, outdated: wiki.outdatedVerificationCount, warnings: wiki.metadataWarningCount })}</small></div>
+                <button class="text-action" onclick={() => showWikiDetails(wiki.id)}>{t('desktop-details')}</button>
               </section>
             {/if}
 
-            {#if snapshot.guidedRepair?.wikiId === selectedWiki.id && snapshot.guidedRepair.status === 'prepared'}
+            {#if snapshot.guidedRepair?.wikiId === wiki.id && snapshot.guidedRepair.status === 'prepared'}
               <section class="journey-repair-preview" aria-label={t('knowledge-repair-review-action')}>
                 <div class="repair-preview"><ul>{#each snapshot.guidedRepair.files as file, fileIndex (fileIndex)}<li><code>{file.page.kind}</code><span>{repairChangeLabel(file.change)}</span></li>{/each}</ul><Checkbox label={t('knowledge-repair-confirm-warning')} bind:checked={guidedRepairConfirmed} /><button class="danger" onclick={() => executeRepair(snapshot!.guidedRepair!.wikiId)} disabled={!guidedRepairConfirmed}>{t('knowledge-repair-confirm-action')}</button></div>
               </section>
@@ -2772,83 +2813,51 @@
 
             <div class="content-tabs-bar wiki-content-sticky">
               <WikiJourney
-                wiki={selectedWiki}
-                scanState={wikiScanState(selectedWiki.id)}
-                reanalyzing={wikiReanalysisRunning(selectedWiki.id)}
+                wiki={wiki}
+                scanState={wikiScanState(wiki.id)}
+                reanalyzing={wikiReanalysisRunning(wiki.id)}
                 sourceIssueCount={selectedWikiIssues.length}
-                peerAccessCount={wikiPeers(selectedWiki.id).length}
-                repairAvailable={snapshot.wikiHealth?.attentionWikiId === selectedWiki.id}
+                peerAccessCount={wikiPeers(wiki.id).length}
+                repairAvailable={snapshot.wikiHealth?.attentionWikiId === wiki.id}
                 integrations={snapshot.integrations?.integrations ?? []}
                 applications={snapshot.applicationAccess}
                 integrationsBusy={integrationRequestId !== null}
                 {t}
                 onreview={() => openWikiTab('pending')}
-                ondetails={() => showWikiDetails(selectedWiki.id)}
-                onrepair={() => prepareRepair(selectedWiki.id)}
-                onaccess={() => editWiki(selectedWiki)}
-                onapps={() => editWikiAiApps(selectedWiki)}
+                ondetails={() => showWikiDetails(wiki.id)}
+                onrepair={() => prepareRepair(wiki.id)}
+                onaccess={() => editWiki(wiki)}
+                onapps={() => editWikiAiApps(wiki)}
               />
-              <div class="content-tabs content-filters" aria-label={t('desktop-wiki-content-filter-label')}>
-                {#each ['all', 'draft', 'reviewed', 'excluded'] as filter (filter)}
-                  <button aria-pressed={contentFilter === filter} class:active={contentFilter === filter} onclick={() => setContentFilter(filter as ContentFilter)}>{t(`desktop-wiki-content-filter-${filter}`)}<span>{contentFilterCounts[filter as ContentFilter]}</span></button>
-                {/each}
-              </div>
               <div class="content-tabs-actions">
                 {#if contentFilter === 'all'}<div class="view-switch" role="group" aria-label={t('desktop-view-mode')}><button class:active={knowledgeMode === 'document'} aria-pressed={knowledgeMode === 'document'} onclick={() => setKnowledgeMode('document')}>{t('desktop-list-view')}</button><button class:active={knowledgeMode === 'graph'} aria-pressed={knowledgeMode === 'graph'} onclick={() => setKnowledgeMode('graph')}>{t('knowledge-tab-graph')}</button></div>{/if}
-                {#if wikiCanUpdateFromFolder(selectedWiki)}
-                  <button class="wiki-update-action" onclick={() => scanWiki(selectedWiki.id)} disabled={wikiUpdateRunning(selectedWiki.id)} title={t('desktop-wiki-update-folder-help')}>
-                    {#if wikiUpdateRunning(selectedWiki.id)}<Spinner size="small" />{t('desktop-wiki-update-running')}{:else}<RefreshCw size={15} aria-hidden="true" />{t('desktop-wiki-update-folder')}{/if}
+                {#if wikiCanUpdateFromFolder(wiki)}
+                  <button class="wiki-update-action" onclick={() => scanWiki(wiki.id)} disabled={wikiUpdateRunning(wiki.id)} title={t('desktop-wiki-update-folder-help')}>
+                    {#if wikiUpdateRunning(wiki.id)}<Spinner size="small" />{t('desktop-wiki-update-running')}{:else}<RefreshCw size={15} aria-hidden="true" />{t('desktop-wiki-update-folder')}{/if}
                   </button>
                 {/if}
-                <button class="details-tab" onclick={() => showWikiDetails(selectedWiki.id)}>{t('desktop-details')}</button>
+                <button class="details-tab" onclick={() => showWikiDetails(wiki.id)}>{t('desktop-details')}</button>
               </div>
             </div>
 
             {#if wikiTab === 'content'}
-              {#if knowledgeMode === 'graph' && snapshot.knowledge?.wikiId === selectedWiki.id && snapshot.knowledge.status === 'ready'}
+              {#if knowledgeMode === 'graph' && snapshot.knowledge?.wikiId === wiki.id && snapshot.knowledge.status === 'ready'}
                 <section class="graph-view">{#key `${snapshot.knowledge.wikiId}:${snapshot.knowledge.version}`}<KnowledgeGraph bundle={snapshot.knowledge} onselect={selectGraphPage} {locale} />{/key}</section>
-              {:else if wikiLoadFailedId === selectedWiki.id || (snapshot.knowledge?.wikiId === selectedWiki.id && snapshot.knowledge.status === 'failed')}
-                <div class="file-empty wiki-load-failed" role="alert"><AlertTriangle size={28} aria-hidden="true" /><h2>{t('desktop-knowledge-load-failed-title')}</h2><p>{t('desktop-knowledge-load-failed-body')}</p><button class="secondary" onclick={() => openWiki(selectedWiki.id, wikiTab)}>{t('action-retry')}</button></div>
-              {:else if (snapshot.knowledge?.wikiId !== selectedWiki.id || snapshot.knowledge.status === 'updating') && filteredReviewOnlyItems.length === 0}
+              {:else if wikiLoadFailedId === wiki.id || (snapshot.knowledge?.wikiId === wiki.id && snapshot.knowledge.status === 'failed')}
+                <div class="file-empty wiki-load-failed" role="alert"><AlertTriangle size={28} aria-hidden="true" /><h2>{t('desktop-knowledge-load-failed-title')}</h2><p>{t('desktop-knowledge-load-failed-body')}</p><button class="secondary" onclick={() => openWiki(wiki.id, wikiTab)}>{t('action-retry')}</button></div>
+              {:else if (snapshot.knowledge?.wikiId !== wiki.id || snapshot.knowledge.status === 'updating') && filteredReviewOnlyItems.length === 0}
                 <section class="wiki-loading-surface" aria-busy="true">
                   <LoadingState label={t('knowledge-updating-title')} detail={t('desktop-knowledge-loading-body')} tone="ai" />
                   <LoadingSkeleton variant="workspace" rows={5} />
                 </section>
               {:else}
                 <div class="file-browser">
-                  <aside class="file-list" aria-label={t('knowledge-pages')}>
-                    {#if snapshot.knowledge?.wikiId === selectedWiki.id}
-                      {#each snapshot.knowledge.reservedPages as reserved (pageKey(reserved.page))}
-                        <button aria-label={`${reserved.page.kind === 'index' ? t('knowledge-index-title') : t('knowledge-recovery-history')}, ${reserved.page.kind}.md`} class:active={knowledgePageIsActive(reserved.page)} aria-current={knowledgePageIsActive(reserved.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => openKnowledgePage(reserved.page, reserved.fingerprint)}>
-                          {#if reserved.page.kind === 'index'}<WikiIcon size={17} />{:else}<History size={17} aria-hidden="true" />{/if}
-                          <span><strong>{reserved.page.kind === 'index' ? t('knowledge-index-title') : t('knowledge-recovery-history')}</strong><small>{reserved.page.kind}.md</small></span>
-                        </button>
-                      {/each}
-                      {#each filteredKnowledgeConcepts as concept (pageKey(concept.page))}
-                        {@const reviewState = conceptReviewState(concept)}
-                        <button aria-label={`${concept.title}, ${concept.page.kind === 'concept' ? concept.page.path : concept.description}, ${t(`desktop-review-state-${reviewState}`)}`} class:active={knowledgePageIsActive(concept.page)} aria-current={knowledgePageIsActive(concept.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => openKnowledgePage(concept.page, concept.fingerprint)}>
-                          {#if reviewState === 'reviewed'}<CheckCircle2 size={17} aria-hidden="true" />{:else}<FileText size={17} aria-hidden="true" />{/if}
-                          <span><strong>{concept.title}</strong><small>{concept.page.kind === 'concept' ? concept.page.path : concept.description}</small></span>
-                          <em class={`concept-review-state ${reviewState}`}>{t(`desktop-review-state-${reviewState}`)}</em>
-                        </button>
-                      {/each}
-                    {/if}
-                    {#each filteredReviewOnlyItems as review (`review-only:${review.conceptId}:${review.sourceRevision}`)}
-                      <button aria-label={`${review.sourceName}, ${t(review.excluded ? 'desktop-review-state-excluded' : 'desktop-review-state-draft')}`} onclick={() => openReview(review)}>
-                        <FileText size={17} aria-hidden="true" />
-                        <span><strong>{review.draft.title}</strong><small>{review.sourceName}</small></span>
-                        <em class={`concept-review-state ${review.excluded ? 'excluded' : 'draft'}`}>{t(review.excluded ? 'desktop-review-state-excluded' : 'desktop-review-state-draft')}</em>
-                      </button>
-                    {/each}
-                    {#if filteredKnowledgeConcepts.length === 0 && filteredReviewOnlyItems.length === 0}
-                      <div class="file-list-empty"><strong>{t(`desktop-wiki-content-filter-${contentFilter}-empty-title`)}</strong><small>{t(`desktop-wiki-content-filter-${contentFilter}-empty-body`)}</small></div>
-                    {/if}
-                  </aside>
+
                   <section class="file-preview" aria-live="polite">
-                    {#if pendingKnowledgePage?.wikiId === selectedWiki.id}
+                    {#if pendingKnowledgePage?.wikiId === wiki.id}
                       <LoadingState label={t('knowledge-page-loading')} detail={t('desktop-knowledge-page-loading-body')} compact />
                       <LoadingSkeleton variant="page" />
-                    {:else if snapshot.knowledgePage?.wikiId === selectedWiki.id && snapshot.knowledgePage.status === 'ready'}
+                    {:else if snapshot.knowledgePage?.wikiId === wiki.id && snapshot.knowledgePage.status === 'ready'}
                       {@const concept = snapshot.knowledgePage.concept}
                       {@const reviewState = concept ? conceptReviewState(concept) : null}
                       <header><p class="section-label">{reviewState ? t(`desktop-review-state-${reviewState}`) : t('desktop-verified-page')}</p><h2>{snapshot.knowledgePage.title}</h2>{#if concept && reviewState !== 'reviewed'}<button class="primary compact-review-action" onclick={() => openConceptReview(concept.conceptId)}>{t(reviewState === 'excluded' ? 'review-review-excluded' : 'review-open-draft')}</button>{/if}</header>
@@ -2863,10 +2872,10 @@
                           <div><span>{t('desktop-concept-type')}</span><strong>{concept.conceptType}</strong></div>
                           {#if concept.generatedBy}<div><span>{t('desktop-concept-generated-by')}</span><strong>{concept.generatedBy}</strong></div>{/if}
                           {#if concept.sources.length > 0}<details><summary>{t('desktop-concept-sources', { count: concept.sources.length })}</summary><ul>{#each concept.sources as source, sourceIndex (source.id ?? source.resource ?? sourceIndex)}<li><strong>{source.title ?? source.id ?? t('desktop-concept-source-unnamed')}</strong>{#if source.author}<small>{source.author}</small>{/if}{#if source.lastModified}<small>{source.lastModified}</small>{/if}</li>{/each}</ul></details>{/if}
-                          {#if canVerifyConcept(selectedWiki, concept)}<button class="secondary concept-verify" onclick={() => verifyConcept(selectedWiki, concept)} disabled={actionBusy}>{t('desktop-concept-verify')}</button>{/if}
+                          {#if canVerifyConcept(wiki, concept)}<button class="secondary concept-verify" onclick={() => verifyConcept(wiki, concept)} disabled={actionBusy}>{t('desktop-concept-verify')}</button>{/if}
                         </aside>
                       {/if}
-                    {:else if snapshot.knowledgePage?.wikiId === selectedWiki.id && snapshot.knowledgePage.status === 'failed'}
+                    {:else if snapshot.knowledgePage?.wikiId === wiki.id && snapshot.knowledgePage.status === 'failed'}
                       <div class="file-empty" role="status"><AlertTriangle size={28} aria-hidden="true" /><h2>{t('knowledge-page-load-failed-title')}</h2><p>{t('knowledge-page-load-failed')}</p></div>
                     {:else}<div class="file-empty"><WikiIcon size={28} /><h2>{t('knowledge-select-page')}</h2><p>{t('desktop-verified-only')}</p></div>{/if}
                   </section>
@@ -2878,19 +2887,27 @@
               </section>
             {/if}
             </div>
+          {:else if destination === 'review'}
+            <header class="page-heading"><div><h1 tabindex="-1">{t('desktop-review-queue-title')}</h1><p>{t('desktop-review-queue-body')}</p></div></header>
+            <div class="review-queue">
+              {#each orderedWikis as wiki (wiki.id)}
+                {@const pending = snapshot.reviews.filter((review) => review.wikiId === wiki.id && !review.excluded)}
+                {#if pending.length > 0}
+                  <section aria-labelledby={`queue-${wiki.id}`}>
+                    <h2 id={`queue-${wiki.id}`}><WikiIcon size={20} />{wiki.name}<small>{pending.length}</small></h2>
+                    <div class="pending-list">
+                      {#each pending as review (`${review.conceptId}:${review.sourceRevision}`)}
+                        <button onclick={() => openReview(review)}><FileText size={17} aria-hidden="true" /><span><strong>{review.draft.title}</strong><small>{review.sourceName}</small></span><span>{t('review-revision', { revision: review.sourceRevision })}</span></button>
+                      {/each}
+                    </div>
+                  </section>
+                {/if}
+              {/each}
+              {#if !snapshot.reviews.some((review) => !review.excluded)}<div class="table-empty"><CheckCircle2 size={28} aria-hidden="true" /><strong>{t('review-empty-title')}</strong><p>{t('review-empty-body')}</p></div>{/if}
+            </div>
           {:else if destination === 'settings'}
             <div class="settings-layout">
-              <nav class="settings-sidebar" aria-label={t('desktop-nav-system')}>
-                {#each settingsSections as section (section.id)}
-                  {@const status = settingsStatuses.find((candidate) => candidate.id === section.id)}
-                  <a href={`#settings/${section.id}`} class:active={settingsSection === section.id} aria-current={settingsSection === section.id ? 'page' : undefined} onclick={(event) => openSettingsSection(event, section.id)}>
-                    <span class="settings-nav-icon" aria-hidden="true">{#if section.id === 'general'}<SlidersHorizontal size={16} />{:else if section.id === 'connections'}<RadioTower size={16} />{:else}<Bot size={16} />{/if}</span>
-                    <span class="settings-nav-label">{t(section.labelId)}</span>
-                    {#if status}<small><span class={`settings-status-dot ${status.tone}`} aria-hidden="true"></span>{status.detail}</small>{/if}
-                    {#if section.id === 'apps' && pendingApprovalCount(snapshot) > 0}<b>{pendingApprovalCount(snapshot) > 9 ? '9+' : pendingApprovalCount(snapshot)}</b>{/if}
-                  </a>
-                {/each}
-              </nav>
+
               <div class="settings-page">
                 {#if settingsSection === 'general'}
                   {@const generalStatus = settingsStatuses.find((status) => status.id === 'general')}
@@ -3034,7 +3051,75 @@
           {#if actionMessage}<p class={`action-message ${actionMessageTone()}`} aria-live="polite">{#if actionMessageTone() === 'progress'}<Spinner size="small" />{/if}<span>{#if actionMessageTone() === 'progress'}<ShimmerText text={actionMessage} />{:else}{actionMessage}{/if}</span></p>{/if}
         </div>
       {/key}
-    </section>
+  {/if}
+{/snippet}
+
+<svelte:head><meta name="theme-color" content="#101012" /></svelte:head>
+
+{#if snapshot?.phase === 'failed'}
+  <main class="onboarding startup startup-failed" role="alert">
+    <div class="onboarding-mark">A</div>
+    <p class="eyebrow">AirWiki</p>
+    <h1>{t('desktop-startup-failed-title')}</h1>
+    <p class="lede">{t('desktop-startup-failed-body')}</p>
+    <button class="primary" onclick={() => quitCompletely()}>{t('desktop-quit')}</button>
+  </main>
+{:else if !snapshot || snapshot.phase !== 'ready' || !snapshot.preferences}
+  <main class="onboarding startup" aria-busy="true">
+    <div class="onboarding-mark">A</div>
+    <p class="eyebrow">AirWiki</p>
+    <h1><ShimmerText text={t('status-working')} /></h1>
+    <p class="lede" aria-live="polite">{t(runtimeMessageId)}</p>
+  </main>
+{:else if snapshot.preferences.completedOnboardingVersion == null}
+  <OnboardingFlow {snapshot} bind:locale bind:modelLicensesConfirmed {actionBusy} {actionMessage} onpickfolder={pickOnboardingFolder} oncreatewiki={createOnboardingWiki} onprepare={prepareLocalModel} onopenmodelsettings={finishOnboardingAndOpenModelSettings} onfinish={() => savePreferences(true)} />
+{:else}
+<div class="shell drive-shell" inert={activeDialogId !== null} aria-hidden={activeDialogId !== null ? 'true' : undefined}>
+  <main class="drive-main">
+    {#if destination === 'settings'}
+      <header class="settings-top-bar">
+        <button class="sidebar-toggle" aria-label={t(sidebarCollapsed ? 'desktop-sidebar-show' : 'desktop-sidebar-hide')} title={t(sidebarCollapsed ? 'desktop-sidebar-show' : 'desktop-sidebar-hide')} aria-expanded={!sidebarCollapsed} onclick={() => { sidebarCollapsed = !sidebarCollapsed; }}><PanelLeft size={18} aria-hidden="true" /></button>
+        <button class="settings-back" onclick={requestSettingsBack}><ArrowLeft size={18} aria-hidden="true" />{t('action-back')}</button>
+        <h1 tabindex="-1">{t(settingsSections.find((section) => section.id === settingsSection)?.labelId ?? 'desktop-settings-general')}</h1>
+      </header>
+    {:else}
+      <header class="top-bar">
+        <div class="workspace-brand">
+          <button class="sidebar-toggle" aria-label={t(sidebarCollapsed ? 'desktop-sidebar-show' : 'desktop-sidebar-hide')} title={t(sidebarCollapsed ? 'desktop-sidebar-show' : 'desktop-sidebar-hide')} aria-expanded={!sidebarCollapsed} onclick={() => { sidebarCollapsed = !sidebarCollapsed; }}><PanelLeft size={18} aria-hidden="true" /></button>
+        <button class="top-brand" onclick={() => select('library')} aria-label="AirWiki"><img class="top-brand-logo" src={airwikiMark} alt="" aria-hidden="true" /><span>AirWiki</span></button>
+        </div>
+        <GlobalSearch
+          {question}
+          {includePublic}
+          busy={searchBusy}
+          ready={snapshot.model?.active === true}
+          platform={snapshot.platform}
+          privateScopeLabel={privateSearchScope}
+          {t}
+          onquestion={updateSearchQuestion}
+          oncompositionstart={beginSearchComposition}
+          oncompositionend={endSearchComposition}
+          onpublic={updatePublicSearch}
+          onsearch={submitGlobalSearch}
+          onopen={openGlobalSearch}
+          onopenmodelsettings={() => openSettings('general')}
+        />
+
+      </header>
+    {/if}
+
+    {#if approvalNotice}
+      <aside class="approval-notice" role="status" aria-live="polite">
+        <div><strong>{t('desktop-approval-notice-title', { count: approvalNotice.count })}</strong><p>{t('desktop-approval-notice-body')}</p></div>
+        <div class="row-actions"><button class="primary" onclick={reviewPendingRequests}>{t('desktop-approval-notice-review')}</button><button class="text-action" onclick={() => { approvalNotice = null; }}>{t('desktop-approval-notice-dismiss')}</button></div>
+      </aside>
+    {/if}
+
+    {#if destination === 'library' && sharedBrowseOpen}
+      <SharedWikiViewer layout={workspaceLayout} source={sharedBrowseSource} sourceName={sharedBrowseSourceName} sourcePlatform={sharedBrowsePlatform} sourceLabel={sharedBrowseSource === 'public' ? t('desktop-public-network') : platformLabel(sharedBrowsePlatform)} browse={sharedBrowseLoading ? null : sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse : snapshot.publicBrowse} loading={sharedBrowseLoading} structureLoading={sharedBrowseStructureLoading} pageLoading={sharedBrowsePageLoading} initialConceptId={sharedBrowseInitialConceptId} {t} metadata={publicConceptMetadata} onback={closeSharedBrowse} onopenpage={openSharedWikiPage} onblock={sharedBrowseSource === 'public' ? (publisherId) => changePublisherBlock(publisherId, true) : null} />
+    {:else}
+      {@render workspaceLayout(localNavigation, localContent)}
+    {/if}
   </main>
 </div>
 

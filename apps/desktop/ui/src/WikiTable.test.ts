@@ -37,11 +37,9 @@ describe('Wiki library shelf', () => {
     expect(screen.getByRole('button', { name: /Atlas 2 de 2 revisados.*Solo tú.*Lista para usar/ })).toBeInTheDocument();
     expect(container.querySelector('.wiki-table-head')).toBeNull();
     expect(Array.from(container.querySelectorAll('.wiki-row-summary > *'), (item) => item.textContent)).toEqual([
-      '2 de 2 revisados · 0 borradores · 0 excluidos', '3 elementos detectados'
+      '2 conceptos revisados'
     ]);
-    expect(Array.from(container.querySelectorAll('.wiki-row-exposure-text > span'), (item) => item.textContent)).toEqual([
-      'Local', 'LAN Desactivada', 'Internet Desactivada'
-    ]);
+    expect(container.querySelector('.wiki-row-exposure')).toHaveTextContent('Solo tú');
     expect(screen.queryByText('Abrir Wiki')).not.toBeInTheDocument();
   });
 
@@ -54,11 +52,8 @@ describe('Wiki library shelf', () => {
       maintenanceRequired: true
     });
 
-    const exposure = Array.from(container.querySelectorAll('.wiki-row-exposure-text > span'));
-    expect(exposure[1]).toHaveClass('active');
-    expect(exposure[1]).toHaveTextContent('LAN Habilitada');
-    expect(exposure[2]).toHaveClass('active');
-    expect(exposure[2]).toHaveTextContent('Internet Pública');
+    expect(container.querySelector('.wiki-row-exposure')).toHaveTextContent('Pública en internet');
+    expect(container.querySelector('.wiki-row-exposure')).toHaveTextContent(t('desktop-share-public'));
     expect(container.querySelector('.wiki-row-status.attention')).toHaveTextContent('Necesita atención');
     expect(container.querySelector('.wiki-row-status.attention')).toHaveTextContent('El contenido publicado necesita una comprobación');
   });

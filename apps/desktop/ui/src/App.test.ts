@@ -234,7 +234,7 @@ describe('AirWiki wiki workspace', () => {
     tauriListeners.clear();
   });
 
-  it('renders one wiki workspace with global search and no redundant sidebar', async () => {
+  it('renders global search and one contextual navigation column', async () => {
     render(App);
 
     expect((await screen.findAllByText('Atlas')).length).toBeGreaterThan(0);
@@ -246,7 +246,63 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('button', { name: 'Nueva wiki' })).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Tus wikis' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Atlas 2 de 2 revisados/ })).toBeInTheDocument();
-    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Navegación' })).toBeInTheDocument();
+  });
+
+  it('opens the global review queue without exploring public wikis and restores it from Settings', async () => {
+    window.location.hash = '#review';
+    render(App);
+    expect(await screen.findByRole('heading', { name: 'Por revisar' })).toBeInTheDocument();
+    expect(explorePublicWikis).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: /^Configuración\./ }));
+    expect(await screen.findByRole('heading', { name: 'General' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+    expect(await screen.findByRole('heading', { name: 'Por revisar' })).toHaveFocus();
+    expect(window.location.hash).toBe('#review');
+  });
+
+  it('keeps edited settings when the sidebar requests review navigation', async () => {
+    render(App);
+    await openSettingsSection('general');
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Al cerrar' }), { target: { value: 'hide_to_tray' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Por revisar' }));
+    const dialog = await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' });
+    expect(window.location.hash).toBe('#settings/general');
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Continuar editando' }));
+    expect(screen.getByRole('combobox', { name: 'Al cerrar' })).toHaveValue('hide_to_tray');
+    expect(updatePreferences).not.toHaveBeenCalled();
+  });
+
+  it('does not resume a pending search when the model becomes ready in the review queue', async () => {
+    render(App);
+    const search = within(await screen.findByRole('search')).getByRole('textbox');
+    vi.useFakeTimers();
+    try {
+      await fireEvent.input(search, { target: { value: 'pending local query' } });
+      await fireEvent.click(screen.getByRole('button', { name: 'Por revisar' }));
+      activateLocalSearch();
+      snapshot = { ...snapshot, sequence: snapshot.sequence + 1 };
+      await act(() => snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: null, kind: 'stateChanged', snapshot }));
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      expect(window.location.hash).toBe('#review');
+      expect(searchKnowledge).not.toHaveBeenCalled();
+      expect(explorePublicWikis).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recovers sidebar controls after Enter enters reading mode', async () => {
+    render(App);
+    const splitter = await screen.findByRole('separator', { name: 'Ancho de la barra lateral' });
+    await fireEvent.keyDown(splitter, { key: 'Enter' });
+    const restore = screen.getByRole('button', { name: 'Mostrar barra lateral' });
+    await waitFor(() => expect(restore).toHaveFocus());
+    expect(screen.queryByRole('complementary', { name: 'Navegación' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Tus wikis' })).toBeInTheDocument();
+    await fireEvent.click(restore);
+    expect(screen.getByRole('complementary', { name: 'Navegación' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ocultar barra lateral' })).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('uses the same attention classification for the Wiki filters and rows', async () => {
@@ -511,7 +567,7 @@ describe('AirWiki wiki workspace', () => {
 
     const settings = await screen.findByRole('button', { name: /Conocimiento local: Configura la búsqueda local.*Conexiones: Solo este dispositivo.*Apps de IA: Disponible/ });
     expect(settings).toBeInTheDocument();
-    expect(container.querySelectorAll('.system-status-button .status-segment')).toHaveLength(3);
+    expect(container.querySelector('.system-status-button')).toHaveTextContent('Configuración');
     expect(screen.queryByRole('button', { name: /MCP:/ })).not.toBeInTheDocument();
   });
 
@@ -3034,7 +3090,7 @@ describe('AirWiki wiki workspace', () => {
   });
 
   it('redirects previous top-level routes without retaining the old UI', async () => {
-    for (const route of ['#library', '#review', '#home', '#shared/public']) {
+    for (const route of ['#library', '#home', '#shared/public']) {
       window.location.hash = route;
       render(App);
       expect(await screen.findByRole('heading', { name: 'Tus wikis' })).toBeInTheDocument();

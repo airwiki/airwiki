@@ -135,10 +135,29 @@ reading order. Keep reading widths comfortable, support continuous window
 resizing, and avoid nested scroll regions. Never put the only critical action at
 the bottom edge of a macOS window.
 
+The normal workspace has one contextual sidebar and one reading region. Library
+and To review are global destinations. The Wiki picker and concept index share
+the sidebar; Settings replaces that context with its section navigation. Local
+and remote reading use the same frame, while each keeps its existing data and
+permission checks. Creation and Settings remain reachable at the sidebar foot.
+
+The sidebar starts at 224 logical pixels and can be resized between 200 and a
+viewport-dependent maximum of 360. Its focusable separator supports arrow keys,
+Home and End. Enter hides it and returns focus to the visible restore control.
+Hiding the sidebar preserves its index DOM and scroll position; it does not
+change the selected page. Geometry is currently session state, pending the
+planned local persistence contract.
+
 The concept index has its own bounded scroll region beside the article at the
 supported 1024-pixel minimum width. A long index must never push the selected
-article below the entire list. At enlarged scales that require a single column,
-bound the index height and keep the article reachable with one reading scroll.
+article below the entire list. The article retains one reading scroll surface.
+The index may be hidden for reading and recovered from the persistent header.
+
+Library rows prioritize name, available description, reviewed and pending
+concept counts, and real network access. Show attention and work in progress
+when present. Do not repeat healthy technical states on every row. Settings
+uses a named control and textual service warnings from the shared system-status
+model; it must not introduce an independent interpretation of service health.
 
 ## Controls and targets
 

@@ -7,7 +7,7 @@
   import List from '@lucide/svelte/icons/list';
   import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
   import Network from '@lucide/svelte/icons/network';
-  import { tick } from 'svelte';
+  import { tick, type Snippet } from 'svelte';
   import type {
     NearbyBrowseSummary,
     PublicBrowseSummary,
@@ -25,6 +25,7 @@
 
   type SharedWikiSource = 'nearby' | 'public';
 
+  export let layout: Snippet<[Snippet, Snippet]> | null = null;
   export let source: SharedWikiSource;
   export let sourceName: string;
   export let sourcePlatform: HostPlatform | null = null;
@@ -177,6 +178,32 @@
   }
 </script>
 
+{#snippet navigation()}
+  {#if browse && !loading && !unavailable()}
+    {#if browse.workspaceSupported}
+          <aside class="file-list" aria-label={t('knowledge-pages')}>
+            {#each descriptors as descriptor (pageKey(descriptor.page))}
+              <button class:active={selectedDescriptor && samePage(selectedDescriptor.page, descriptor.page)} aria-current={selectedDescriptor && samePage(selectedDescriptor.page, descriptor.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage(descriptor)} disabled={pageLoading}>
+                {#if descriptor.page.kind === 'index'}<WikiIcon size={17} />{:else if descriptor.page.kind === 'log'}<History size={17} aria-hidden="true" />{:else}<FileText size={17} aria-hidden="true" />{/if}
+                <span><strong>{pageTitle(descriptor)}</strong><small>{descriptor.logicalPath}</small></span>
+              </button>
+            {:else}
+              <div class="shared-file-empty"><WikiIcon size={20} /><span>{t('desktop-shared-empty-title')}</span></div>
+            {/each}
+            {#if structureLoading}<LoadingState label={t('desktop-shared-loading-structure')} compact />{/if}
+            {#if browse.appendFailed}<div class="shared-more-warning" role="status"><AlertTriangle size={15} aria-hidden="true" /><span>{t('desktop-shared-structure-failed')}</span></div>{/if}
+          </aside>
+    {:else}
+        <aside class="file-list" aria-label={t('knowledge-pages')}>
+          {#each browse.concepts as concept (`${concept.conceptId}:${concept.sourceRevision}`)}
+            <button class:active={selectedConcept?.conceptId === concept.conceptId} onmousedown={focusChoiceWithoutScroll} onclick={() => selectedPage = { kind: 'concept', conceptId: concept.conceptId }}><FileText size={17} aria-hidden="true" /><span><strong>{concept.title}</strong><small>{concept.conceptType} · {concept.language}</small></span></button>
+          {/each}
+        </aside>
+    {/if}
+  {/if}
+{/snippet}
+
+{#snippet content()}
 <section class="shared-wiki-viewer" aria-busy={loading || structureLoading || pageLoading}>
   {#if loading}
     <button class="shared-wiki-back" onclick={onback}>
@@ -245,18 +272,7 @@
         </section>
       {:else}
         <div class="file-browser shared-file-browser">
-          <aside class="file-list" aria-label={t('knowledge-pages')}>
-            {#each descriptors as descriptor (pageKey(descriptor.page))}
-              <button class:active={selectedDescriptor && samePage(selectedDescriptor.page, descriptor.page)} aria-current={selectedDescriptor && samePage(selectedDescriptor.page, descriptor.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage(descriptor)} disabled={pageLoading}>
-                {#if descriptor.page.kind === 'index'}<WikiIcon size={17} />{:else if descriptor.page.kind === 'log'}<History size={17} aria-hidden="true" />{:else}<FileText size={17} aria-hidden="true" />{/if}
-                <span><strong>{pageTitle(descriptor)}</strong><small>{descriptor.logicalPath}</small></span>
-              </button>
-            {:else}
-              <div class="shared-file-empty"><WikiIcon size={20} /><span>{t('desktop-shared-empty-title')}</span></div>
-            {/each}
-            {#if structureLoading}<LoadingState label={t('desktop-shared-loading-structure')} compact />{/if}
-            {#if browse.appendFailed}<div class="shared-more-warning" role="status"><AlertTriangle size={15} aria-hidden="true" /><span>{t('desktop-shared-structure-failed')}</span></div>{/if}
-          </aside>
+
           <section class="file-preview shared-file-preview" aria-live="polite">
             {#if pageLoading}
               <LoadingState label={t('desktop-shared-loading-page')} detail={selectedDescriptor?.logicalPath ?? null} compact />
@@ -291,11 +307,7 @@
     {:else}
       <div class="shared-legacy" role="status"><AlertTriangle size={18} aria-hidden="true" /><div><strong>{t('desktop-shared-legacy-title')}</strong><p>{t('desktop-shared-legacy-body')}</p></div></div>
       <div class="file-browser shared-file-browser legacy">
-        <aside class="file-list" aria-label={t('knowledge-pages')}>
-          {#each browse.concepts as concept (`${concept.conceptId}:${concept.sourceRevision}`)}
-            <button class:active={selectedConcept?.conceptId === concept.conceptId} onmousedown={focusChoiceWithoutScroll} onclick={() => selectedPage = { kind: 'concept', conceptId: concept.conceptId }}><FileText size={17} aria-hidden="true" /><span><strong>{concept.title}</strong><small>{concept.conceptType} · {concept.language}</small></span></button>
-          {/each}
-        </aside>
+
         <section class="file-preview shared-file-preview">
           {#if selectedConcept}<header><p class="section-label">{t('desktop-shared-summary-label')}</p><h2>{selectedConcept.title}</h2></header><p>{selectedConcept.summary}</p>{:else}<div class="file-empty"><WikiIcon size={28} /><h2>{t('knowledge-select-page')}</h2></div>{/if}
         </section>
@@ -306,3 +318,15 @@
     <div class="shared-wiki-state warning" role="alert"><AlertTriangle size={20} aria-hidden="true" /><div><strong>{t('desktop-public-invalid-content')}</strong><p>{t('desktop-shared-unavailable-body')}</p></div></div>
   {/if}
 </section>
+
+{/snippet}
+
+{#if layout}
+  {@render layout(navigation, content)}
+{:else}
+  <div class="shared-standalone">{@render navigation()}{@render content()}</div>
+{/if}
+
+<style>
+  .shared-standalone { display: grid; grid-template-columns: minmax(200px, 28%) minmax(0, 1fr); }
+</style>

@@ -271,6 +271,34 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(within(dialog).getByRole('button', { name: 'Continuar editando' }));
     expect(screen.getByRole('combobox', { name: 'Al cerrar' })).toHaveValue('hide_to_tray');
     expect(updatePreferences).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Por revisar' }));
+    await fireEvent.click(within(await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' })).getByRole('button', { name: 'Descartar cambios' }));
+    expect(await screen.findByRole('heading', { name: 'Por revisar' })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#review');
+  });
+
+  it('continues the search shortcut after the person discards settings edits', async () => {
+    render(App);
+    await openSettingsSection('general');
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Al cerrar' }), { target: { value: 'hide_to_tray' } });
+    await fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    const dialog = await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' });
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Descartar cambios' }));
+    const input = within(await screen.findByRole('search')).getByRole('textbox');
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(window.location.hash).toBe('#library');
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
+  it('opens the requested wiki source dialog after discarding settings edits', async () => {
+    render(App);
+    await openSettingsSection('general');
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Al cerrar' }), { target: { value: 'hide_to_tray' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Nueva wiki' }));
+    await fireEvent.click(within(await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' })).getByRole('button', { name: 'Descartar cambios' }));
+    expect(await screen.findByRole('dialog', { name: '¿De dónde viene esta wiki?' })).toBeInTheDocument();
+    expect(pickWikiFolder).not.toHaveBeenCalled();
+    expect(updatePreferences).not.toHaveBeenCalled();
   });
 
   it('does not resume a pending search when the model becomes ready in the review queue', async () => {

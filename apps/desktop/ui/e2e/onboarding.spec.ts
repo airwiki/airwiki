@@ -601,6 +601,19 @@ async function importOkfWiki(): Promise<void> {
   expect(workspaceLayout.stickyTop).toBeGreaterThanOrEqual(workspaceLayout.topBarBottom);
   expect(workspaceLayout.stickyTop).toBeLessThanOrEqual(workspaceLayout.topBarBottom + 2);
   expect(workspaceLayout.browserHeight).toBeGreaterThan(0);
+  const beforeSettings = await browser.execute(() => ({
+    page: document.querySelector('.drive-page')?.scrollTop ?? 0,
+    index: document.querySelector('.file-list')?.scrollTop ?? 0,
+  }));
+  await $('.system-status-button').click();
+  await $('.settings-layout').waitForDisplayed();
+  await $('.settings-back').click();
+  await expect($('.file-preview h2')).toHaveText('Verified architecture reference');
+  const afterSettings = await browser.execute(() => ({
+    page: document.querySelector('.drive-page')?.scrollTop ?? 0,
+    index: document.querySelector('.file-list')?.scrollTop ?? 0,
+  }));
+  expect(afterSettings).toEqual(beforeSettings);
   const contentToolbarGeometry = await browser.execute(() => {
     const sticky = document.querySelector<HTMLElement>('.wiki-content-sticky');
     const summary = sticky?.querySelector<HTMLElement>('.wiki-journey-compact');

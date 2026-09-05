@@ -9,7 +9,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
   To review destination groups current proposals by Wiki using the existing
   evidence checks. Library rows show content and access more simply; Settings
   now uses a named control with textual warnings. A pending search no longer
-  interrupts the review queue when the local model becomes available.
+  interrupts the review queue when the local model becomes available. Returning
+  from Settings preserves reading and index positions, including remote page
+  selection. Discarding edited preferences continues the requested navigation.
 
 - Began the reading-focused desktop redesign: the linked-W symbol identifies
   local and remote Wikis, and a long concept index no longer pushes the reader

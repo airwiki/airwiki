@@ -41,8 +41,8 @@
   export let onopenpage: (page: RemoteWikiPageInput, expectedFingerprint: string) => void;
   export let onblock: ((publisherId: string) => void) | null = null;
 
-  let selectedPage: RemoteWikiPageInput | null = null;
-  let viewMode: 'list' | 'graph' = 'list';
+  export let selectedPage: RemoteWikiPageInput | null = null;
+  export let viewMode: 'list' | 'graph' = 'list';
   let headingElement: HTMLHeadingElement | null = null;
   let renderedWikiIdentity: string | null = null;
 
@@ -88,9 +88,14 @@
 
   function synchronizeWikiSelection(wikiIdentity: string | null) {
     if (wikiIdentity === renderedWikiIdentity) return;
+    const replacingWiki = renderedWikiIdentity !== null;
     renderedWikiIdentity = wikiIdentity;
-    selectedPage = initialConceptId ? { kind: 'concept', conceptId: initialConceptId } : null;
-    viewMode = 'list';
+    // App can restore this viewer after Settings. A restored selection belongs
+    // to the same live browse; switching Wiki identity still resets it.
+    if (replacingWiki || selectedPage === null) {
+      selectedPage = initialConceptId ? { kind: 'concept', conceptId: initialConceptId } : null;
+    }
+    if (replacingWiki) viewMode = 'list';
   }
 
   function descriptorForInitialConcept(

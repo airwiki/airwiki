@@ -53,6 +53,12 @@
   type LibraryFilter = 'all' | 'attention' | 'private' | 'shared';
   type ContentFilter = 'all' | 'draft' | 'reviewed' | 'excluded';
   type Peer = AppSnapshot['peers'][number];
+  type SettingsLeaveIntent =
+    | { kind: 'destination'; destination: 'library' | 'review' }
+    | { kind: 'wiki'; wikiId: string; tab: 'content' | 'pending' }
+    | { kind: 'newWiki' }
+    | { kind: 'search'; focus: boolean }
+    | { kind: 'route'; hash: string };
 
   const settingsSections = [
     { id: 'general', labelId: 'desktop-settings-general' },
@@ -66,8 +72,9 @@
   let sidebarWidth = 224;
   let settingsSection: SettingsSection = 'general';
   let lastSettingsSection: SettingsSection = 'general';
-  let settingsReturnContext: { hash: string; scrollTop: number } | null = null;
+  let settingsReturnContext: { hash: string; scrollTop: number; indexScrollTop: number } | null = null;
   let settingsLeavePending = false;
+  let settingsLeaveIntent: SettingsLeaveIntent | null = null;
   let searchFilter: SearchFilter = 'all';
   let libraryScope: LibraryScope = 'device';
   let libraryFilter: LibraryFilter = 'all';
@@ -146,6 +153,8 @@
   let sharedBrowseSourceName = '';
   let sharedBrowsePlatform: Peer['platform'] = null;
   let sharedBrowseInitialConceptId: string | null = null;
+  let sharedSelectedPage: RemoteWikiPageInput | null = null;
+  let sharedViewMode: 'list' | 'graph' = 'list';
   let sharedBrowseReturnScrollTop: number | null = null;
   let sharedBrowseReturnHash = '#library';
   let publicCatalogRequestId: string | null = null;
@@ -291,6 +300,17 @@
     return { value, label };
   }
 
+  function currentPageIndex(): HTMLElement | null {
+    return mainScrollRegion?.closest('.drive-main')?.querySelector<HTMLElement>('.workspace-navigation .file-list') ?? null;
+  }
+
+  function restoreIndexScroll(top: number) {
+    void tick().then(() => {
+      const index = currentPageIndex();
+      if (index) index.scrollTop = Math.max(0, top);
+    });
+  }
+
   function scrollMainTo(top: number) {
     const target = Math.max(0, top);
     void tick().then(() => {
@@ -408,6 +428,7 @@
         break;
       case 'settings-discard':
         settingsLeavePending = false;
+        settingsLeaveIntent = null;
         break;
       case null:
         confirmUpdateInstall = false;
@@ -655,13 +676,14 @@
         destination = 'settings';
         settingsSection = requestedSettings;
         lastSettingsSection = requestedSettings;
-        settingsReturnContext ??= { hash: '#library', scrollTop: 0 };
+        settingsReturnContext ??= { hash: '#library', scrollTop: 0, indexScrollTop: 0 };
         const canonical = `#settings/${requestedSettings}`;
         if (window.location.hash !== canonical) window.history.replaceState(null, '', canonical);
         scrollMainTo(0);
         return;
       }
       if (destination === 'settings' && preferencesDirty) {
+        settingsLeaveIntent = { kind: 'route', hash: window.location.hash };
         window.history.pushState(null, '', `#settings/${settingsSection}`);
         settingsLeavePending = true;
         return;
@@ -702,6 +724,7 @@
             : '#library';
       if (window.location.hash !== canonical) window.history.replaceState(null, '', canonical);
       scrollMainTo(sharedReturnScrollTop ?? settingsReturnContext?.scrollTop ?? 0);
+      if (settingsReturnContext) restoreIndexScroll(settingsReturnContext.indexScrollTop);
       if (libraryScope === 'public' && snapshot && snapshot.publicCatalog === null) {
         void refreshPublicCatalog();
       }
@@ -749,12 +772,7 @@
         select('library');
       } else if (command && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        if (destination === 'settings' && preferencesDirty) {
-          settingsLeavePending = true;
-        } else {
-          openGlobalSearch();
-          requestAnimationFrame(() => document.querySelector<HTMLInputElement>('#global-search')?.focus());
-        }
+        openGlobalSearch(true);
       } else if (command && event.key === ',') {
         event.preventDefault();
         openSettings(lastSettingsSection);
@@ -911,7 +929,7 @@
     actionMessage = '';
     if (next === 'settings') openSettings(lastSettingsSection);
     else {
-      if (!canLeaveSettings()) return;
+      if (!canLeaveSettings({ kind: 'destination', destination: next })) return;
       selectedWikiId = null;
       dismissSharedBrowse();
       destination = next;
@@ -962,7 +980,8 @@
     if (destination !== 'settings') {
       settingsReturnContext = {
         hash: window.location.hash || '#library',
-        scrollTop: mainScrollRegion?.scrollTop ?? 0
+        scrollTop: mainScrollRegion?.scrollTop ?? 0,
+        indexScrollTop: currentPageIndex()?.scrollTop ?? 0
       };
     }
     destination = 'settings';
@@ -970,8 +989,9 @@
     void refreshAutostartState();
   }
 
-  function canLeaveSettings(): boolean {
+  function canLeaveSettings(intent: SettingsLeaveIntent): boolean {
     if (destination !== 'settings' || !preferencesDirty) return true;
+    settingsLeaveIntent = intent;
     settingsLeavePending = true;
     return false;
   }
@@ -981,34 +1001,44 @@
       newWikiMenuOpen = false;
       return;
     }
-    if (!canLeaveSettings()) return;
+    if (!canLeaveSettings({ kind: 'newWiki' })) return;
     newWikiMenuOpen = true;
     void tick().then(() => focusDialog('new-wiki-source'));
   }
 
   function restoreLibraryContext() {
-    const context = settingsReturnContext ?? { hash: '#library', scrollTop: 0 };
+    const context = settingsReturnContext ?? { hash: '#library', scrollTop: 0, indexScrollTop: 0 };
     destination = context.hash === '#review' ? 'review' : 'library';
     settingsLeavePending = false;
     settingsReturnContext = null;
     pushHash(context.hash === '#review' || context.hash.startsWith('#library') ? context.hash : '#library');
     scrollMainTo(context.scrollTop);
+    restoreIndexScroll(context.indexScrollTop);
     focusRouteHeading();
     if (destination === 'library') resumePendingSearch();
   }
 
   function requestSettingsBack() {
+    settingsLeaveIntent = null;
     if (preferencesDirty) settingsLeavePending = true;
     else restoreLibraryContext();
   }
 
-  function resolveSettingsBack(discard: boolean) {
-    if (!discard) {
-      settingsLeavePending = false;
-      return;
-    }
+  async function resolveSettingsBack(discard: boolean) {
+    const intent = settingsLeaveIntent;
+    settingsLeaveIntent = null;
+    settingsLeavePending = false;
+    if (!discard) return;
     resetPreferences();
-    restoreLibraryContext();
+    // Let the preference comparison and dialog focus settle before continuing
+    // the exact navigation the person requested.
+    await tick();
+    if (!intent) restoreLibraryContext();
+    else if (intent.kind === 'destination') select(intent.destination);
+    else if (intent.kind === 'wiki') await openWiki(intent.wikiId, intent.tab);
+    else if (intent.kind === 'newWiki') requestNewWikiSource();
+    else if (intent.kind === 'search') openGlobalSearch(intent.focus);
+    else window.location.hash = intent.hash;
   }
 
   function observePendingRequests(current: AppSnapshot) {
@@ -1056,8 +1086,8 @@
     }
   }
 
-  function openGlobalSearch() {
-    if (!canLeaveSettings()) return;
+  function openGlobalSearch(focus = false): boolean {
+    if (!canLeaveSettings({ kind: 'search', focus })) return false;
     // The search field owns focus. This transition must not call restoreLibraryContext,
     // whose accessible back-navigation contract intentionally focuses the page heading.
     selectedWikiId = null;
@@ -1068,10 +1098,12 @@
     pushHash('#library');
     scrollMainTo(0);
     resumePendingSearch();
+    if (focus) requestAnimationFrame(() => document.querySelector<HTMLInputElement>('#global-search')?.focus());
+    return true;
   }
 
   async function submitGlobalSearch() {
-    openGlobalSearch();
+    if (!openGlobalSearch()) return;
     await submitSearch();
   }
 
@@ -1945,6 +1977,8 @@
     sharedBrowseInitialConceptId = null;
     sharedBrowseOpen = true;
     sharedBrowseLoading = true;
+    sharedSelectedPage = null;
+    sharedViewMode = 'list';
     sharedBrowseStructureLoading = true;
     sharedBrowsePageLoading = false;
     sharedBrowsePendingPage = null;
@@ -1993,6 +2027,8 @@
     sharedBrowseInitialConceptId = hit.conceptId;
     sharedBrowseOpen = true;
     sharedBrowseLoading = true;
+    sharedSelectedPage = null;
+    sharedViewMode = 'list';
     sharedBrowseStructureLoading = true;
     sharedBrowsePageLoading = false;
     sharedBrowsePendingPage = null;
@@ -2403,7 +2439,7 @@
   }
 
   async function openWiki(wikiId: string, tab: 'content' | 'pending' = 'content') {
-    if (!canLeaveSettings()) return;
+    if (!canLeaveSettings({ kind: 'wiki', wikiId, tab })) return;
     cancelScheduledSearch();
     dismissSharedBrowse();
     destination = 'library';
@@ -3116,7 +3152,7 @@
     {/if}
 
     {#if destination === 'library' && sharedBrowseOpen}
-      <SharedWikiViewer layout={workspaceLayout} source={sharedBrowseSource} sourceName={sharedBrowseSourceName} sourcePlatform={sharedBrowsePlatform} sourceLabel={sharedBrowseSource === 'public' ? t('desktop-public-network') : platformLabel(sharedBrowsePlatform)} browse={sharedBrowseLoading ? null : sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse : snapshot.publicBrowse} loading={sharedBrowseLoading} structureLoading={sharedBrowseStructureLoading} pageLoading={sharedBrowsePageLoading} initialConceptId={sharedBrowseInitialConceptId} {t} metadata={publicConceptMetadata} onback={closeSharedBrowse} onopenpage={openSharedWikiPage} onblock={sharedBrowseSource === 'public' ? (publisherId) => changePublisherBlock(publisherId, true) : null} />
+      <SharedWikiViewer bind:selectedPage={sharedSelectedPage} bind:viewMode={sharedViewMode} layout={workspaceLayout} source={sharedBrowseSource} sourceName={sharedBrowseSourceName} sourcePlatform={sharedBrowsePlatform} sourceLabel={sharedBrowseSource === 'public' ? t('desktop-public-network') : platformLabel(sharedBrowsePlatform)} browse={sharedBrowseLoading ? null : sharedBrowseSource === 'nearby' ? snapshot.nearbyBrowse : snapshot.publicBrowse} loading={sharedBrowseLoading} structureLoading={sharedBrowseStructureLoading} pageLoading={sharedBrowsePageLoading} initialConceptId={sharedBrowseInitialConceptId} {t} metadata={publicConceptMetadata} onback={closeSharedBrowse} onopenpage={openSharedWikiPage} onblock={sharedBrowseSource === 'public' ? (publisherId) => changePublisherBlock(publisherId, true) : null} />
     {:else}
       {@render workspaceLayout(localNavigation, localContent)}
     {/if}

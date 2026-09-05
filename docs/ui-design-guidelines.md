@@ -148,6 +148,12 @@ Hiding the sidebar preserves its index DOM and scroll position; it does not
 change the selected page. Geometry is currently session state, pending the
 planned local persistence contract.
 
+Returning from Settings restores the article and index scroll positions. A
+remote reader also retains its page and list/graph choice within the same live
+browse; current unavailability still hides its content. If navigation requires
+discarding edited preferences, continue the action the person requested after
+that decision. Cancelling keeps the edits and the current Settings section.
+
 The concept index has its own bounded scroll region beside the article at the
 supported 1024-pixel minimum width. A long index must never push the selected
 article below the entire list. The article retains one reading scroll surface.

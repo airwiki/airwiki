@@ -123,6 +123,43 @@ describe('SharedWikiViewer', () => {
     expect(container.querySelector('.loading-skeleton.workspace')).toBeInTheDocument();
   });
 
+  it('restores the selected page after Settings while honoring current remote availability', async () => {
+    const browse = completePublicWiki();
+    const descriptor = browse.reservedPages.find((page) => page.page.kind === 'index');
+    if (!descriptor) throw new Error('Synthetic index descriptor is missing');
+    browse.page = {
+      descriptor, blocks: [{ kind: 'paragraph', text: 'The selected index page.' }],
+      metadata: [], backlinks: [], truncated: false
+    };
+    const onopenpage = vi.fn();
+    const { rerender } = render(SharedWikiViewer, {
+      source: 'public', sourceName: 'Public network', browse,
+      loading: false, structureLoading: false, pageLoading: false,
+      initialConceptId: 'concept-a', selectedPage: { kind: 'index' },
+      t: translate, metadata: () => 'Human reviewed', onback: vi.fn(), onopenpage
+    });
+    expect(await screen.findByText('The selected index page.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /index\.md/ })).toHaveAttribute('aria-current', 'page');
+    expect(onopenpage).not.toHaveBeenCalled();
+    await rerender({ browse: { ...browse, status: 'offline' } });
+    expect(screen.queryByText('The selected index page.')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('desktop-shared-unavailable-body');
+    expect(onopenpage).not.toHaveBeenCalled();
+  });
+
+  it('restores graph mode for the same remote wiki and resets it for another wiki', async () => {
+    const browse = completePublicWiki();
+    const { rerender } = render(SharedWikiViewer, {
+      source: 'public', sourceName: 'Public network', browse,
+      loading: false, structureLoading: false, pageLoading: false,
+      selectedPage: { kind: 'concept', conceptId: 'concept-a' }, viewMode: 'graph',
+      t: translate, metadata: () => 'Human reviewed', onback: vi.fn(), onopenpage: vi.fn()
+    });
+    expect(screen.getByRole('button', { name: 'Graph' })).toHaveAttribute('aria-pressed', 'true');
+    await rerender({ browse: { ...browse, wikiId: 'another-wiki' } });
+    expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('renders the complete published workspace without visible pagination', async () => {
     const onopenpage = vi.fn();
     render(SharedWikiViewer, {

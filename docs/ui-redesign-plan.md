@@ -311,15 +311,21 @@ existente. Al plegar se conserva el índice y su posición; Enter en el separado
 restaura el foco en el control de lectura. Un modelo que termina de prepararse
 no reanuda búsquedas pendientes mientras el usuario está revisando.
 
-La base de navegación pasa 239 pruebas en 18 archivos, `check`, `lint` y
+La base de navegación pasa 243 pruebas en 18 archivos, `check`, `lint` y
 `check:e2e`. El recorrido de IPC real en macOS cubre la biblioteca, el índice de
 50 conceptos, artículo corto y largo, plegado sin perder el desplazamiento y
 ajuste con flechas. Se inspeccionaron capturas del lector en claro y oscuro y
 se corrigió la alineación de descripciones en la biblioteca. La comparación de
 baselines permanece desactivada hasta consolidar las superficies del rediseño.
 
+El regreso explícito desde Ajustes conserva el scroll de lectura e índice;
+el visor remoto mantiene la página y el modo de vista del mismo browse vigente.
+Al descartar preferencias editadas se continúa el destino o acción solicitada,
+incluidos Por revisar, Nueva wiki y el atajo de búsqueda. Cancelar conserva las
+ediciones. La disponibilidad remota actual sigue prevaleciendo sobre la selección.
+
 Siguen pendientes el historial de navegación local entre wikis y páginas, la
-conservación completa del contexto al cambiar de destino, la reducción de la
+conservación de contexto entre wikis distintas, la reducción de la
 cabecera de lectura en fase 3, el editor dedicado y la persistencia de geometría.
 La base visual y sus pruebas no completan por sí solas la aceptación instalada.
 

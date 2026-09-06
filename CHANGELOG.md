@@ -27,6 +27,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
   local-AI recovery guidance appears in the search page when needed.
 - Switching the onboarding language now immediately translates the current
   page, progress label and navigation buttons.
+- Closing a panel no longer lets a delayed focus return steal focus from a
+  newer dialog. Focus restoration waits for the DOM update and cancels outdated
+  requests.
 - Fixed approval of a previously excluded proposal with current source evidence.
   Stale source evidence still blocks approval and preserves the proposal for retry.
 

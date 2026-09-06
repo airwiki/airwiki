@@ -289,6 +289,9 @@ must explain that consequence without implying new grants or verification.
   hit region, and a keyboard path.
 - Prefer 40–44 pixels for isolated primary actions or touch-capable hardware.
 - Provide visible hover, pressed, disabled, selected, and keyboard-focus states.
+- Restore focus after a dialog's DOM update without waiting for an animation
+  frame. A newer dialog or a destroyed view cancels the earlier focus request;
+  an old close must never move focus outside the current dialog.
 - Reserve visible focus rings for interactive controls. A noninteractive route
   heading may receive programmatic focus for semantic navigation without
   drawing a full-width control outline.

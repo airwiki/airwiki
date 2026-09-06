@@ -131,7 +131,7 @@
     </aside>
   {/if}
 </div>
-<dialog class="reader-dialog" id={wide && panel ? undefined : contextId} aria-labelledby={`${contextId}-title`} bind:this={dialog} onclose={() => { if (!wide && panel) closePanel(); }}>
+<dialog class="reader-dialog" id={wide && panel ? undefined : contextId} aria-labelledby={`${contextId}-title`} bind:this={dialog} onclose={() => { if (!wide && panel && !dialog.open) closePanel(); }}>
   {#if !wide && panel}{@render context()}{/if}
 </dialog>
 

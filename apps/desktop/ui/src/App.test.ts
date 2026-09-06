@@ -3992,6 +3992,34 @@ describe('AirWiki wiki workspace', () => {
     expect(browsePublicWiki).not.toHaveBeenCalled();
   });
 
+  it('ignores a delayed close event from the previous reader dialog after reopening sources', async () => {
+    const close = vi.spyOn(HTMLDialogElement.prototype, 'close').mockImplementation(function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    });
+    try {
+      const { first } = readingHistoryFixture();
+      render(App);
+      await screen.findByRole('heading', { name: first.title });
+      await fireEvent.click(screen.getByRole('button', { name: 'Detalles' }));
+      const previousDialog = await screen.findByRole('dialog', { name: 'Detalles de la página' });
+      await fireEvent.click(within(previousDialog).getByRole('button', { name: 'Cerrar' }));
+      const sources = screen.getByRole('button', { name: /^Fuentes/ });
+      await fireEvent.click(sources);
+      const currentDialog = await screen.findByRole('dialog', { name: 'Fuentes del concepto' });
+      // Native close events are queued. The event for Details may arrive after
+      // the same dialog element has already been reopened for Sources.
+      await fireEvent(previousDialog, new Event('close'));
+      expect(currentDialog).toBeVisible();
+      expect(sources).toHaveAttribute('aria-expanded', 'true');
+      currentDialog.removeAttribute('open');
+      await fireEvent(currentDialog, new Event('close'));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(sources).toHaveFocus();
+    } finally {
+      close.mockRestore();
+    }
+  });
+
   it('keeps the selected details while changing from a side inspector to a narrow dialog', async () => {
     const previousWidth = window.innerWidth;
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });

@@ -412,8 +412,13 @@
       const restore = () => {
         window.cancelAnimationFrame(frame);
         window.clearTimeout(fallback);
-        if (generation === mainScrollGeneration) {
-          mainScrollRegion?.scrollTo({ top: target, left: 0, behavior: 'auto' });
+        const region = mainScrollRegion;
+        if (generation === mainScrollGeneration && region) {
+          // Frame callbacks run before layout. Resolve the current scroll
+          // extent before scrolling so the old Settings padding cannot clamp
+          // a position near the end of the restored article.
+          void region.scrollHeight;
+          region.scrollTo({ top: target, left: 0, behavior: 'auto' });
         }
       };
       frame = window.requestAnimationFrame(restore);

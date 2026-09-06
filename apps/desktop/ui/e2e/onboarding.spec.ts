@@ -617,9 +617,9 @@ async function importOkfWiki(): Promise<void> {
   await browser.execute(() => {
     const page = document.querySelector<HTMLElement>('.drive-page');
     if (!page) throw new Error('reading scroll region is missing');
-    const trace: Array<{ event: string; target?: number; position: number }> = [];
+    const trace: Array<{ event: string; target?: number; position: number; height: number; contentHeight: number; padding: string }> = [];
     const record = (event: string, target?: number) => {
-      if (trace.length < 24) trace.push({ event, target, position: page.scrollTop });
+      if (trace.length < 24) trace.push({ event, target, position: page.scrollTop, height: page.clientHeight, contentHeight: page.scrollHeight, padding: getComputedStyle(page).paddingBlock });
       document.documentElement.dataset.readingScrollTrace = JSON.stringify(trace);
     };
     const originalScroll = page.scrollTo;

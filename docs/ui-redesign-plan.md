@@ -595,8 +595,27 @@ instalado de macOS confirma comparación y edición en 1180×760 y 1024×720,
 conservación del título al alternar paneles y al cancelar la salida, y descarte
 explícito sin aprobar ni excluir. La revisión independiente no encontró hallazgos.
 
-Siguen pendientes la persistencia local en una entrega separada, las referencias
-visuales de Windows y su aceptación instalada de los recorridos cotidianos.
+Las 64 referencias visuales de Windows están integradas. Las 16 de revisión
+se actualizaron después de inspeccionarlas en ES/EN, claro/oscuro y los tres
+tamaños. El resto corresponde al recorrido de biblioteca, lector, Fuentes y
+Ajustes ya comprobado en Windows. La comparación conserva su tolerancia; la
+normalización temporal de hover no oculta los bordes de campos inválidos.
+
+La nueva aserción de área inicial del editor detectó en CI que Windows aún
+mostraba menos de 120 px en la ventana mínima. En el modo compacto, la pestaña
+activa ahora identifica el panel sin repetir un título visible; se conservan
+los controles, el encabezado semántico y las regiones de desplazamiento. Pasan
+las 30 pruebas enfocadas y el recorrido nativo de revisión en macOS, incluida
+la geometría. La revisión independiente no encontró hallazgos pendientes.
+
+La configuración inicial mantiene sus acciones dentro de la ventana y permite
+desplazar el contenido largo de cada paso. La regresión de macOS falló antes y
+pasa después en ES/EN a 1024×720 y 1180×740 de contenido, incluido el clic en
+Finalizar y la reapertura. Las 322 pruebas de UI del conjunto integrado pasan. La aceptación instalada
+del último ajuste y las referencias compactas actualizadas de macOS esperan
+que el escritorio vuelva a estar disponible. Falta consolidar el reporte final
+de aceptación instalada y comparación visual de Windows.
+La persistencia local se entrega en la PR dependiente.
 La validación especializada de accesibilidad queda como seguimiento no bloqueante
 según la prioridad de cierre indicada arriba.
 

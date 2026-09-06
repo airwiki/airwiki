@@ -61,6 +61,9 @@ export async function captureVisual(tag: string): Promise<void> {
       .workspace-sidebar button:hover:not(.active):not(.wiki-picker) { color: var(--muted) !important; background: transparent !important; }
       .secondary:hover:not(:disabled) { background: transparent !important; border-color: var(--line) !important; }
       .system-status-button:hover { color: var(--muted) !important; background: transparent !important; }
+      .review-columns .control-field > input:hover:not(:disabled):not([aria-invalid="true"]), .review-columns .control-field > textarea:hover:not(:disabled):not([aria-invalid="true"]) {
+        border-color: var(--control-border, var(--line)) !important;
+      }
       .select-control select:hover:not(:disabled), .select-control select:focus-visible {
         border-color: var(--control-border, var(--line)) !important;
         box-shadow: inset 0 1px 1px #0000000d !important;

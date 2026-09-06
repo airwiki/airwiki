@@ -267,6 +267,9 @@ source names and excerpts.
 Keep the review heading compact so the initial viewport prioritizes evidence
 and editing. Progress can share the return-action row and wrap when needed;
 Wiki identity, proposal title, source revision and explanatory copy remain visible.
+In the compact layout, the active tab names its panel without repeating a
+visible section heading. Keep the heading available semantically and preserve
+the editor controls and at least 120 logical pixels of its initial visible area.
 The decision footer fills the review region's width and occupies its own bottom
 row. Evidence and proposal share one scrolling content region above it; the
 footer must never cover the end of the editor. Returning from Settings restores

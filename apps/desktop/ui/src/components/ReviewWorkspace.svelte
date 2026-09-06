@@ -119,8 +119,12 @@
     .review-actions { padding: 14px 16px 16px; }
   }
   @container (max-width: 780px) {
-    .review-view-switch { display: flex; flex-wrap: wrap; }
+    .review-view-switch { display: flex; flex-wrap: wrap; margin-bottom: 8px; }
     .review-columns { grid-template-columns: minmax(0, 1fr); }
+    .review-columns > section { padding-top: 12px; }
+    /* The active tab already names the panel; retain its heading for assistive navigation. */
+    .review-columns h2 { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .review-columns :global(.control-field + .control-field) { margin-top: 12px; }
     .review-columns[data-panel='proposal'] #review-evidence, .review-columns[data-panel='evidence'] #review-proposal { display: none; }
   }
 </style>

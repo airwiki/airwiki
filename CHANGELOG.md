@@ -30,6 +30,7 @@ All notable user-visible changes to AirWiki will be documented here. The project
   local-AI recovery guidance appears in the search page when needed.
 - Compacted the review heading and placed progress beside the return action,
   leaving more of the proposal editor visible when a review opens.
+  Compact panels use their tab label without repeating a visible section title.
 - Library uses the singular reviewed-concept count in Spanish and English.
 - Long Wiki names stay within the sidebar and keep their pending count visible.
 - Switching the onboarding language now immediately translates the current

@@ -4,11 +4,13 @@ import { join } from 'node:path';
 import { captureVisual, configureVisualPreferences, runVisualMatrix, setCssViewport, visualViewports } from './visual.js';
 
 async function assertReviewLayout(): Promise<void> {
+  await browser.execute(() => document.querySelector('.review-content')?.scrollTo({ top: 0, behavior: 'instant' }));
   const layout = await browser.execute(() => {
     const action = document.querySelector('.review-actions .primary')?.getBoundingClientRect();
     const footer = document.querySelector('.review-actions')?.getBoundingClientRect();
     const workspace = document.querySelector('.drive-page')?.getBoundingClientRect();
     const content = document.querySelector('.review-content')?.getBoundingClientRect();
+    const editor = document.querySelector('#review-proposal textarea')?.getBoundingClientRect();
     const wikiPicker = document.querySelector<HTMLElement>('.sidebar-wikis');
     return {
       overflow: document.documentElement.scrollWidth > innerWidth,
@@ -17,9 +19,10 @@ async function assertReviewLayout(): Promise<void> {
       footerFillsWidth: !!footer && !!workspace && Math.abs(footer.left - workspace.left) < 1 && Math.abs(footer.right - workspace.right) < 1,
       footerAtBottom: !!footer && !!workspace && Math.abs(footer.bottom - workspace.bottom) < 1,
       contentReserved: !!content && !!footer && content.bottom <= footer.top,
+      editorInitiallyUsable: !!editor && !!content && Math.min(editor.bottom, content.bottom) - Math.max(editor.top, content.top) >= 120,
     };
   });
-  expect(layout).toEqual({ overflow: false, sidebarOverflow: false, approvalVisible: true, footerFillsWidth: true, footerAtBottom: true, contentReserved: true });
+  expect(layout).toEqual({ overflow: false, sidebarOverflow: false, approvalVisible: true, footerFillsWidth: true, footerAtBottom: true, contentReserved: true, editorInitiallyUsable: true });
   await browser.execute(() => {
     const content = document.querySelector('.review-content');
     content?.scrollTo({ top: content.scrollHeight, behavior: 'instant' });

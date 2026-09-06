@@ -38,11 +38,13 @@
   <div class="review-content" bind:this={scrollRegion}>
   <div class="review-content-inner">
   <header class="review-workspace-heading">
+    <div class="review-toolbar">
     <button class="text-action" onclick={onback} disabled={busy}><ArrowLeft size={16} aria-hidden="true" />{t('review-back-queue')}</button>
+    <p class="review-progress">{t('review-session-progress', { completed, remaining })}</p>
+    </div>
     <p class="section-label">{review.wikiName} · {t(review.excluded ? 'desktop-review-state-excluded' : 'desktop-review-state-draft')}</p>
     <h1 tabindex="-1">{review.draft.title}</h1>
     <p class="review-source-name">{review.sourceName} · {t('review-revision', { revision: review.sourceRevision })}</p>
-    <p class="review-progress">{t('review-session-progress', { completed, remaining })}</p>
   </header>
   <p class="review-introduction">{t(review.excluded ? 'review-excluded-body' : 'review-draft-body')}</p>
   {#if stale && !busy}<div class="review-notice" role="alert"><AlertTriangle size={18} aria-hidden="true" /><div><strong>{t('review-changed-title')}</strong><p>{t('review-changed-body')}</p>{#if canReload}<button class="text-action" onclick={onreload}>{t('review-open-current')}</button>{/if}</div></div>{/if}
@@ -84,19 +86,22 @@
 
 <style>
   .review-workspace { display: grid; grid-template-rows: minmax(0, 1fr) auto; flex: 1; min-height: 0; min-width: 0; }
-  .review-content { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 28px 38px 24px; }
+  .review-content { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 20px 38px 24px; }
   .review-content-inner { container-type: inline-size; max-width: 1240px; margin: 0 auto; }
   .review-workspace-heading { display: block; padding: 0; border: 0; }
-  .review-workspace-heading > button { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 16px; padding-inline: 0; }
-  h1 { margin: 8px 0; font: 650 clamp(26px, 3vw, 34px)/1.18 var(--font-display); overflow-wrap: anywhere; }
-  .review-source-name, .review-progress { margin: 8px 0 0; color: var(--muted); font: 400 12px/1.6 var(--font-ui); overflow-wrap: anywhere; }
-  .review-introduction { margin: 16px 0 20px; max-width: 84ch; }
+  .review-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 20px; margin-bottom: 12px; }
+  .review-toolbar > button { display: inline-flex; align-items: center; gap: 6px; padding-inline: 0; }
+  .section-label { margin-bottom: 4px; }
+  h1 { margin: 4px 0; font: 650 clamp(24px, 2.4vw, 28px)/1.18 var(--font-display); overflow-wrap: anywhere; }
+  .review-source-name, .review-progress { margin: 0; color: var(--muted); font: 400 12px/1.6 var(--font-ui); overflow-wrap: anywhere; }
+  .review-source-name { margin-top: 6px; }
+  .review-introduction { margin: 12px 0 16px; max-width: 84ch; }
   .review-notice { display: flex; align-items: flex-start; gap: 10px; padding: 14px 0; color: var(--amber); font: 400 13px/1.5 var(--font-ui); }
   .review-notice :global(svg) { flex-shrink: 0; }
   .review-notice p { margin: 4px 0 8px; }
   .review-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; border-top: 1px solid var(--line); }
   .review-columns > section { min-width: 0; padding: 18px 0; }
-  h2 { margin: 0 0 18px; font: 600 17px/1.4 var(--font-display); }
+  h2 { margin: 0 0 12px; font: 600 17px/1.4 var(--font-display); }
   .review-excerpts blockquote { margin: 0 0 22px; padding: 0 0 0 16px; border-left: 2px solid var(--line); color: var(--strong); font: 400 16px/1.65 var(--font-reading); overflow-wrap: anywhere; }
   .review-excerpts p { margin: 0; white-space: pre-wrap; }
   .review-excerpts .review-excerpt-label, .review-excerpts small, .review-edit-state { margin: 0 0 6px; color: var(--muted); font: 400 12px/1.5 var(--font-ui); }
@@ -110,7 +115,7 @@
   .review-actions { padding: 16px 38px 20px; border-top: 1px solid var(--line); background: var(--slate); }
   .review-actions-inner { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; max-width: 1240px; margin: 0 auto; }
   @media (max-width: 1100px) {
-    .review-content { padding: 24px 16px; }
+    .review-content { padding: 20px 16px 24px; }
     .review-actions { padding: 14px 16px 16px; }
   }
   @container (max-width: 780px) {

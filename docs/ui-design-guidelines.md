@@ -269,6 +269,9 @@ or an ongoing update. Show evidence and editable title/summary side by side
 when they fit; otherwise switch between them without recreating the edited
 draft. Keep the decision actions reachable during comparison and wrap long
 source names and excerpts.
+Keep the review heading compact so the initial viewport prioritizes evidence
+and editing. Progress can share the return-action row and wrap when needed;
+Wiki identity, proposal title, source revision and explanatory copy remain visible.
 The decision footer fills the review region's width and occupies its own bottom
 row. Evidence and proposal share one scrolling content region above it; the
 footer must never cover the end of the editor. Returning from Settings restores

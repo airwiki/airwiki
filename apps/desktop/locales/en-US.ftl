@@ -791,6 +791,7 @@ autostart-needs-approval = needs system approval
 autostart-conflict = another setting uses the same name
 autostart-unsupported = unavailable
 autostart-checking = checking…
+autostart-state-unavailable = status unavailable. Refresh to try again.
 
 updates-title = Updates
 updates-automatic = Check automatically (no telemetry)

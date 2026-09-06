@@ -7,7 +7,7 @@ A plan records intent and acceptance, not a transcript, command log, or speculat
 ## Desktop reading-first redesign
 
 Status: Active — implementation and validation authorized.
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 The [desktop UI redesign plan](docs/ui-redesign-plan.md) records seven phased
 deliveries: minimum-window reading and the linked-W Wiki symbol, navigation and
@@ -16,6 +16,11 @@ session restoration, then installed-platform acceptance. It preserves explicit
 sharing and AI-app permissions and does not depend on public package signing.
 The installer plan is paused while this user-prioritized redesign is active;
 its unfinished acceptance remains recorded below.
+
+Current acceptance prioritizes everyday layout, navigation, reading, review,
+and recovery on macOS and Windows. Specialized screen-reader and exhaustive
+accessibility validation is deferred, as requested by the product owner;
+existing keyboard, focus, semantics, contrast, and reduced-motion support stays.
 
 ## Windows MSI and open-source signing
 

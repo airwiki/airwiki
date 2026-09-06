@@ -455,8 +455,9 @@ recorridos con IPC real en macOS: navegación y revisión. El recorrido de Ajust
 comprueba que modelo, perfil y acciones de preferencias siguen accesibles a
 1024, 1180 y 1440 px. Se inspeccionaron capturas sintéticas de IA lista,
 descarga, conexiones e integraciones en ES/EN y claro/oscuro. La comprobación
-manual de esta entrega en el candidato instalado sigue pendiente: el escritorio
-de macOS estaba bloqueado al intentarla. Los E2E no sustituyen esa aceptación.
+manual comenzó cuando volvió a estar disponible el escritorio de macOS.
+Los E2E no sustituyen esa aceptación; sus avances y pendientes se detallan al
+final de este documento.
 
 La fase 7 incorpora 64 referencias visuales nativas de macOS: Biblioteca vacía,
 General, lector y Fuentes, más propuesta, evidencia y comparación en revisión.
@@ -477,6 +478,15 @@ espaciado de un contenedor estático. La corrección desactiva esas transiciones
 y el recorrido comprueba la posición exacta con ambos modos de movimiento,
 restaurando después las reglas originales. Esta activación de CSS en la prueba
 no modifica la preferencia del sistema ni sustituye su aceptación instalada.
+
+La aceptación instalada de macOS comprobó lectura con 50 conceptos, Fuentes
+modal y lateral, cierre con Escape y devolución del foco, ventana mínima,
+búsqueda sin modelo, regreso desde Ajustes y movimiento reducido del sistema.
+General se comprobó en inglés/claro y español/claro/oscuro. El menú nativo de
+salida y ⌘Q respetan preferencias sin guardar: continuar conserva los cambios
+y descartar permite cerrar. VoiceOver se activó, pero la herramienta no permitió
+comprobar sus indicaciones; no se da por aprobado. Los ajustes del sistema se
+devolvieron a su estado original.
 
 Siguen pendientes la persistencia local en una entrega separada, las referencias
 visuales de Windows, la revisión independiente y la aceptación instalada completa.

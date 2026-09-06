@@ -3,7 +3,7 @@ import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
 import { allowPeerPairingAgain, approveProjectMemoryRequest, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmLegacyLanAiGrants, connect, createProjectMemory, detachProjectMemory, explorePublicWikis, installModels, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, refreshApplicationAccess, refreshConnectivity, refreshWikiHealth, rejectProjectMemoryRequest, rejectReview, rescanWiki, searchKnowledge, setApplicationWikiRole, setWikiGrant, updatePreferences, updateWikiPolicy, validateOkfImport, verifyWikiConcept } from './api';
-import { setModelProfile } from './api';
+import { setModelProfile, loadDesktopWorkspace, saveDesktopWorkspace } from './api';
 import type { AppSnapshot, SearchCoverage, SearchHitSummary, SearchStatus, UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
 
@@ -231,6 +231,8 @@ vi.mock('./api', async (importOriginal) => {
   const original = await importOriginal() as typeof import('./api');
   return {
     ...original,
+    loadDesktopWorkspace: vi.fn(async () => null),
+    saveDesktopWorkspace: vi.fn(async () => undefined),
     connect: vi.fn(async (onEvent: (event: UiEventEnvelope) => void) => {
       snapshotListener = onEvent;
       return snapshot;
@@ -310,6 +312,8 @@ describe('AirWiki wiki workspace', () => {
     snapshot = readySnapshot();
     snapshotListener = null;
     tauriListeners.clear();
+    vi.mocked(loadDesktopWorkspace).mockReset().mockResolvedValue(null);
+    vi.mocked(saveDesktopWorkspace).mockReset().mockResolvedValue(undefined);
     vi.mocked(loadReviewEvidence).mockReset().mockImplementation(async () => snapshot.reviewEvidence?.requestId ?? 'review-evidence-request');
     vi.mocked(approveReview).mockReset().mockResolvedValue(undefined);
     vi.mocked(rejectReview).mockReset().mockResolvedValue(undefined);
@@ -1862,12 +1866,18 @@ describe('AirWiki wiki workspace', () => {
     expect(updatePreferences).not.toHaveBeenCalled();
   });
 
-  it('quits a clean view directly after the native request', async () => {
+  it('flushes the latest workspace preference before quitting a clean view', async () => {
     Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    let finish: (() => void) | undefined;
+    vi.mocked(saveDesktopWorkspace).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
     render(App);
     await screen.findByRole('heading', { name: 'Tus wikis' });
+    await waitFor(() => expect(loadDesktopWorkspace).toHaveBeenCalledOnce());
     await act(() => { tauriListeners.get('quit-requested')?.({ payload: null }); });
-    expect(quitCompletely).toHaveBeenCalledOnce();
+    await waitFor(() => expect(saveDesktopWorkspace).toHaveBeenCalledOnce());
+    expect(quitCompletely).not.toHaveBeenCalled();
+    await act(() => finish?.());
+    await waitFor(() => expect(quitCompletely).toHaveBeenCalledOnce());
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
@@ -3726,6 +3736,105 @@ describe('AirWiki wiki workspace', () => {
     } finally {
       scroll.mockRestore();
     }
+  });
+
+  it('restores a saved local selection only after startup and a current bundle and page', async () => {
+    const { wiki, first, second, bundle, page } = readingHistoryFixture();
+    window.history.replaceState(null, '', window.location.pathname);
+    const preferences = snapshot.preferences;
+    snapshot = { ...snapshot, phase: 'starting', preferences: null, wikis: [], knowledge: null, knowledgePage: null };
+    vi.mocked(loadDesktopWorkspace).mockResolvedValue({ selection: { wikiId: wiki.id, page: { kind: 'concept', conceptId: first.conceptId } }, sidebarWidth: 320, sidebarCollapsed: true });
+    const { container } = render(App);
+    await waitFor(() => expect(loadDesktopWorkspace).toHaveBeenCalledOnce());
+    expect(loadWikiBundle).not.toHaveBeenCalled();
+    await deliverSnapshot(null, { phase: 'ready', preferences, wikis: [wiki] });
+    await waitFor(() => expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id, expect.any(String)));
+    expect(saveDesktopWorkspace).not.toHaveBeenCalled();
+    expect(container.querySelector('.workspace-frame')).toHaveClass('collapsed');
+    const current = { ...first, page: { kind: 'concept' as const, path: 'current/renamed.md' }, fingerprint: 'c'.repeat(64) };
+    await completeHistoryBundle({ ...bundle, concepts: [current, second] });
+    expect(loadWikiPage).toHaveBeenLastCalledWith(wiki.id, current.page, current.fingerprint, expect.any(String));
+    expect(screen.queryByRole('heading', { name: current.title })).not.toBeInTheDocument();
+    await completeHistoryPage(page(current));
+    expect(await screen.findByRole('heading', { name: current.title })).toHaveFocus();
+    expect(window.location.hash).toBe('#library/wiki');
+    expect(explorePublicWikis).not.toHaveBeenCalled();
+    expect(browseNearbyWiki).not.toHaveBeenCalled();
+    expect(browsePublicWiki).not.toHaveBeenCalled();
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
+  it.each(['explicit route', 'onboarding'])('gives %s precedence over the saved reading', async (precedence) => {
+    const { wiki, first } = readingHistoryFixture();
+    snapshot.knowledge = null;
+    snapshot.knowledgePage = null;
+    window.history.replaceState(null, '', precedence === 'explicit route' ? '#review' : window.location.pathname);
+    if (precedence === 'onboarding') snapshot.preferences = { ...snapshot.preferences!, completedOnboardingVersion: null };
+    vi.mocked(loadDesktopWorkspace).mockResolvedValue({ selection: { wikiId: wiki.id, page: { kind: 'concept', conceptId: first.conceptId } }, sidebarWidth: 240, sidebarCollapsed: false });
+    render(App);
+    await waitFor(() => expect(loadDesktopWorkspace).toHaveBeenCalledOnce());
+    await act(() => Promise.resolve());
+    expect(loadWikiBundle).not.toHaveBeenCalled();
+    expect(loadWikiPage).not.toHaveBeenCalled();
+    expect(screen.queryByRole('heading', { name: first.title })).not.toBeInTheDocument();
+    if (precedence === 'explicit route') expect(window.location.hash).toBe('#review');
+  });
+
+  it('does not replace a newer navigation when the saved preference arrives late', async () => {
+    const { wiki, first } = readingHistoryFixture();
+    snapshot.knowledge = null;
+    snapshot.knowledgePage = null;
+    window.history.replaceState(null, '', window.location.pathname);
+    let resolve: ((value: Awaited<ReturnType<typeof loadDesktopWorkspace>>) => void) | undefined;
+    vi.mocked(loadDesktopWorkspace).mockReturnValue(new Promise((done) => { resolve = done; }));
+    render(App);
+    await openSettingsSection('general');
+    await act(() => resolve?.({ selection: { wikiId: wiki.id, page: { kind: 'concept', conceptId: first.conceptId } }, sidebarWidth: 224, sidebarCollapsed: false }));
+    expect(window.location.hash).toBe('#settings/general');
+    expect(loadWikiBundle).not.toHaveBeenCalled();
+  });
+
+  it('keeps reading available after a preference read failure without overwriting unknown saved state', async () => {
+    vi.mocked(loadDesktopWorkspace).mockRejectedValueOnce(new Error('synthetic read failure'));
+    const { container } = render(App);
+    expect(await screen.findByText('No se pudo recuperar la última lectura. Puedes continuar desde Biblioteca.')).toBeVisible();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 450)));
+    expect(saveDesktopWorkspace).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Tus wikis' })).toBeVisible();
+    const toggle = container.querySelector<HTMLButtonElement>('.sidebar-toggle')!;
+    await fireEvent.click(toggle);
+    await waitFor(() => expect(saveDesktopWorkspace).toHaveBeenCalledWith({ selection: null, sidebarWidth: 224, sidebarCollapsed: true }));
+  });
+
+  it.each(['wiki', 'concept'])('returns to Library when the saved %s no longer exists', async (removed) => {
+    const { wiki, first, bundle } = readingHistoryFixture();
+    window.history.replaceState(null, '', window.location.pathname);
+    snapshot.knowledge = null;
+    snapshot.knowledgePage = null;
+    if (removed === 'wiki') snapshot.wikis = [];
+    vi.mocked(loadDesktopWorkspace).mockResolvedValue({ selection: { wikiId: wiki.id, page: { kind: 'concept', conceptId: first.conceptId } }, sidebarWidth: 224, sidebarCollapsed: false });
+    render(App);
+    if (removed === 'concept') {
+      await waitFor(() => expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id, expect.any(String)));
+      await completeHistoryBundle({ ...bundle, concepts: [] });
+    }
+    expect(await screen.findByText('La última página ya no está disponible. Puedes elegir otra wiki en Biblioteca.')).toBeVisible();
+    expect(window.location.hash).toBe('#library');
+    expect(loadWikiPage).not.toHaveBeenCalled();
+  });
+
+  it('saves identifiers and panel bounds without page paths, content or queries, and recovers a write failure', async () => {
+    const { wiki, first } = readingHistoryFixture();
+    vi.mocked(saveDesktopWorkspace).mockRejectedValueOnce(new Error('synthetic persistence failure')).mockResolvedValue(undefined);
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    expect(await screen.findByText('No se pudo guardar la última lectura y la disposición de los paneles. Puedes seguir leyendo y volver a intentar.')).toBeVisible();
+    expect(screen.getByRole('heading', { name: first.title })).toBeVisible();
+    expect(saveDesktopWorkspace).toHaveBeenCalledExactlyOnceWith({ selection: { wikiId: wiki.id, page: { kind: 'concept', conceptId: first.conceptId } }, sidebarWidth: 224, sidebarCollapsed: false });
+    expect(JSON.stringify(vi.mocked(saveDesktopWorkspace).mock.calls)).not.toMatch(/first\.md|First article|query|fingerprint|sourcePath/);
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a intentar' }));
+    await waitFor(() => expect(saveDesktopWorkspace).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/No se pudo guardar la última lectura/)).not.toBeInTheDocument();
   });
 
   it('resumes each local wiki after switching through the sidebar', async () => {

@@ -458,8 +458,29 @@ descarga, conexiones e integraciones en ES/EN y claro/oscuro. La comprobación
 manual de esta entrega en el candidato instalado sigue pendiente: el escritorio
 de macOS estaba bloqueado al intentarla. Los E2E no sustituyen esa aceptación.
 
-Siguen pendientes la persistencia local en una entrega separada y la aceptación
-instalada completa.
+La restauración local se implementa en una entrega separada. Un único registro
+SQLite guarda identificadores locales y el ancho/plegado de la barra lateral.
+Las escrituras se agrupan y completan en el worker; una escritura anterior no
+puede reemplazar la selección nueva. Salir intenta guardar el último cambio con
+una espera acotada; un fallo no impide seguir leyendo o cerrar y permite reintentar.
+
+El inicio espera al snapshot listo y vuelve a cargar el bundle y la página con
+su ruta y fingerprint actuales. Las rutas explícitas, el onboarding y una
+navegación posterior tienen prioridad. Una selección eliminada vuelve a Biblioteca;
+un fallo al leer las preferencias no reemplaza inmediatamente el estado guardado
+desconocido. Consultas, resultados, contenido, rutas y selecciones remotas no se
+persisten. La migración aditiva conserva contenido y permisos y rechaza una
+versión futura sin sobrescribirla.
+
+Pasan 309 pruebas de UI, 1333 pruebas del workspace Rust (una prueba existente
+ignorada), formato, Clippy y los checks de tipos, lint, documentación y licencias.
+El E2E nativo de macOS ahora cierra el proceso mediante el manejador de la UI y
+lo abre de nuevo con la misma base temporal: restaura el concepto vigente y el
+panel, mantiene vacía la búsqueda y conserva el índice de 50 conceptos accesible.
+Esta evidencia automatizada todavía no cierra la aceptación instalada manual.
+
+Siguen pendientes la revisión independiente, las baselines consolidadas y la
+aceptación instalada completa de ambas plataformas.
 
 - [ ] Fase 1: ventana mínima, W enlazada y base visual.
 - [ ] Fase 2: navegación y biblioteca.

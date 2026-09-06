@@ -4,6 +4,12 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Reopen the last valid local reading with the sidebar's width and collapsed
+  state. Startup checks the current Wiki and page; missing selections return to
+  Library, and explicit routes or onboarding take precedence. Only bounded local
+  identifiers and layout preferences persist. Search, remote browsing, consent
+  and pending operations are not restored; a failed save offers a retry.
+
 - Added a shared contextual sidebar for Library, local and remote Wiki indexes,
   and Settings, with a visible reading-mode toggle and keyboard resizing. The
   To review destination groups current proposals by Wiki using the existing

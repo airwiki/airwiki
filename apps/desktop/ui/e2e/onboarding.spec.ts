@@ -1339,5 +1339,17 @@ describe('AirWiki real IPC journey', () => {
       await setCssViewport(1020, 728);
       await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-list-review-${theme}-narrow.png`));
     }
+    // Leave a real local reading for the runner's second process. The normal
+    // native quit request must flush even the final, debounced panel change.
+    await $('.wiki-row*=E2E imported wiki').click();
+    await $('.file-list').$('button*=Synthetic reference 48').waitForDisplayed();
+    await $('.file-list').$('button*=Synthetic reference 48').click();
+    await expect($('.file-preview h1')).toHaveText('Synthetic reference 48 with a deliberately long descriptive title');
+    await browser.execute(() => document.querySelector<HTMLElement>('.sidebar-resizer')?.focus());
+    await expect($('.sidebar-resizer')).toHaveAttribute('aria-valuenow', '224');
+    await browser.keys(['ArrowRight', 'ArrowRight']);
+    await expect($('.sidebar-resizer')).toHaveAttribute('aria-valuenow', '256');
+    await $('.sidebar-toggle').click();
+    await expect($('.workspace-frame')).toHaveElementClass('collapsed');
   });
 });

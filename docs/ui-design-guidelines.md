@@ -223,6 +223,13 @@ Preparation language in global search requires an actual preparation in progress
 an unavailable local runtime instead points to its state in General Settings.
 An already active runtime remains usable while another model awaits restart.
 
+Reopening can resume one local reading after a fresh bundle/page check. Explicit
+routes and onboarding take precedence; a missing selection returns to Library
+with a brief explanation. Only local identifiers and sidebar geometry persist.
+Search, remote browsing and pending operations start afresh. Keep the sidebar
+within the current window's limits and its show control available when collapsed.
+A failed continuity save must not block reading; show a concise retry action.
+
 Search groups prioritize concept titles, excerpts and provenance. Keep the Wiki
 name, source owner and total match count in a compact header; extended Wiki
 metadata belongs in a disclosure. Unavailable sources, restricted compatibility,

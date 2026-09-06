@@ -18,6 +18,7 @@ mod services;
 mod updater;
 mod worker;
 mod workflow_guides;
+mod workspace_state;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -6488,6 +6489,9 @@ fn ui_bindings_source() -> String {
         exported_declaration::<UpdaterSummary>(&config),
         exported_declaration::<PreferencesSummary>(&config),
         exported_declaration::<PreferencesInput>(&config),
+        exported_declaration::<workspace_state::WorkspaceStateDto>(&config),
+        exported_declaration::<workspace_state::WorkspaceSelectionDto>(&config),
+        exported_declaration::<workspace_state::WorkspacePageDto>(&config),
         exported_declaration::<HostPlatform>(&config),
         exported_declaration::<AppPhase>(&config),
         exported_declaration::<AppSnapshot>(&config),
@@ -7073,6 +7077,8 @@ fn main() -> Result<()> {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            workspace_state::load_desktop_workspace,
+            workspace_state::save_desktop_workspace,
             connect,
             install_models,
             cancel_model_install,

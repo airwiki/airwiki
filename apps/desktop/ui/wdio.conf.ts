@@ -14,13 +14,15 @@ const webDriverPort = Number(configuredWebDriverPort);
 if (!Number.isInteger(webDriverPort) || webDriverPort < 1 || webDriverPort > 65_535) {
   throw new Error(`invalid TAURI_WEBDRIVER_PORT: ${configuredWebDriverPort}`);
 }
-if (process.env.UPDATE_VISUAL_BASELINES === '1') {
+if (process.env.UPDATE_VISUAL_BASELINES === '1' && process.env.AIRWIKI_E2E_SESSION_RESTORE !== '1') {
   rmSync(baselineFolder, { recursive: true, force: true });
 }
 
 export const config: WebdriverIO.Config = {
   runner: 'local',
-  specs: process.env.AIRWIKI_E2E_REVIEW_FIXTURE === '1'
+  specs: process.env.AIRWIKI_E2E_SESSION_RESTORE === '1'
+    ? ['./e2e/session-restore.spec.ts']
+    : process.env.AIRWIKI_E2E_REVIEW_FIXTURE === '1'
     ? ['./e2e/review.spec.ts']
     : ['./e2e/onboarding.spec.ts'],
   maxInstances: 1,
@@ -38,7 +40,7 @@ export const config: WebdriverIO.Config = {
       formatImageName: '{tag}-{width}x{height}',
       autoSaveBaseline: process.env.UPDATE_VISUAL_BASELINES === '1',
       alwaysSaveActualImage: true,
-      clearRuntimeFolder: true,
+      clearRuntimeFolder: process.env.AIRWIKI_E2E_SESSION_RESTORE !== '1',
       disableBlinkingCursor: true,
       disableCSSAnimation: true,
       enableLegacyScreenshotMethod: true,

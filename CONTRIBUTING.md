@@ -61,6 +61,9 @@ Run `cargo deny --locked check` whenever dependencies or `Cargo.lock` change. UI
 Tests must not download models, contact real peers or external services, open external URLs, or require private credentials. Loopback, in-process peers, fake providers, and temporary directories are acceptable.
 
 `pnpm --dir apps/desktop/ui e2e` builds and runs the isolated desktop journey.
+The normal journey then exits through the UI quit handler and starts a second
+process against the same temporary database to verify local reading and panel
+restoration. It does not restore a query or remote browsing session.
 Set `AIRWIKI_E2E_REVIEW_FIXTURE=1` for the review journey with synthetic drafts,
 stored evidence and real publication IPC, without installing inference models.
 The fixture is compiled only with the debug-only `e2e` feature and requires a

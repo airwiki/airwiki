@@ -68,6 +68,12 @@ Set `AIRWIKI_E2E_REVIEW_FIXTURE=1` for the review journey with synthetic drafts,
 stored evidence and real publication IPC, without installing inference models.
 The fixture is compiled only with the debug-only `e2e` feature and requires a
 temporary E2E data root. The runner creates and removes that root automatically.
+Every `e2e` build requires an existing `airwiki-e2e-*` directory directly inside
+the operating system's temporary directory. Launching it without that explicit
+root fails before profile discovery; it never falls back to the normal user
+profile. Retained profiles can be reused, but linked data/config directories
+are rejected. Use the runner or provide its isolated environment before attaching
+a UI inspection tool to an installed debug candidate.
 Rebuild with `e2e` after other Cargo commands rebuild the desktop binary so the
 runner uses the Tauri E2E configuration and embedded UI.
 Its quit-event checks complement, but do not replace, installed-platform checks

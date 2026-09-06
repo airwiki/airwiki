@@ -497,9 +497,13 @@ reproducible está en [CONTRIBUTING.md](../CONTRIBUTING.md).
 Esta comprobación detectó y corrigió un estado de inicio automático que seguía
 anunciando comprobación después de terminar sin datos, y un evento de cierre
 atrasado que podía cerrar un inspector recién abierto. Las pruebas cubren el
-reintento del estado y la conservación del diálogo y el foco. La restauración
-exacta del scroll al volver de Ajustes aún está bajo diagnóstico en CI; estas
-capturas no sustituyen esa comprobación funcional.
+reintento del estado y la conservación del diálogo y el foco. La pérdida de
+70 píxeles al volver de Ajustes se reprodujo en el WebView nativo al activar
+los estilos de movimiento reducido: una duración global mínima animaba el
+espaciado de un contenedor estático. La corrección desactiva esas transiciones,
+y el recorrido comprueba la posición exacta con ambos modos de movimiento,
+restaurando después las reglas originales. Esta activación de CSS en la prueba
+no modifica la preferencia del sistema ni sustituye su aceptación instalada.
 
 Siguen pendientes las referencias visuales de Windows, la revisión independiente
 y la aceptación instalada completa de ambas plataformas.

@@ -308,6 +308,10 @@ and remote libraries, page indexes and empty states. It inherits text color and
 is decorative beside a named control; labels convey identity and access state.
 The official application logo remains a separate brand asset.
 
+Reduced motion disables CSS animations and transitions. Do not assign a small
+nonzero transition duration globally: it also animates otherwise static layout
+properties and can clamp a restored reading position during a route change.
+
 ## Windows and Fluent adaptation
 
 Windows uses the same product hierarchy and semantic roles, while retaining

@@ -24,6 +24,19 @@ siguen siendo la autoridad sobre el comportamiento actual. El plan se enlaza
 desde [PLANS.md](../PLANS.md) como activo. El trabajo de instaladores queda en
 pausa, conservando sus pendientes y sin crear una dependencia con su firma pública.
 
+### Prioridad de cierre — 2026-09-06
+
+La entrega prioriza los recorridos cotidianos: entender qué hacer, encontrar y
+leer conocimiento, revisar sin perder trabajo y volver al contexto anterior.
+La aceptación se concentra en jerarquía visual, aprovechamiento del espacio,
+navegación, legibilidad, respuesta de los controles y estados de carga y error.
+
+Por decisión del responsable de producto, la validación especializada con
+VoiceOver/Narrator y la matriz exhaustiva de accesibilidad pasan a seguimiento
+posterior y no bloquean esta entrega. Se conserva la cobertura existente de
+teclado, foco, semántica, contraste y movimiento reducido. Las comprobaciones
+aplazadas siguen sin certificar; no se registran como aprobadas.
+
 ## Camino mínimo de aceptación
 
 1. Abrir una wiki local con 50 conceptos en una ventana de 1024×720 y leer el
@@ -246,11 +259,16 @@ primero se revisa si el nuevo resultado cumple el diseño.
 | Dimensión | Casos mínimos |
 | --- | --- |
 | Ventana | 1024×720, 1180×760, 1440×900; redimensionado continuo |
-| Apariencia | Claro, oscuro, sistema, alto contraste de Windows |
-| Accesibilidad | Teclado completo, foco visible/restaurado, VoiceOver/Narrator en recorridos principales, movimiento reducido |
-| Escala e idioma | ES/EN; texto y pantalla a 125%, 150% y 200% donde el host lo permita |
+| Apariencia | Claro, oscuro y sistema; legibilidad de textos, controles y estados |
+| Interacción | Ratón y teclado, foco visible/restaurado; conservar las regresiones de movimiento reducido |
+| Escala e idioma | ES/EN; escala habitual del equipo y un aumento representativo donde el host lo permita |
 | Datos sintéticos | Biblioteca vacía y poblada; 50 conceptos con títulos largos; artículo largo; varios orígenes |
 | Estados | Carga, vacío, sin resultados, parcial, desconexión, error/reintento, revocación y revisión obsoleta |
+
+El seguimiento posterior incluye anuncios y navegación de VoiceOver/Narrator,
+alto contraste de Windows y la matriz exhaustiva de texto/pantalla a
+125%, 150% y 200%. Un desbordamiento o control inaccesible observado durante
+los recorridos cotidianos sí se corrige en esta entrega.
 
 La suite actual que exige `overflow: visible` debe reformularse cuando cambie
 el layout: probar que se alcanza el artículo, que no hay clipping y que foco y
@@ -597,7 +615,9 @@ VoiceOver sigue sin verificarse: la herramienta permite activar su ajuste,
 pero no observar los anuncios, incluso con el panel de subtítulos habilitado.
 
 Siguen pendientes las referencias visuales de Windows y la aceptación instalada
-completa de ambas plataformas.
+en Windows de los recorridos cotidianos.
+La validación especializada de accesibilidad queda como seguimiento no bloqueante
+según la prioridad de cierre indicada arriba.
 
 - [ ] Fase 1: ventana mínima, W enlazada y base visual.
 - [ ] Fase 2: navegación y biblioteca.

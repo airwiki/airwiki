@@ -479,8 +479,24 @@ lo abre de nuevo con la misma base temporal: restaura el concepto vigente y el
 panel, mantiene vacía la búsqueda y conserva el índice de 50 conceptos accesible.
 Esta evidencia automatizada todavía no cierra la aceptación instalada manual.
 
-Siguen pendientes la revisión independiente, las baselines consolidadas y la
-aceptación instalada completa de ambas plataformas.
+La fase 7 incorpora 64 referencias visuales nativas de macOS: Biblioteca vacía,
+General, lector y Fuentes, más propuesta, evidencia y comparación en revisión.
+Cubren ES/EN, claro/oscuro y ventanas de 1024×720, 1180×760 y 1440×900; los nombres
+registran el área real del WebView, descontando la barra de la ventana. Las
+capturas sintéticas se inspeccionaron antes de actualizar las referencias, y
+ambos recorridos pasan después la comparación sin regenerarlas. La actualización
+queda limitada a la plataforma y al recorrido seleccionados. El procedimiento
+reproducible está en [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+Esta comprobación detectó y corrigió un estado de inicio automático que seguía
+anunciando comprobación después de terminar sin datos, y un evento de cierre
+atrasado que podía cerrar un inspector recién abierto. Las pruebas cubren el
+reintento del estado y la conservación del diálogo y el foco. La restauración
+exacta del scroll al volver de Ajustes aún está bajo diagnóstico en CI; estas
+capturas no sustituyen esa comprobación funcional.
+
+Siguen pendientes las referencias visuales de Windows, la revisión independiente
+y la aceptación instalada completa de ambas plataformas.
 
 - [ ] Fase 1: ventana mínima, W enlazada y base visual.
 - [ ] Fase 2: navegación y biblioteca.

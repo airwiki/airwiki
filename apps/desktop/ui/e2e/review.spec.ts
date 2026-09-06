@@ -1,6 +1,42 @@
 import { $, browser, expect } from '@wdio/globals';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { captureVisual, configureVisualPreferences, runVisualMatrix, setCssViewport, visualViewports } from './visual.js';
+
+async function assertReviewVisualMatrix(): Promise<void> {
+  for (const locale of ['en', 'es'] as const) {
+    for (const theme of ['light', 'dark'] as const) {
+      await configureVisualPreferences(locale, theme);
+      await $('.settings-back').click();
+      await expect($('.review-workspace h1')).toHaveText('Review maintenance');
+      await $('.review-actions .primary').waitForEnabled();
+      for (const viewport of visualViewports) {
+        await setCssViewport(viewport.width, viewport.height);
+        await browser.execute(() => document.querySelector('.drive-page')?.scrollTo({ top: 0, behavior: 'instant' }));
+        const compact = await $('.review-view-switch').isDisplayed();
+        await captureVisual(`${locale}-${theme}-review-${compact ? 'proposal' : 'comparison'}`);
+        if (compact) {
+          await $('.review-view-switch [aria-controls="review-evidence"]').click();
+          await expect($('#review-evidence')).toBeDisplayed();
+          await captureVisual(`${locale}-${theme}-review-evidence`);
+          await $('.review-view-switch [aria-controls="review-proposal"]').click();
+        }
+        const layout = await browser.execute(() => {
+          const action = document.querySelector('.review-actions .primary')?.getBoundingClientRect();
+          return {
+            overflow: document.documentElement.scrollWidth > innerWidth,
+            approvalVisible: !!action && action.top >= 0 && action.bottom <= innerHeight,
+          };
+        });
+        expect(layout).toEqual({ overflow: false, approvalVisible: true });
+      }
+    }
+  }
+  await configureVisualPreferences('en', 'light');
+  await $('.settings-back').click();
+  await setCssViewport(1440, 900);
+  await $('.review-actions .primary').waitForEnabled();
+}
 
 async function selectValue(selector: string, value: string): Promise<void> {
   expect(await browser.execute((selector, value) => {
@@ -38,6 +74,7 @@ describe('AirWiki review with real storage and IPC', () => {
     await expect($('.review-workspace h1')).toHaveText('Review maintenance');
     await $('.review-actions .primary').waitForEnabled();
     await expect($('#review-evidence')).toHaveText(expect.stringContaining('Create a local backup and verify its checksum before beginning.'));
+    if (runVisualMatrix) await assertReviewVisualMatrix();
     await $('#review-proposal input').setValue('Maintenance approved by a person');
     await requestQuitIntent();
     await $('#review-discard-title').waitForDisplayed();

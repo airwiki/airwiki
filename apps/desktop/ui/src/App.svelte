@@ -393,10 +393,31 @@
     });
   }
 
-  function scrollMainTo(top: number) {
+  let mainScrollGeneration = 0;
+
+  function scrollMainTo(top: number, afterLayout = false) {
+    const generation = ++mainScrollGeneration;
     const target = Math.max(0, top);
     void tick().then(() => {
-      mainScrollRegion?.scrollTo({ top: target, left: 0, behavior: 'auto' });
+      if (generation !== mainScrollGeneration) return;
+      if (!afterLayout) {
+        mainScrollRegion?.scrollTo({ top: target, left: 0, behavior: 'auto' });
+        return;
+      }
+      // Route changes also change the scroll container's padding. Wait for the
+      // layout boundary so a bottom-of-article position is not clamped against
+      // the temporary Settings geometry. Occluded WebViews can suspend frames.
+      let frame = 0;
+      let fallback = 0;
+      const restore = () => {
+        window.cancelAnimationFrame(frame);
+        window.clearTimeout(fallback);
+        if (generation === mainScrollGeneration) {
+          mainScrollRegion?.scrollTo({ top: target, left: 0, behavior: 'auto' });
+        }
+      };
+      frame = window.requestAnimationFrame(restore);
+      fallback = window.setTimeout(restore, 16);
     });
   }
 
@@ -1273,6 +1294,7 @@
     }).catch(() => { runtimeMessageId = 'error-generic'; });
     return () => {
       disposed = true;
+      mainScrollGeneration += 1;
       workspacePersistence?.dispose();
       cancelScheduledSearch();
       window.removeEventListener('hashchange', syncRoute);
@@ -1442,12 +1464,12 @@
       const review = snapshot?.reviews.find((candidate) => candidate.wikiId === context.review?.wikiId && candidate.conceptId === context.review.conceptId);
       if (review) {
         void openReview(review, true);
-        scrollMainTo(review.sourceRevision === context.review.sourceRevision ? context.scrollTop : 0);
+        scrollMainTo(review.sourceRevision === context.review.sourceRevision ? context.scrollTop : 0, true);
         return;
       }
     }
     pushHash(context.hash === '#review' || context.hash.startsWith('#library') ? context.hash : '#library');
-    scrollMainTo(context.scrollTop);
+    scrollMainTo(context.scrollTop, true);
     restoreIndexScroll(context.indexScrollTop);
     focusRouteHeading();
     if (destination === 'library') resumePendingSearch();

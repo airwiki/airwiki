@@ -987,7 +987,8 @@ button:active:not(:disabled) { transform: scale(.985); }
 .approval-notice .row-actions { gap: 8px; }
 .approval-notice button { white-space: nowrap; }
 
-.drive-page.settings-open { padding: 0; }
+/* Match the mounted route so padding and content change in the same layout. */
+.drive-page:has(> .settings-route) { padding: 0; }
 .settings-route { width: 100%; min-height: 100%; }
 .settings-sidebar a {
   position: relative;

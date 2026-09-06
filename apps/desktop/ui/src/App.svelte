@@ -395,34 +395,12 @@
 
   let mainScrollGeneration = 0;
 
-  function scrollMainTo(top: number, afterLayout = false) {
+  function scrollMainTo(top: number) {
     const generation = ++mainScrollGeneration;
     const target = Math.max(0, top);
     void tick().then(() => {
       if (generation !== mainScrollGeneration) return;
-      if (!afterLayout) {
-        mainScrollRegion?.scrollTo({ top: target, left: 0, behavior: 'auto' });
-        return;
-      }
-      // Route changes also change the scroll container's padding. Wait for the
-      // layout boundary so a bottom-of-article position is not clamped against
-      // the temporary Settings geometry. Occluded WebViews can suspend frames.
-      let frame = 0;
-      let fallback = 0;
-      const restore = () => {
-        window.cancelAnimationFrame(frame);
-        window.clearTimeout(fallback);
-        const region = mainScrollRegion;
-        if (generation === mainScrollGeneration && region) {
-          // Frame callbacks run before layout. Resolve the current scroll
-          // extent before scrolling so the old Settings padding cannot clamp
-          // a position near the end of the restored article.
-          void region.scrollHeight;
-          region.scrollTo({ top: target, left: 0, behavior: 'auto' });
-        }
-      };
-      frame = window.requestAnimationFrame(restore);
-      fallback = window.setTimeout(restore, 16);
+      mainScrollRegion?.scrollTo({ top: target, left: 0, behavior: 'auto' });
     });
   }
 
@@ -1469,12 +1447,12 @@
       const review = snapshot?.reviews.find((candidate) => candidate.wikiId === context.review?.wikiId && candidate.conceptId === context.review.conceptId);
       if (review) {
         void openReview(review, true);
-        scrollMainTo(review.sourceRevision === context.review.sourceRevision ? context.scrollTop : 0, true);
+        scrollMainTo(review.sourceRevision === context.review.sourceRevision ? context.scrollTop : 0);
         return;
       }
     }
     pushHash(context.hash === '#review' || context.hash.startsWith('#library') ? context.hash : '#library');
-    scrollMainTo(context.scrollTop, true);
+    scrollMainTo(context.scrollTop);
     restoreIndexScroll(context.indexScrollTop);
     focusRouteHeading();
     if (destination === 'library') resumePendingSearch();
@@ -3473,7 +3451,6 @@
       class="drive-page"
       class:wiki-open={destination === 'library' && selectedWiki !== null}
       class:shared-wiki-open={destination === 'library' && sharedBrowseOpen}
-      class:settings-open={destination === 'settings'}
       bind:this={mainScrollRegion}
     >
         {#if workspaceSaveFailed}

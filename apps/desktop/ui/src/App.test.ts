@@ -3709,15 +3709,10 @@ describe('AirWiki wiki workspace', () => {
     expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id);
   });
 
-  it.each([false, true])('restores reading after Settings layout settles and respects later navigation (%s)', async (leaveReading) => {
+  it.each([false, true])('restores reading after Settings and respects later navigation (%s)', async (leaveReading) => {
     const { first } = readingHistoryFixture();
     const scroll = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (this: HTMLElement, options: ScrollToOptions | number) {
       if (typeof options === 'object') this.scrollTop = options.top ?? 0;
-    });
-    const frames: FrameRequestCallback[] = [];
-    const animationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
-      frames.push(callback);
-      return frames.length;
     });
     try {
       const { container } = render(App);
@@ -3729,11 +3724,9 @@ describe('AirWiki wiki workspace', () => {
       await fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
       await screen.findByRole('heading', { name: first.title });
       if (leaveReading) await fireEvent.click(screen.getByRole('button', { name: 'AirWiki' }));
-      await act(() => { for (const callback of frames.splice(0)) callback(0); });
       await waitFor(() => expect(main.scrollTop).toBe(leaveReading ? 0 : 318));
       expect(screen.getByRole('heading', { name: leaveReading ? 'Tus wikis' : first.title })).toBeVisible();
     } finally {
-      animationFrame.mockRestore();
       scroll.mockRestore();
     }
   });

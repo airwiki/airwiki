@@ -154,7 +154,7 @@ browse; current unavailability still hides its content. If navigation requires
 discarding edited preferences, continue the action the person requested after
 that decision. Cancelling keeps the edits and the current Settings section.
 
-Local Back/Forward navigation and the Wiki picker retain the page, view, filter
+Back/Forward navigation and the local Wiki picker retain the page, view, filter
 and reading/index positions within the session. The app keeps at most 100
 history entries and 100 recent Wiki contexts in memory. Browser history stores
 only opaque entry IDs; it never stores queries, article content or revisions.
@@ -162,6 +162,12 @@ Restoration loads the current bundle, resolves the page and requests its current
 fingerprint. Only the matching worker completion restores the article and scroll.
 A missing page leaves the current index usable; a missing Wiki or expired
 history entry returns to Library. Failed loads retain the selection for retry.
+Remote history retains the exact origin, owner, Wiki, page and list/graph choice.
+An explicit traversal requests that page again against the current remote
+workspace; only the matching completed request may display content. It never
+replays a free-form search. A failed reopen hides the earlier body, and a blocked
+public publisher cannot be reopened from history. Reloading a shared route
+without its in-memory entry returns to Library without network activity.
 Back/Forward supports Command/Control with `[` / `]`, and Alt with Left/Right,
 outside editable fields and dialogs. These session controls do not implement
 the planned SQLite persistence across application restarts.
@@ -208,16 +214,23 @@ closed. Group identity includes origin, owner and Wiki; two owners of the same
 Wiki must never share component state. Preserve backend order, bounded matches
 and the total match count. Filter counts refer to Wikis, not displayed excerpts.
 
-Returning from an exact result in the same active search restores its filter,
-scroll position and focus without resubmitting the query. The return target is
-session state and is discarded when the query or public scope changes. A local
+Returning from an exact result restores its query, filter, scroll position and
+focus without resubmitting the query. Keep at most twenty searches in memory,
+including their bounded received results. Back/Forward between queries labels
+earlier results and offers an explicit refresh; it restores no public-search
+consent. A superseded incomplete search keeps its received partial results and
+states that it did not finish. A newer completion cannot replace the historical
+view. Evicted searches return to Library without replay. Blocking a publisher
+removes its results from every cached search; unblocking does not revive them.
+Queries and snippets never enter browser history, durable state or logs.
+
+A local
 result waits for its own bundle request to complete before resolving the concept
 against the current page fingerprint. A failed load can retry that exact concept;
 unrelated or abandoned completions cannot open a cached page. Choosing another
 page cancels that pending intent; a completed bundle waits while Settings is
-visible and continues on return. This does not add
-a durable query history or cache previous searches independently of the current
-worker snapshot.
+visible and continues on return. Session history does not change worker ranking,
+publication or authorization; opening any result checks its current availability.
 
 ## Controls and targets
 

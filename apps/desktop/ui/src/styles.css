@@ -1092,6 +1092,10 @@ button:active:not(:disabled) { transform: scale(.985); }
 .settings-page .peer-list { grid-template-columns: 1fr; }
 
 .library-search { display: grid; gap: 14px; padding-top: 24px; }
+.search-history-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; margin-top: 20px; color: var(--muted); font: 400 12px/1.5 var(--font-ui); }
+.search-history-notice > div { display: grid; gap: 3px; flex: 1; min-width: 240px; }
+.search-history-notice strong { color: var(--strong); font-weight: 500; }
+.search-history-notice .text-action { display: inline-flex; align-items: center; gap: 6px; }
 .search-filter-bar { display: flex; flex-wrap: wrap; gap: 7px; }
 .search-filter-bar button { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 7px 11px; color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: var(--control-radius); cursor: pointer; }
 .search-filter-bar button:hover, .search-filter-bar button.active { color: var(--strong); background: var(--surface-raised); }

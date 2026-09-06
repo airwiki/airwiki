@@ -373,8 +373,27 @@ desbordamiento horizontal. También pasan `check`, `lint`, `check:e2e`, la
 compilación y el recorrido con IPC real en macOS. Estas comprobaciones no
 sustituyen la QA instalada.
 
-Siguen pendientes la continuidad entre búsquedas distintas del historial, el
-editor dedicado y la persistencia local. La base visual y sus pruebas no
+El historial conserva hasta veinte consultas y sus resultados recibidos solo
+en memoria. Atrás/Adelante recupera consulta, filtro y posición, etiqueta los
+resultados anteriores y ofrece actualización explícita sin restaurar el
+consentimiento público. Conserva resultados parciales de una consulta
+interrumpida; una respuesta posterior no reemplaza la vista histórica. La
+expulsión de una consulta vuelve a Biblioteca sin repetirla. Bloquear un
+publicador retira sus resultados de todas las consultas conservadas.
+
+La vuelta a una lectura remota conserva propietario, wiki, página y modo de
+vista, y solicita de nuevo la página vigente. Solo una respuesta completada
+de ese propietario y wiki puede mostrar contenido. Una reapertura fallida o
+bloqueada oculta el cuerpo anterior. La selección se conserva mientras llega
+la confirmación de una carga incremental.
+
+Pasan 272 pruebas de UI, `check`, `lint`, `check:e2e`, compilación y el recorrido
+con IPC real en macOS. Se comprobó visualmente Atrás/Adelante entre consultas,
+filtro conservado, aviso de historial y consentimiento desactivado a 1024×720
+en ES/claro y 1180×760 en EN/oscuro, sin desbordamiento horizontal. Estas
+comprobaciones usan datos sintéticos y no sustituyen la aceptación instalada.
+
+Siguen pendientes el editor dedicado y la persistencia local. La base visual y sus pruebas no
 completan por sí solas la aceptación instalada ni la matriz de accesibilidad.
 
 - [ ] Fase 1: ventana mínima, W enlazada y base visual.

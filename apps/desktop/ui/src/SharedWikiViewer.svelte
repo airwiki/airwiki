@@ -90,7 +90,9 @@
   }
 
   function synchronizeWikiSelection(wikiIdentity: string | null) {
-    if (wikiIdentity === renderedWikiIdentity) return;
+    // An unacknowledged request may temporarily hide its snapshot. Keep the
+    // selected page through that gap; only another Wiki resets the selection.
+    if (wikiIdentity === null || wikiIdentity === renderedWikiIdentity) return;
     const replacingWiki = renderedWikiIdentity !== null;
     renderedWikiIdentity = wikiIdentity;
     // App can restore this viewer after Settings. A restored selection belongs

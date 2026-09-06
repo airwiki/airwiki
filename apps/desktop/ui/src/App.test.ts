@@ -122,6 +122,16 @@ async function submitVisibleSearch(query = 'fixture search') {
   await waitFor(() => expect(searchKnowledge).toHaveBeenCalled());
 }
 
+function historySearch(requestId: string, title: string, source: 'local' | 'public' = 'local', status: SearchStatus = 'complete') {
+  return searchSummary(requestId, status === 'searching' ? 'partial' : 'complete', [{
+    conceptId: title, wikiId: source === 'local' ? snapshot.wikis[0].id : 'history-public-wiki', title,
+    snippet: `${title} received excerpt`, headingOrPage: 'Guide', logicalResourceUri: 'urn:airwiki:search-history',
+    sourceRevision: 1, sourceSha256: 'a'.repeat(64), rank: 1,
+    nodeId: source === 'local' ? snapshot.nodeId! : 'history-publisher',
+    route: source === 'local' ? 'deviceNetwork' : 'publicNetwork', assurance: null, lifecycle: 'stable'
+  }], status);
+}
+
 async function openSettingsSection(section: 'general' | 'connections' | 'apps') {
   await waitFor(() => {
     expect(
@@ -2651,6 +2661,225 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByText('No encontramos evidencia coincidente')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Tus wikis' })).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Tus wikis' })).toBeInTheDocument();
+  });
+
+  it('restores different completed queries, origin filters and scroll without restoring public consent', async () => {
+    activateLocalSearch();
+    snapshot.search = historySearch('public-history', 'Public history result', 'public');
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (this: HTMLElement, options: ScrollToOptions | number) {
+      if (typeof options === 'object') this.scrollTop = options.top ?? 0;
+    });
+    const { container } = render(App);
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
+    await submitVisibleSearch('consulta pública anterior');
+    await fireEvent.click(screen.getByRole('button', { name: 'Públicas 1' }));
+    const main = container.querySelector<HTMLElement>('.drive-page')!;
+    main.scrollTop = 417;
+    const firstEntry = window.history.state;
+    await deliverSnapshot('unrelated', { search: historySearch('local-history', 'Local history result') });
+    await submitVisibleSearch('consulta local nueva');
+    await fireEvent.click(screen.getByRole('button', { name: 'Este equipo 1' }));
+    main.scrollTop = 86;
+    expect(window.history.state).not.toEqual(firstEntry);
+    expect(Object.keys(window.history.state)).toEqual(['airwikiNavigation']);
+    expect(JSON.stringify(window.history.state)).not.toMatch(/consulta|history|excerpt|publisher/);
+    await fireEvent.keyDown(window, { key: '[', metaKey: true });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('consulta pública anterior'));
+    expect(screen.getByRole('button', { name: 'Públicas 1' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Public history result received excerpt')).toBeVisible();
+    expect(screen.queryByText('Local history result received excerpt')).not.toBeInTheDocument();
+    expect(screen.getByText('Resultados anteriores de esta sesión')).toBeVisible();
+    expect(screen.getByRole('checkbox', { name: 'Incluir públicas' })).not.toBeChecked();
+    await waitFor(() => expect(main.scrollTop).toBe(417));
+    await fireEvent.keyDown(window, { key: ']', metaKey: true });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('consulta local nueva'));
+    expect(screen.getByText('Local history result received excerpt')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Este equipo 1' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(main.scrollTop).toBe(86));
+    expect(searchKnowledge).toHaveBeenCalledTimes(2);
+    expect(explorePublicWikis).not.toHaveBeenCalled();
+    expect(browsePublicWiki).not.toHaveBeenCalled();
+    scroll.mockRestore();
+  });
+
+  it('keeps received partial results in history while a newer search completes in the background', async () => {
+    activateLocalSearch();
+    snapshot.search = null;
+    vi.mocked(searchKnowledge).mockResolvedValueOnce('first-inflight').mockResolvedValueOnce('second-inflight');
+    render(App);
+    await submitVisibleSearch('primera consulta');
+    await deliverSnapshot('first-inflight', { search: historySearch('first-inflight', 'Partial history result', 'local', 'searching') });
+    await submitVisibleSearch('segunda consulta');
+    await fireEvent.keyDown(window, { key: '[', metaKey: true });
+    await waitFor(() => expect(screen.getByText('Partial history result received excerpt')).toBeVisible());
+    expect(screen.getByText('Esta búsqueda no se completó. Se conservan los resultados recibidos; puedes volver a intentarlo.')).toBeVisible();
+    await deliverSnapshot('second-inflight', { search: historySearch('second-inflight', 'Background result') });
+    expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('primera consulta');
+    expect(screen.queryByText('Background result received excerpt')).not.toBeInTheDocument();
+    await fireEvent.keyDown(window, { key: ']', metaKey: true });
+    await waitFor(() => expect(screen.getByText('Background result received excerpt')).toBeVisible());
+    expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('segunda consulta');
+    expect(searchKnowledge).toHaveBeenCalledTimes(2);
+  });
+
+  it('refreshes a restored public query with the currently selected private scope', async () => {
+    activateLocalSearch();
+    snapshot.search = historySearch('public-before-refresh', 'Previous public evidence', 'public');
+    render(App);
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
+    await submitVisibleSearch('consulta pública recibida');
+    await deliverSnapshot(null, { search: historySearch('next-private', 'Private evidence') });
+    await submitVisibleSearch('otra consulta');
+    await fireEvent.keyDown(window, { key: '[', metaKey: true });
+    await waitFor(() => expect(screen.getByText('Previous public evidence received excerpt')).toBeVisible());
+    vi.mocked(searchKnowledge).mockResolvedValueOnce('private-refresh');
+    await fireEvent.click(screen.getByRole('button', { name: 'Actualizar resultados' }));
+    expect(searchKnowledge).toHaveBeenLastCalledWith('consulta pública recibida', false);
+    expect(screen.queryByText('Previous public evidence received excerpt')).not.toBeInTheDocument();
+  });
+
+  it.each(['nearby', 'public'] as const)('reopens a %s reading from query history using its exact owner, page and current revision', async (source) => {
+    activateLocalSearch();
+    const ownerId = 'history-owner';
+    const browseApi = source === 'public' ? browsePublicWiki : browseNearbyWiki;
+    const initialId = 'initial-history-browse';
+    const restoredId = 'restored-history-browse';
+    vi.mocked(browseApi).mockResolvedValueOnce(initialId).mockResolvedValueOnce(restoredId);
+    snapshot.search = searchSummary('remote-query', 'complete', [{
+      conceptId: 'remembered-concept', wikiId: 'remembered-wiki', title: 'Remembered result',
+      snippet: 'Received search evidence', headingOrPage: 'Guide', logicalResourceUri: 'urn:airwiki:history',
+      sourceRevision: 1, sourceSha256: 'c'.repeat(64), rank: 1, nodeId: ownerId,
+      route: source === 'public' ? 'publicNetwork' : 'deviceNetwork', assurance: null, lifecycle: 'stable'
+    }]);
+    const { container } = render(App);
+    if (source === 'public') await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
+    await submitVisibleSearch('consulta remota recordada');
+    await fireEvent.click(screen.getByRole('button', { name: source === 'public' ? 'Públicas 1' : 'Cercanas 1' }));
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (this: HTMLElement, options: ScrollToOptions | number) {
+      if (typeof options === 'object') this.scrollTop = options.top ?? 0;
+    });
+    container.querySelector<HTMLElement>('.drive-page')!.scrollTop = 137;
+    await openFirstSearchMatch();
+    const base = { ...publishedRemoteWorkspace('remembered-concept', 'Remembered article', 'Previously received remote body'),
+      requestId: initialId, wikiId: 'remembered-wiki', wikiName: 'Remembered Wiki',
+      okfCompatibility: { kind: 'declaredV02' as const }, nextCursor: null, appendFailed: false, concepts: [] };
+    const original = source === 'nearby'
+      ? { nearbyBrowse: { ...base, peerId: ownerId, status: 'available' as const } }
+      : { publicBrowse: { ...base, publisherId: ownerId, status: 'direct' as const, description: null, languages: [] } };
+    await deliverSnapshot(initialId, original);
+    expect(screen.getByText('Previously received remote body')).toBeVisible();
+    await fireEvent.click(screen.getByRole('button', { name: 'Grafo' }));
+    container.querySelector<HTMLElement>('.drive-page')!.scrollTop = 269;
+    const remoteEntry = window.history.state;
+    await deliverSnapshot(null, { search: historySearch('different-query', 'Different query result') });
+    await submitVisibleSearch('otra consulta más reciente');
+    expect(screen.queryByText('Previously received remote body')).not.toBeInTheDocument();
+
+    window.history.replaceState(remoteEntry, '', '#library/shared');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await waitFor(() => expect(browseApi).toHaveBeenCalledTimes(2));
+    expect(browseApi).toHaveBeenLastCalledWith(ownerId, 'remembered-wiki', {
+      graphCursor: 0, targetConceptId: 'remembered-concept',
+      page: { page: { kind: 'concept', conceptId: 'remembered-concept' }, expectedFingerprint: null }
+    });
+    expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('consulta remota recordada');
+    expect(screen.getByRole('checkbox', { name: 'Incluir públicas' })).not.toBeChecked();
+    expect(screen.queryByText('Previously received remote body')).not.toBeInTheDocument();
+    expect(screen.getByText('Abriendo wiki compartida')).toBeVisible();
+    const workspace = publishedRemoteWorkspace('remembered-concept', 'Current article', 'Currently confirmed remote body');
+    workspace.documents[0].fingerprint = 'e'.repeat(64);
+    workspace.page.descriptor.fingerprint = 'e'.repeat(64);
+    const currentBase = { ...base, ...workspace, requestId: restoredId };
+    await deliverSnapshot(restoredId, source === 'nearby'
+      ? { nearbyBrowse: { ...currentBase, peerId: ownerId, status: 'available' } }
+      : { publicBrowse: { ...currentBase, publisherId: ownerId, status: 'direct', description: null, languages: [] } });
+    expect(screen.getByRole('button', { name: 'Grafo' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(container.querySelector<HTMLElement>('.drive-page')!.scrollTop).toBe(269));
+    await fireEvent.click(screen.getByRole('button', { name: 'Lista' }));
+    expect(screen.getByText('Currently confirmed remote body')).toBeVisible();
+    expect(screen.queryByText('Previously received remote body')).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a los resultados' }));
+    expect(screen.getByRole('button', { name: source === 'public' ? 'Públicas 1' : 'Cercanas 1' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(container.querySelector<HTMLElement>('.drive-page')!.scrollTop).toBe(137));
+    expect(searchKnowledge).toHaveBeenCalledTimes(2);
+    scroll.mockRestore();
+  });
+
+  it.each(['failed', 'blocked', 'wrong-owner'] as const)('hides previously received public content when a history reopen is %s', async (failure) => {
+    activateLocalSearch();
+    snapshot.search = historySearch('public-reopen-query', 'Remembered public result', 'public');
+    vi.mocked(browsePublicWiki).mockResolvedValueOnce('initial-public-history');
+    render(App);
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
+    await submitVisibleSearch('consulta pública recordada');
+    await openFirstSearchMatch();
+    const original: NonNullable<AppSnapshot['publicBrowse']> = {
+      ...publishedRemoteWorkspace('Remembered public result', 'Public article', 'Previously received public body'),
+      requestId: 'initial-public-history', wikiId: 'history-public-wiki', wikiName: 'Public Wiki',
+      publisherId: 'history-publisher', status: 'direct', description: null, languages: [],
+      okfCompatibility: { kind: 'declaredV02' }, nextCursor: null, appendFailed: false, concepts: []
+    };
+    await deliverSnapshot(original.requestId, { publicBrowse: original });
+    expect(screen.getByText('Previously received public body')).toBeVisible();
+    const remoteEntry = window.history.state;
+    await deliverSnapshot(null, { search: historySearch('new-query', 'New result') });
+    await submitVisibleSearch('consulta nueva');
+    if (failure === 'blocked') await deliverSnapshot(null, { blockedPublicPublishers: ['history-publisher'] });
+    else if (failure === 'failed') vi.mocked(browsePublicWiki).mockRejectedValueOnce(new Error('unavailable'));
+    else vi.mocked(browsePublicWiki).mockResolvedValueOnce('wrong-owner-reply');
+    window.history.replaceState(remoteEntry, '', '#library/shared');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    if (failure === 'wrong-owner') {
+      await waitFor(() => expect(browsePublicWiki).toHaveBeenCalledTimes(2));
+      await deliverSnapshot('wrong-owner-reply', { publicBrowse: { ...original,
+        requestId: 'wrong-owner-reply', publisherId: 'different-owner' } });
+    }
+    await waitFor(() => expect(screen.queryByText('Abriendo wiki compartida')).not.toBeInTheDocument());
+    expect(screen.queryByText('Previously received public body')).not.toBeInTheDocument();
+    expect(screen.queryByText('Public Wiki')).not.toBeInTheDocument();
+    expect(browsePublicWiki).toHaveBeenCalledTimes(failure === 'blocked' ? 1 : 2);
+    expect(searchKnowledge).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: 'Volver a los resultados' })).toBeVisible();
+    if (failure === 'blocked') {
+      await fireEvent.click(screen.getByRole('button', { name: 'Volver a los resultados' }));
+      await waitFor(() => expect(screen.getByRole('heading', { name: 'Resultados de búsqueda', level: 1 })).toHaveFocus());
+    }
+  });
+
+  it('removes a blocked publisher from previous searches and does not revive it on unblock', async () => {
+    activateLocalSearch();
+    snapshot.search = historySearch('blocked-history', 'Publisher history result', 'public');
+    render(App);
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
+    await submitVisibleSearch('consulta del publicador');
+    await deliverSnapshot('unrelated', { search: historySearch('safe-history', 'Safe local result') });
+    await submitVisibleSearch('consulta segura');
+    await deliverSnapshot(null, { blockedPublicPublishers: ['history-publisher'] });
+    await fireEvent.keyDown(window, { key: '[', metaKey: true });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('consulta del publicador'));
+    expect(screen.queryByText('Publisher history result received excerpt')).not.toBeInTheDocument();
+    await deliverSnapshot(null, { blockedPublicPublishers: [] });
+    expect(screen.queryByText('Publisher history result received excerpt')).not.toBeInTheDocument();
+    expect(searchKnowledge).toHaveBeenCalledTimes(2);
+    expect(browsePublicWiki).not.toHaveBeenCalled();
+  });
+
+  it('returns to Library for an evicted search without replaying its query', async () => {
+    activateLocalSearch();
+    render(App);
+    let firstEntry: unknown;
+    for (let index = 0; index < 21; index++) {
+      await deliverSnapshot(null, { search: searchSummary(`bounded-${index}`, 'complete', []) });
+      await submitVisibleSearch(`bounded query ${index}`);
+      await waitFor(() => expect(searchKnowledge).toHaveBeenCalledTimes(index + 1));
+      if (index === 0) firstEntry = window.history.state;
+    }
+    window.history.replaceState(firstEntry, '', '#library');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(await screen.findByText('Esta búsqueda ya no está en el historial de la sesión. Puedes hacer una nueva consulta.')).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('');
+    expect(searchKnowledge).toHaveBeenCalledTimes(21);
+    expect(explorePublicWikis).not.toHaveBeenCalled();
   });
 
   it('searches the latest query automatically after typing pauses', async () => {

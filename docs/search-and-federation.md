@@ -58,11 +58,21 @@ unavailability and stale assurance remain visible with details closed. Filters
 with Wiki counts
 select **All**, **This device**, **Nearby**, or **Public** without rerunning or
 re-authorizing the search. Opening a concept selects that exact match; opening
-the Wiki uses its best result. Within that active search, returning restores the
+the Wiki uses its best result. Within the session, returning restores the
 query, filter, completed results, scroll position and focus on the opened match.
 Local opening first waits for its own current Wiki bundle; a failed load retries
 the same concept rather than opening a cached page from an unrelated completion.
 Clearing the query restores the previously selected Library view.
+
+Back/Forward retains up to twenty queries and their bounded received results
+in memory. Earlier results are labeled and can be refreshed explicitly. An
+unfinished, superseded query keeps its partial results with an interruption
+notice; background completions do not replace the historical view. Eviction
+returns to Library without replaying the query. Restoring results never restores
+public-search consent. Reopening a remote reading requests the exact owner,
+Wiki and page afresh; a failed reopen cannot display its previous body. Blocking
+a public publisher removes its results throughout this session history, and
+unblocking does not revive them.
 
 **Search the public network too** is explicit consent for that search. Without
 it, **All** means this device plus currently authorized LAN peers. Successful

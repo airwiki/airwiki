@@ -96,7 +96,12 @@ describe('AirWiki review with real storage and IPC', () => {
       await writeFile(source, original);
     }
     await $('.review-actions .primary').click();
-    await expect($('.review-workspace h1')).toHaveText('Review recovery');
+    // Confirmation replaces the keyed workspace. Read the current heading on
+    // each attempt instead of retaining an element from the previous draft.
+    await browser.waitUntil(
+      () => browser.execute(() => document.querySelector('.review-workspace h1')?.textContent === 'Review recovery'),
+      { timeout: 10_000, timeoutMsg: 'Confirmed approval did not open the next draft' }
+    );
     await $('.review-actions .primary').waitForEnabled();
     await expect($('.review-progress')).toHaveText('Confirmed decisions: 1 · Pending: 1');
     await expect($('#review-evidence')).toHaveText(expect.stringContaining('restore the backup and check the recovered state.'));

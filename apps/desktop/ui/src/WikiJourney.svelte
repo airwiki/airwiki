@@ -6,6 +6,7 @@
   import { applicationClientFor, type AiClientIdentity } from './aiClientIdentity';
   import type { ApplicationAccessSummary, IntegrationClient, IntegrationSummary, WikiScanStatus, WikiSummary } from './api';
   import Spinner from './components/Spinner.svelte';
+  import { focusChoiceWithoutScroll } from './focus';
   import type { MessageArgs } from './i18n';
   import { applicationCanAccessWiki, wikiExternalAccessBlocked, wikiProjectMemoryBlocked } from './wikiAccess';
 
@@ -66,7 +67,8 @@
     return 'details';
   }
 
-  function runKnowledgeAction() {
+  function runKnowledgeAction(event: MouseEvent) {
+    focusChoiceWithoutScroll(event);
     const action = knowledgeAction();
     if (action === 'review') onreview();
     else if (action === 'repair') onrepair();
@@ -196,12 +198,12 @@
     </button>
   {/if}
   <div class="wiki-permission-actions">
-    <button class="journey-compact-share" aria-label={t('desktop-share-action')} aria-describedby={`share-state-${wiki.id}`} onclick={onaccess} disabled={wiki.restrictions.length > 0}>
+    <button class="journey-compact-share" aria-label={t('desktop-share-action')} aria-describedby={`share-state-${wiki.id}`} onclick={(event) => { focusChoiceWithoutScroll(event); onaccess(); }} disabled={wiki.restrictions.length > 0}>
       <Share2 size={15} aria-hidden="true" /><span>{t('desktop-share-action')}</span>
       <small class:attention={internetTone() === 'attention' || (wiki.peerShareable && wikiExternalAccessBlocked(wiki))}>{wiki.internetPublic ? internetStatus() : wiki.peerShareable ? `LAN · ${lanStatus()}` : t('reader-access-private')}</small>
     </button>
     <span class="sr-only" id={`share-state-${wiki.id}`}><span aria-label={`${t('desktop-compact-exposure-lan')}: ${lanStatus()}`}>LAN: {lanStatus()}.</span> <span aria-label={`${t('desktop-compact-exposure-internet')}: ${internetStatus()}`}>Internet: {internetStatus()}.</span></span>
-    <button class="journey-compact-ai" aria-label={`${t('desktop-compact-ai-manage')}. ${aiSummary()}`} aria-describedby={`ai-state-${wiki.id}`} onclick={onapps}>
+    <button class="journey-compact-ai" aria-label={`${t('desktop-compact-ai-manage')}. ${aiSummary()}`} aria-describedby={`ai-state-${wiki.id}`} onclick={(event) => { focusChoiceWithoutScroll(event); onapps(); }}>
       <Bot size={15} aria-hidden="true" /><span>{t('desktop-status-ai-apps')}</span><small>{aiSummary()}</small>
       <span class="sr-only" id={`ai-state-${wiki.id}`}>{#each aiDestinations as destination (destination.key)}{destination.name}: {destination.status}. {/each}</span>
     </button>

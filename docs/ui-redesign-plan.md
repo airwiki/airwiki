@@ -488,6 +488,16 @@ y descartar permite cerrar. VoiceOver se activó, pero la herramienta no permiti
 comprobar sus indicaciones; no se da por aprobado. Los ajustes del sistema se
 devolvieron a su estado original.
 
+La revisión instalada de macOS también comprobó teclado y foco en la cola,
+alternancia de evidencia/propuesta en la ventana mínima y conservación de
+ediciones al cancelar la salida. Una fuente sintética modificada impidió aprobar
+sin perder la propuesta; restaurarla y reintentar confirmó la decisión y terminó
+la cola. Cancelar la confirmación nativa de acceso cercano mantuvo LAN apagada.
+Esta aceptación detectó que cerrar los paneles de wiki abiertos con el ratón
+podía perder el foco del botón de origen. Los disparadores de Compartir, Apps
+de IA y Detalles ahora conservan explícitamente ese foco antes de abrir el panel;
+las regresiones de UI y el recorrido nativo comprueban su devolución al cerrar.
+
 Siguen pendientes la persistencia local en una entrega separada, las referencias
 visuales de Windows, la revisión independiente y la aceptación instalada completa.
 

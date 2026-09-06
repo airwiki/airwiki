@@ -1522,6 +1522,21 @@ describe('AirWiki wiki workspace', () => {
     expect(document.querySelector('.action-message.error')).toBeNull();
   });
 
+  it.each([/^Detalles de la wiki:/, /^Compartir$/, /Gestionar apps de IA/])(
+    'returns focus to the clicked Wiki panel trigger %s even when another element had focus',
+    async (name) => {
+      render(App);
+      await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 2 revisados/ }));
+      const trigger = screen.getByRole('button', { name });
+      screen.getByRole('heading', { name: 'Atlas', level: 1 }).focus();
+      // A WebKit pointer click does not focus buttons automatically.
+      await fireEvent.click(trigger);
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Cerrar' })).toHaveFocus());
+      await fireEvent.keyDown(window, { key: 'Escape' });
+      await waitFor(() => expect(trigger).toHaveFocus());
+    }
+  );
+
   it('keeps wiki details and sharing as separate actions', async () => {
     const { container } = render(App);
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 2 revisados/ }));

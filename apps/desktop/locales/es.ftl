@@ -1717,7 +1717,11 @@ desktop-sidebar-hide = Ocultar barra lateral
 desktop-sidebar-resize = Ancho de la barra lateral
 desktop-review-queue-title = Por revisar
 desktop-review-queue-body = Revisa las propuestas y su evidencia antes de incorporarlas a tus wikis.
-desktop-wiki-reviewed-count = { $count } conceptos revisados
+desktop-wiki-reviewed-count =
+    { $count ->
+        [one] { $count } concepto revisado
+       *[other] { $count } conceptos revisados
+    }
 desktop-wiki-pending-count = { $count } por revisar
 desktop-sidebar-shared = Wiki compartida
 

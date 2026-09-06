@@ -9,15 +9,17 @@ async function assertReviewLayout(): Promise<void> {
     const footer = document.querySelector('.review-actions')?.getBoundingClientRect();
     const workspace = document.querySelector('.drive-page')?.getBoundingClientRect();
     const content = document.querySelector('.review-content')?.getBoundingClientRect();
+    const wikiPicker = document.querySelector<HTMLElement>('.sidebar-wikis');
     return {
       overflow: document.documentElement.scrollWidth > innerWidth,
+      sidebarOverflow: !wikiPicker || wikiPicker.scrollWidth > wikiPicker.clientWidth + 1,
       approvalVisible: !!action && action.top >= 0 && action.bottom <= innerHeight,
       footerFillsWidth: !!footer && !!workspace && Math.abs(footer.left - workspace.left) < 1 && Math.abs(footer.right - workspace.right) < 1,
       footerAtBottom: !!footer && !!workspace && Math.abs(footer.bottom - workspace.bottom) < 1,
       contentReserved: !!content && !!footer && content.bottom <= footer.top,
     };
   });
-  expect(layout).toEqual({ overflow: false, approvalVisible: true, footerFillsWidth: true, footerAtBottom: true, contentReserved: true });
+  expect(layout).toEqual({ overflow: false, sidebarOverflow: false, approvalVisible: true, footerFillsWidth: true, footerAtBottom: true, contentReserved: true });
   await browser.execute(() => {
     const content = document.querySelector('.review-content');
     content?.scrollTo({ top: content.scrollHeight, behavior: 'instant' });

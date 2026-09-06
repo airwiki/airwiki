@@ -1340,7 +1340,7 @@ describe('AirWiki real IPC journey', () => {
     for (const row of libraryRows) {
       expect(row.height).toBeGreaterThanOrEqual(68);
       expect(row.height).toBeLessThanOrEqual(200);
-      expect(row.contentSummary).toContain('reviewed concepts');
+      expect(row.contentSummary).toMatch(/\d+ reviewed concepts?/);
       expect(row.accessSummary.length).toBeGreaterThan(0);
       expect(row.hasOpenLabel).toBe(false);
       expect(row.shelfRadius).not.toBeNull();

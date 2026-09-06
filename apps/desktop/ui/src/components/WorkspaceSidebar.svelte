@@ -87,7 +87,7 @@
   .wiki-picker { flex: none; margin-bottom: 8px; color: var(--strong); }
   .wiki-picker strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
   .wiki-picker:disabled { opacity: 1; cursor: default; }
-  .sidebar-wikis { min-height: 0; overflow: auto; padding: 4px; margin: -4px; scrollbar-gutter: stable; }
+  .sidebar-wikis { grid-template-columns: minmax(0, 1fr); min-height: 0; overflow: auto; padding: 4px; margin: -4px; scrollbar-gutter: stable; }
   footer { display: grid; gap: 3px; padding-top: 8px; border-top: 1px solid var(--line); }
   @media (forced-colors: active) { button.active { border-color: Highlight; } }
 </style>

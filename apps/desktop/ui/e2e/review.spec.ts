@@ -45,10 +45,13 @@ async function assertReviewVisualMatrix(): Promise<void> {
         await setCssViewport(viewport.width, viewport.height);
         await browser.execute(() => document.querySelector('.review-content')?.scrollTo({ top: 0, behavior: 'instant' }));
         const compact = await $('.review-view-switch').isDisplayed();
+        // Keep the pointer off editors after resizing so hover does not alter their borders.
+        await $('.review-workspace h1').moveTo();
         await captureVisual(`${locale}-${theme}-review-${compact ? 'proposal' : 'comparison'}`);
         if (compact) {
           await $('.review-view-switch [aria-controls="review-evidence"]').click();
           await expect($('#review-evidence')).toBeDisplayed();
+          await $('.review-workspace h1').moveTo();
           await captureVisual(`${locale}-${theme}-review-evidence`);
           await $('.review-view-switch [aria-controls="review-proposal"]').click();
         }

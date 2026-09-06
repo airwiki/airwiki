@@ -4,6 +4,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Keep onboarding navigation visible in shorter desktop windows. Long setup
+  steps scroll independently so finishing without local AI remains reachable.
+
 - Reopen the last valid local reading with the sidebar's width and collapsed
   state. Startup checks the current Wiki and page; missing selections return to
   Library, and explicit routes or onboarding take precedence. Only bounded local

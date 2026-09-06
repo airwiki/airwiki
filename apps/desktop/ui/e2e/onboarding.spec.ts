@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { captureVisual, configureVisualPreferences, runVisualMatrix, setCssViewport, visualViewports } from './visual.js';
+import { assertOnboardingLayout } from './onboarding-layout.js';
 
 function required<T>(value: T | undefined, label: string): T {
   if (value === undefined) throw new Error(`missing ${label}`);
@@ -1142,6 +1143,7 @@ describe('AirWiki real IPC journey', () => {
         expect(await localSearchNextStep.$('button').isExisting()).toBe(false);
       }
     }
+    await assertOnboardingLayout();
     const finishOnboarding = await $('main.onboarding:not(.startup) button.onboarding-action');
     await expect(finishOnboarding).toBeEnabled();
     await finishOnboarding.click();

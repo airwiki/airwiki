@@ -1372,6 +1372,7 @@ describe('AirWiki real IPC journey', () => {
     await browser.keys(['ArrowRight', 'ArrowRight']);
     await expect($('.sidebar-resizer')).toHaveAttribute('aria-valuenow', '256');
     await $('.system-status-button').click();
+    await $('a[href="#settings/general"]').click();
     await expect($('.settings-top-bar h1')).toHaveText('General');
     await $('.sidebar-toggle').click();
     await expect($('.workspace-frame')).toHaveElementClass('collapsed');

@@ -505,6 +505,68 @@ mod tests {
     }
 
     #[test]
+    fn excluded_review_can_be_approved_with_current_evidence_after_source_recovery() {
+        let fixture = fixture();
+        let excluded = fixture
+            .database
+            .exclude_review(fixture.concept_id, 1)
+            .unwrap();
+        let source = fixture
+            .database
+            .source_document(excluded.source_document_id)
+            .unwrap()
+            .unwrap();
+        let original = fs::read(&source.source_path).unwrap();
+        let review_version = fixture
+            .database
+            .review_evidence_page(fixture.concept_id, 1, None, None, 1)
+            .unwrap()
+            .unwrap()
+            .review_version;
+        let materializer = OkfPublicationMaterializer::new(fixture.database.clone());
+
+        fs::write(&source.source_path, "Synthetic source changed after review").unwrap();
+        assert!(
+            materializer
+                .approve(fixture.concept_id, fixture.draft.clone(), &review_version)
+                .is_err()
+        );
+        assert_eq!(
+            fixture
+                .database
+                .concept(fixture.concept_id)
+                .unwrap()
+                .unwrap()
+                .status,
+            DocumentStatus::Excluded
+        );
+        assert!(fixture.database.publication_claims().unwrap().is_empty());
+
+        fs::write(&source.source_path, original).unwrap();
+        let mut edited = fixture.draft.clone();
+        edited.title = "Recovered excluded proposal".into();
+        let published = materializer
+            .approve(fixture.concept_id, edited, &review_version)
+            .unwrap();
+        assert_eq!(published.status, DocumentStatus::Published);
+        assert_eq!(published.draft.title, "Recovered excluded proposal");
+        assert!(
+            OkfBundleInspector::new(fixture.database.clone())
+                .inspect_bundle(fixture.collection_id)
+                .unwrap()
+                .health
+                .is_healthy()
+        );
+        assert!(
+            materializer
+                .approve(fixture.concept_id, fixture.draft, &review_version)
+                .is_err()
+        );
+        assert_eq!(fixture.database.count("audit_events").unwrap(), 1);
+        assert!(fixture.database.publication_claims().unwrap().is_empty());
+    }
+
+    #[test]
     fn every_durable_publication_boundary_recovers_idempotently() {
         for fail_after in [
             None,

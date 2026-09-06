@@ -528,6 +528,31 @@ podía perder el foco del botón de origen. Los disparadores de Compartir, Apps
 de IA y Detalles ahora conservan explícitamente ese foco antes de abrir el panel;
 las regresiones de UI y el recorrido nativo comprueban su devolución al cerrar.
 
+El feedback visual de la aceptación corrige el footer de revisión: ocupa todo el
+ancho y su propia fila inferior, mientras evidencia y propuesta se desplazan por
+encima sin ocultar el final del editor. La barra de búsqueda queda en una fila;
+el acceso al estado de IA aparece en la página de búsqueda cuando una consulta
+necesita resolver su disponibilidad. Las comprobaciones de geometría cubren los
+tres tamaños, y las capturas nativas se revisaron en ES/EN y claro/oscuro.
+
+La comprobación instalada confirmó el footer en 1180×760 y 1024×720, claro y
+oscuro, desplazamiento hasta el final del editor, foco visible en la aprobación
+por teclado y retorno desde Ajustes a la misma posición. El acceso de recuperación
+abre General y conserva la consulta al volver. También detectó y corrigió dos
+fallos: cambiar de idioma en el onboarding ahora traduce inmediatamente la página
+y sus controles; aprobar un excluido vuelve a funcionar con evidencia vigente.
+Ambos se reprodujeron antes de corregirlos y se comprobaron después en el
+candidato instalado con datos sintéticos. La regresión de publicación además
+rechaza una fuente modificada, permite reintentar tras restaurarla y evita una
+segunda aprobación. Pasan las pruebas de UI y las 369 del núcleo, Clippy, formato,
+tipos, lint y ambos recorridos nativos. Esta evidencia no sustituye los pendientes
+de aceptación y revisión indicados abajo.
+La comparación final de ambos recorridos pasa sin regenerar referencias. Dos
+intentos previos se detuvieron al abrir Fuentes o devolver el foco de un panel;
+las repeticiones sin cambios funcionales pasaron. Se conservan como fallos
+intermitentes de la automatización para la aceptación final, sin atribuirles una
+causa no demostrada ni darlos por corregidos.
+
 Siguen pendientes las referencias visuales de Windows, la revisión independiente
 y la aceptación instalada completa de ambas plataformas.
 

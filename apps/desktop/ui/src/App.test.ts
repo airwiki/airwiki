@@ -3514,6 +3514,7 @@ describe('AirWiki wiki workspace', () => {
     window.location.hash = '#search';
     render(App);
     const form = await screen.findByRole('search');
+    expect(within(form).queryByRole('button', { name: 'Ver estado de la IA local' })).not.toBeInTheDocument();
     const input = form.querySelector('input');
     expect(input).not.toBeNull();
     input!.focus();

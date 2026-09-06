@@ -41,9 +41,10 @@
   $: totalSteps = reviewStep + 1;
   $: stepIndexes = Array.from({ length: totalSteps }, (_, index) => index);
 
-  function t(id: string, args?: Record<string, string>): string {
-    return message(locale, id, args);
+  function translatorFor(currentLocale: LocalePreference) {
+    return (id: string, args?: Record<string, string>) => message(currentLocale, id, args);
   }
+  $: t = translatorFor(locale);
 
   async function moveTo(nextStep: number) {
     step = nextStep;

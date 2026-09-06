@@ -442,7 +442,24 @@ continuar con Enter y también cancelar con Escape. Descartar cierra el proceso.
 Esta comprobación usa la configuración aislada E2E y no certifica distribución
 pública, bandeja, Windows ni la matriz completa de accesibilidad.
 
-Siguen pendientes la persistencia local y la aceptación instalada completa.
+La presentación de la fase 6 prioriza modelo, estado y siguiente acción en
+General. La explicación extensa queda plegada; licencia, descarga, espacio,
+cancelación y recuperación permanecen visibles. Conexiones reúne preferencia
+LAN y estado de dispositivos; Apps de IA simplifica sus filas conservando
+estados distintos, errores, acciones y consentimiento público por app.
+La búsqueda solo anuncia preparación mientras existe una operación real;
+si falta el runtime, dirige a su estado en Ajustes sin simular progreso.
+
+Pasan 296 pruebas de UI, `check`, `lint`, `check:e2e`, compilación y los dos
+recorridos con IPC real en macOS: navegación y revisión. El recorrido de Ajustes
+comprueba que modelo, perfil y acciones de preferencias siguen accesibles a
+1024, 1180 y 1440 px. Se inspeccionaron capturas sintéticas de IA lista,
+descarga, conexiones e integraciones en ES/EN y claro/oscuro. La comprobación
+manual de esta entrega en el candidato instalado sigue pendiente: el escritorio
+de macOS estaba bloqueado al intentarla. Los E2E no sustituyen esa aceptación.
+
+Siguen pendientes la persistencia local en una entrega separada y la aceptación
+instalada completa.
 
 - [ ] Fase 1: ventana mínima, W enlazada y base visual.
 - [ ] Fase 2: navegación y biblioteca.

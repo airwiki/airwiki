@@ -171,7 +171,7 @@
             <strong>{clientName(integration.client)}</strong>
             {#if integration.activityRecent}<small class="recent-activity"><span aria-hidden="true"></span>{t('integrations-recent-activity')}</small>{/if}
           </div>
-          <p>{connectionSummary(integration)}</p>
+          {#if integration.status !== 'configured'}<p>{connectionSummary(integration)}</p>{/if}
           {#if integration.detectedVersion}<small class="integration-version">{t('integrations-version', { version: integration.detectedVersion })}</small>{/if}
         </div>
       </div>

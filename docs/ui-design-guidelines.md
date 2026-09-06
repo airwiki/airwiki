@@ -206,6 +206,23 @@ when present. Do not repeat healthy technical states on every row. Settings
 uses a named control and textual service warnings from the shared system-status
 model; it must not introduce an independent interpretation of service health.
 
+General Settings leads with the selected model, its current status and the next
+available action. Keep download size, required disk space, license, installation
+progress and recovery guidance visible. The longer explanation of local AI lives
+in a closed disclosure; a ready installation uses a short introduction. Show
+measured download progress only when a total is known, and keep cancellation
+available during preparation. Unsupported hardware and insufficient space explain
+why installation is unavailable. A pending model change explains the required
+complete restart without mislabeling the selected model as active.
+
+Settings sections and integration rows use simple separators. Connections keeps
+the LAN preference next to the actual device state. AI Apps preserves separate
+connection and workflow states, errors and recovery actions. Public search remains
+an explicit per-app control, separate from the Wiki's AI access permissions.
+Preparation language in global search requires an actual preparation in progress;
+an unavailable local runtime instead points to its state in General Settings.
+An already active runtime remains usable while another model awaits restart.
+
 Search groups prioritize concept titles, excerpts and provenance. Keep the Wiki
 name, source owner and total match count in a compact header; extended Wiki
 metadata belongs in a disclosure. Unavailable sources, restricted compatibility,

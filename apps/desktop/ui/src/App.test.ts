@@ -3449,8 +3449,8 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.input(input!, { target: { value: 'consulta preparada' } });
     expect(input).toHaveValue('consulta preparada');
 
-    expect(await screen.findByRole('heading', { name: 'Preparando la búsqueda local' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Preparando la búsqueda local' })).toBeDisabled();
+    expect(await screen.findByRole('heading', { name: 'La búsqueda local no está disponible' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'La búsqueda local no está disponible' })).toBeDisabled();
     await fireEvent.click(screen.getByRole('button', { name: 'Ver estado de la IA local' }));
     expect(window.location.hash).toBe('#settings/general');
   });
@@ -3466,6 +3466,49 @@ describe('AirWiki wiki workspace', () => {
     await waitFor(() => expect(updatePreferences).toHaveBeenCalledWith(expect.objectContaining({ completeOnboarding: true })));
     expect(await screen.findByRole('heading', { name: 'General' })).toBeInTheDocument();
     expect(window.location.hash).toBe('#settings/general');
+  });
+
+  it('reports search preparation only while a real preparation is in progress', async () => {
+    window.location.hash = '#search';
+    render(App);
+    const input = (await screen.findByRole('search')).querySelector('input');
+    expect(input).not.toBeNull();
+    input!.focus();
+    await fireEvent.input(input!, { target: { value: 'consulta sin preparar' } });
+    await screen.findByRole('heading', { name: 'La búsqueda local no está disponible' });
+    await deliverSnapshot(null, { modelInstall: { status: 'queued', downloaded: 0, totalBytes: 0 } });
+    expect(await screen.findByRole('heading', { name: 'Preparando la búsqueda local' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Preparando la búsqueda local' })).toBeDisabled();
+    await deliverSnapshot(null, { modelInstall: null });
+    expect(await screen.findByRole('heading', { name: 'La búsqueda local no está disponible' })).toBeVisible();
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
+  it('keeps download requirements and recovery visible before installing local AI', async () => {
+    window.location.hash = '#settings/general';
+    activateLocalSearch();
+    snapshot.model = { ...snapshot.model!, active: false, installed: false, licenseAccepted: false, downloadBytes: 3221225472, requiredFreeBytes: 4294967296, fitsAvailableDisk: false, issues: ['synthetic-unavailable'] };
+    render(App);
+    await screen.findByRole('heading', { name: 'IA local de AirWiki' });
+    expect(screen.getByText('Descarga: 3.0 GiB')).toBeVisible();
+    expect(screen.getByText('Espacio necesario: 4.0 GiB')).toBeVisible();
+    expect(screen.getByText('No hay espacio libre suficiente para preparar este modelo.')).toBeVisible();
+    expect(screen.getByText(/Vuelve a preparar el modelo para comprobar sus archivos/)).toBeVisible();
+    expect(screen.queryByText('synthetic-unavailable')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Instalar IA local' })).toBeDisabled();
+    await deliverSnapshot(null, { model: { ...snapshot.model!, fitsAvailableDisk: true } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Instalar IA local' }));
+    await waitFor(() => expect(installModels).toHaveBeenCalledOnce());
+  });
+
+  it('explains unsupported hardware without offering an installation that cannot run', async () => {
+    window.location.hash = '#settings/general';
+    snapshot.hardware = { ...snapshot.hardware!, canInstall: false };
+    render(App);
+    await screen.findByRole('heading', { name: 'IA local de AirWiki' });
+    expect(screen.getByRole('button', { name: 'Instalar IA local' })).toBeDisabled();
+    expect(screen.getByText(/Este equipo no puede preparar un perfil de IA local compatible/)).toBeVisible();
+    expect(installModels).not.toHaveBeenCalled();
   });
 
   it('keeps an onboarding recovery error visible when saving completion fails', async () => {
@@ -3517,9 +3560,13 @@ describe('AirWiki wiki workspace', () => {
     render(App);
 
     expect(await screen.findByRole('heading', { name: 'IA local de AirWiki' })).toBeInTheDocument();
-    expect(screen.getByText('No publica, comparte ni modifica tus documentos fuente.')).toBeInTheDocument();
+    const explanation = screen.getByText('Cómo funciona la IA local').closest('details');
+    expect(explanation).not.toHaveAttribute('open');
+    await fireEvent.click(screen.getByText('Cómo funciona la IA local'));
+    expect(within(explanation!).getByText('No publica, comparte ni modifica tus documentos fuente.')).toBeInTheDocument();
     expect(screen.getByText('Gemma 4 E4B Q4')).toBeInTheDocument();
-    expect(screen.getByText('En uso')).toBeInTheDocument();
+    expect(screen.getByText('Preparación y búsqueda disponibles en este equipo. Tus documentos permanecen en local.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ver licencia' })).toBeEnabled();
     const selector = screen.getByRole('combobox', { name: 'Perfil del modelo' });
     expect(selector).toHaveValue('automatic');
 
@@ -3542,7 +3589,8 @@ describe('AirWiki wiki workspace', () => {
     await screen.findByRole('heading', { name: 'IA local de AirWiki' });
     const settings = container.querySelector<HTMLElement>('.local-ai-settings');
     expect(settings).not.toBeNull();
-    expect(await within(settings!).findAllByText('Reinicio necesario')).toHaveLength(2);
+    expect(await within(settings!).findAllByText('Reinicio necesario')).toHaveLength(1);
+    expect(within(settings!).getByText('Cierra AirWiki completamente y vuelve a abrirlo para activar el modelo seleccionado.')).toBeVisible();
     expect(within(settings!).queryByText('En uso')).not.toBeInTheDocument();
     expect(within(settings!).queryByRole('button', { name: 'Instalar IA local' })).not.toBeInTheDocument();
   });

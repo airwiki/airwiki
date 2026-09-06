@@ -24,6 +24,7 @@
   import ConnectionAdvanced from './ConnectionAdvanced.svelte';
   import GlobalSearch from './GlobalSearch.svelte';
   import IntegrationList from './IntegrationList.svelte';
+  import LocalAiSettings from './components/LocalAiSettings.svelte';
   import OnboardingFlow from './OnboardingFlow.svelte';
   import PublicWikiTable from './PublicWikiTable.svelte';
   import SharedWikiViewer from './SharedWikiViewer.svelte';
@@ -45,7 +46,7 @@
   import TextField from './components/controls/TextField.svelte';
   import { focusChoiceWithoutScroll } from './focus';
   import { message, resolveLocale, type MessageArgs } from './i18n';
-  import { localAiModelReady, localAiModelRestartPending, pendingApprovalCount, systemStatuses, type SystemStatusItem, type SystemStatusTarget } from './systemStatus';
+  import { localAiModelReady, localAiModelRestartPending, localSearchState, pendingApprovalCount, systemStatuses, type SystemStatusItem, type SystemStatusTarget } from './systemStatus';
   import { wikiIsPrivate } from './wikiAccess';
   import { wikiRequiresAttention } from './wikiHealth';
   import airwikiMark from './assets/airwiki-mark-transparent.png';
@@ -3418,7 +3419,8 @@
                 <div class="search-history-notice" role="status"><History size={16} aria-hidden="true" /><div><strong>{t('desktop-search-history-title')}</strong><span>{t(activeSearchSession.includePublic ? 'desktop-search-history-public' : 'desktop-search-history-private')}</span></div><button class="text-action" onclick={submitGlobalSearch} disabled={searchBusy}><RefreshCw size={14} aria-hidden="true" />{t('desktop-search-history-refresh')}</button></div>
               {/if}
               {#if !snapshot.model?.active && !activeSearchSession}
-                <div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t('desktop-search-preparing-title')}</h2><p>{t('desktop-search-preparing-body')}</p></div>
+                {@const readinessKey = localSearchState(snapshot) === 'preparing' ? 'desktop-search-preparing' : 'desktop-search-unavailable'}
+                <div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t(`${readinessKey}-title`)}</h2><p>{t(`${readinessKey}-body`)}</p></div>
               {:else if searchBusy && !activeSearchSummary}
                 <div class="search-results" aria-busy="true"><LoadingState label={t('search-running')} detail={t('desktop-search-loading-detail')} tone="ai" /><LoadingSkeleton variant="results" rows={3} /></div>
               {:else if activeSearchSummary}
@@ -3640,84 +3642,19 @@
 
               <div class="settings-page">
                 {#if settingsSection === 'general'}
-                  {@const generalStatus = settingsStatuses.find((status) => status.id === 'general')}
-                  {@const selectedModelReady = localAiModelReady(snapshot)}
-                  {@const selectedModelPending = localAiModelRestartPending(snapshot)}
-                  <section class="local-ai-settings" aria-labelledby="local-ai-settings-title">
-                    <div class="settings-section-heading">
-                      <div>
-                        <p class="section-label">{t('settings-local-ai')}</p>
-                        <h2 id="local-ai-settings-title">{t('settings-local-ai-title')}</h2>
-                        <p>{t('settings-local-ai-body')}</p>
-                      </div>
-                      <span class={`settings-state ${generalStatus?.tone ?? 'off'}`}><span aria-hidden="true"></span>{generalStatus?.detail ?? t('desktop-model-needs-setup-short')}</span>
-                    </div>
-
-                    <ul class="local-ai-purpose-list">
-                      <li><FileText size={17} aria-hidden="true" /><span><strong>{t('settings-local-ai-drafts-title')}</strong><small>{t('settings-local-ai-drafts-body')}</small></span></li>
-                      <li><Sparkles size={17} aria-hidden="true" /><span><strong>{t('settings-local-ai-search-title')}</strong><small>{t('settings-local-ai-search-body')}</small></span></li>
-                      <li><CheckCircle2 size={17} aria-hidden="true" /><span><strong>{t('settings-local-ai-control-title')}</strong><small>{t('settings-local-ai-control-body')}</small></span></li>
-                    </ul>
-
-                    <div class="local-model-control">
-                      <SelectField
-                        label={t('settings-model-selector')}
-                        description={t('settings-model-selector-help')}
-                        value={snapshot.model?.profile ?? 'automatic'}
-                        onchange={changeLocalModelProfile}
-                        options={[
-                          { value: 'automatic', label: t('settings-model-profile-automatic') },
-                          { value: 'efficient', label: t('settings-model-profile-efficient') },
-                          { value: 'quality', label: t('settings-model-profile-quality') }
-                        ]}
-                        disabled={actionBusy || snapshot.modelInstall !== null}
-                      />
-                      <div class="local-model-summary">
-                        <div class="local-model-summary-heading">
-                          <span><small>{t('settings-model-selected')}</small><strong>{snapshot.model?.displayName ?? t('component-local-ai')}</strong></span>
-                          <span class="local-model-state" class:ready={selectedModelReady} class:warning={selectedModelPending || snapshot.model?.fitsAvailableDisk === false}>{t(selectedModelReady ? 'settings-local-model-active' : selectedModelPending ? 'settings-local-model-restart-needed' : snapshot.model?.installed ? 'settings-local-model-installed' : 'settings-local-model-download-needed')}</span>
-                        </div>
-                        <p>{t('settings-model-profile-explanation')}</p>
-                        {#if snapshot.model}
-                          <div class="local-model-metadata">
-                            {#if !snapshot.model.installed && snapshot.model.downloadBytes > 0}<span>{t('settings-model-download-size', { size: formatBytes(snapshot.model.downloadBytes) })}</span>{/if}
-                            {#if !snapshot.model.installed && snapshot.model.requiredFreeBytes > 0}<span>{t('settings-model-space-needed', { size: formatBytes(snapshot.model.requiredFreeBytes) })}</span>{/if}
-                            {#if snapshot.model.degraded}<span class="warning-copy">{t('settings-model-compatible-fallback')}</span>{/if}
-                            {#if !snapshot.model.fitsAvailableDisk}<span class="warning-copy">{t('settings-model-insufficient-space')}</span>{/if}
-                          </div>
-                        {/if}
-                      </div>
-                    </div>
-
-                    {#if snapshot.modelInstall}
-                      <div class="model-install-state">
-                        {#if snapshot.modelInstall.status === 'downloading' && snapshot.modelInstall.totalBytes > 0}
-                          <progress aria-label={modelInstallLabel(locale)} max={snapshot.modelInstall.totalBytes} value={snapshot.modelInstall.downloaded}></progress>
-                          <div class="model-install-copy" role="status" aria-live="polite"><strong>{modelInstallLabel(locale)}</strong><small>{t('models-install-progress', { downloaded: formatBytes(snapshot.modelInstall.downloaded), total: formatBytes(snapshot.modelInstall.totalBytes) })}</small></div>
-                        {:else}
-                          <div class="model-install-wait" role="status" aria-live="polite"><Spinner size="small" /><div><strong>{modelInstallLabel(locale)}</strong><small>{t(snapshot.modelInstall.status === 'queued' ? 'models-install-queued-detail' : 'models-install-phase-detail')}</small></div></div>
-                        {/if}
-                        <button class="secondary" onclick={cancelLocalModelInstall} disabled={actionBusy}>{t(snapshot.modelInstall.status === 'queued' ? 'models-cancel-request' : 'action-cancel')}</button>
-                      </div>
-                    {:else}
-                      <div class="local-model-actions">
-                        {#if !selectedModelReady && !selectedModelPending}<button class="primary" onclick={prepareLocalModel} disabled={actionBusy || snapshot.model?.fitsAvailableDisk === false}>{t('models-install')}</button>{/if}
-                        {#if snapshot.model?.licenseUrl}<button class="text-action" onclick={() => openVerifiedExternalLink(snapshot!.model!.licenseUrl!)}>{t('models-license-open')}</button>{/if}
-                      </div>
-                    {/if}
-                  </section>
+                  <LocalAiSettings model={snapshot.model} installation={snapshot.modelInstall} status={settingsStatuses.find((status) => status.id === 'general')} ready={localAiModelReady(snapshot)} restartPending={localAiModelRestartPending(snapshot)} canInstall={snapshot.hardware?.canInstall !== false} busy={actionBusy} installLabel={modelInstallLabel(locale)} {t} {formatBytes} onprofile={changeLocalModelProfile} onprepare={prepareLocalModel} oncancel={cancelLocalModelInstall} onlicense={() => { if (snapshot?.model?.licenseUrl) void openVerifiedExternalLink(snapshot.model.licenseUrl); }} />
                   <section class="device-preferences-section">
-                    <div class="settings-section-heading"><div><p class="section-label">{t('desktop-preferences')}</p><h2>{t('desktop-preferences')}</h2><p>{t('settings-device-preferences-body')}</p></div></div>
+                    <div class="settings-section-heading"><div><h2>{t('desktop-preferences')}</h2></div></div>
                     <div class="settings-form device-preferences-form"><SelectField label={t('settings-language')} value={locale} onchange={(value) => { locale = value as LocalePreference; }} options={[{ value: 'system', label: t('language-system') }, { value: 'en', label: 'English' }, { value: 'es', label: 'Español' }]} /><SelectField label={t('settings-theme')} value={theme} onchange={(value) => { theme = value as ThemePreference; }} options={[{ value: 'system', label: t('theme-system') }, { value: 'light', label: t('theme-light') }, { value: 'dark', label: t('theme-dark') }]} /><SelectField label={t('desktop-close')} value={closeBehavior} onchange={(value) => { closeBehavior = value as CloseBehavior; }} options={[closeBehaviorOption('ask', t('desktop-ask')), closeBehaviorOption('hide_to_tray', t('desktop-hide-tray')), closeBehaviorOption('quit', t('desktop-quit'))]} /><Switch label={t('updates-automatic')} checked={automaticUpdateChecks} onchange={(checked) => { automaticUpdateChecks = checked; }} /><p class="settings-save-state" role="status">{preferencesDirty ? t('desktop-preferences-unsaved') : t('desktop-preferences-saved')}</p><div class="settings-form-actions"><button class="secondary" onclick={resetPreferences} disabled={actionBusy || !preferencesDirty}>{t('action-cancel')}</button><button class="primary" onclick={() => savePreferences()} disabled={actionBusy || !preferencesDirty}>{t('desktop-save-preferences')}</button></div></div>
                   </section>
                   <section><p class="section-label">{t('settings-login-title')}</p><h2>{t('settings-login-heading')}</h2><p>{autostartLabel(locale)}</p><div class="row-actions"><button class="secondary" onclick={() => changeAutostart(true)} disabled={autostartBusy}>{t('action-enable')}</button><button class="secondary" onclick={() => changeAutostart(false)} disabled={autostartBusy}>{t('action-disable')}</button><button class="text-action" onclick={refreshAutostartState} disabled={autostartBusy}>{t('action-refresh')}</button></div></section>
                   <section><p class="section-label">{t('updates-title')}</p><h2>{t('updates-stable-title')}</h2><p role="status">{updaterLabel(locale, updaterAction)}</p><div class="row-actions"><button class="secondary" onclick={() => runUpdaterAction('check')} disabled={updaterRequestId !== null}>{t('updates-check-now')}</button>{#if snapshot.updater?.status === 'available'}<button class="primary" onclick={() => runUpdaterAction('download')} disabled={updaterRequestId !== null}>{t('updates-download')}</button>{:else if snapshot.updater?.status === 'readyToInstall'}<button class="primary" onclick={() => { confirmUpdateInstall = true; }} disabled={updaterRequestId !== null}>{t('updates-install')}</button>{/if}</div>{#if confirmUpdateInstall}<div class="install-confirmation"><p>{t('updates-install-confirm')}</p><button class="primary" onclick={() => runUpdaterAction('install')} disabled={updaterRequestId !== null}>{t('updates-install')}</button><button class="secondary" onclick={() => { confirmUpdateInstall = false; }} disabled={updaterRequestId !== null}>{t('action-cancel')}</button></div>{/if}</section>
                   <details class="advanced-disclosure"><summary>{t('desktop-advanced-details')}</summary><dl>{#if snapshot.nodeId}<div><dt>{t('desktop-network-identity')}</dt><dd><code>{shortPeerId(snapshot.nodeId)}</code></dd></div>{/if}{#if snapshot.mcpUrl}<div><dt>{t('diagnostics-local-mcp')}</dt><dd><code>{snapshot.mcpUrl}</code></dd></div>{/if}{#if snapshot.hardware}<div><dt>{t('desktop-memory-installed')}</dt><dd>{formatBytes(snapshot.hardware.totalMemoryBytes)}</dd></div><div><dt>{t('desktop-disk-available')}</dt><dd>{formatBytes(snapshot.hardware.availableDiskBytes)}</dd></div>{/if}</dl></details>
                 {:else if settingsSection === 'connections'}
-                  <section><p class="section-label">{t('desktop-private-network')}</p><h2>{t('desktop-lan')}</h2><SelectField label={t('desktop-lan-access')} value={lanPreference} onchange={(value) => changeLanPreference(value as LanPreference)} options={[{ value: 'undecided', label: t('settings-lan-undecided') }, { value: 'disabled', label: t('onboarding-lan-disable') }, { value: 'enabled', label: t('onboarding-lan-enable') }]} /></section>
                   <section class="private-network-section" aria-labelledby="settings-devices-title">
-                    <div class="section-heading connection-section-heading"><div><p class="section-label">{t('desktop-private-network')}</p><h2 id="settings-devices-title">{t('desktop-known-devices', { count: snapshot.peers.length })}</h2><p>{t('desktop-private-devices-summary', { visible: visiblePeerCount(), total: snapshot.peers.length })}</p></div><button class="text-action" disabled={connectivityRequestId !== null} onclick={() => runConnectivityAction('refresh')}>{t('action-refresh')}</button></div>
-                    {#if lanPreference !== 'enabled'}<div class="connection-guidance"><p>{lanPreference === 'undecided' ? t('connectivity-undecided') : t('connectivity-disabled')}</p></div>{:else if snapshot.connectivity?.networkProfile === 'public'}<div class="connection-guidance"><p>{t('connectivity-public-network')}</p><button class="secondary" onclick={() => runConnectivityAction('networkSettings')}>{t('connectivity-open-network-settings')}</button></div>{:else if snapshot.connectivity?.firewall === 'rulesMissing' && snapshot.connectivity.firewallHelper === 'verified'}<div class="connection-guidance"><p>{t('connectivity-firewall-needed')}</p><button class="secondary" onclick={() => runConnectivityAction('install')}>{t('connectivity-configure-firewall')}</button></div>{:else if snapshot.connectivity?.firewall === 'rulesMissing'}<div class="connection-guidance"><p>{t('connectivity-firewall-helper-repair')}</p></div>{:else if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure' || snapshot.connectivity?.firewall === 'managedPolicy' || snapshot.connectivity?.firewall === 'firewallDisabled' || snapshot.connectivity?.firewall === 'blockAllInbound'}<div class="connection-guidance"><p>{firewallGuidanceLabel()}</p><button class="secondary" onclick={() => runConnectivityAction('advancedFirewall')}>{t('connectivity-open-advanced-firewall')}</button></div>{:else if snapshot.connectivity?.systemPermission === 'denied'}<div class="connection-guidance"><p>{t('connectivity-failed')}</p><button class="secondary" onclick={() => runConnectivityAction('localNetworkPrivacy')}>{t('connectivity-open-local-network-settings')}</button></div>{/if}
+                    <div class="section-heading connection-section-heading"><div><h2 id="settings-devices-title">{t('desktop-known-devices', { count: snapshot.peers.length })}</h2><p>{t('desktop-private-devices-summary', { visible: visiblePeerCount(), total: snapshot.peers.length })}</p></div><button class="text-action" disabled={connectivityRequestId !== null} onclick={() => runConnectivityAction('refresh')}>{t('action-refresh')}</button></div>
+                    <SelectField label={t('desktop-lan-access')} value={lanPreference} onchange={(value) => changeLanPreference(value as LanPreference)} options={[{ value: 'undecided', label: t('settings-lan-undecided') }, { value: 'disabled', label: t('onboarding-lan-disable') }, { value: 'enabled', label: t('onboarding-lan-enable') }]} />
+                    {#if lanPreference !== 'enabled'}<div class="connection-guidance quiet"><p>{lanPreference === 'undecided' ? t('connectivity-undecided') : t('connectivity-disabled')}</p></div>{:else if snapshot.connectivity?.networkProfile === 'public'}<div class="connection-guidance"><p>{t('connectivity-public-network')}</p><button class="secondary" onclick={() => runConnectivityAction('networkSettings')}>{t('connectivity-open-network-settings')}</button></div>{:else if snapshot.connectivity?.firewall === 'rulesMissing' && snapshot.connectivity.firewallHelper === 'verified'}<div class="connection-guidance"><p>{t('connectivity-firewall-needed')}</p><button class="secondary" onclick={() => runConnectivityAction('install')}>{t('connectivity-configure-firewall')}</button></div>{:else if snapshot.connectivity?.firewall === 'rulesMissing'}<div class="connection-guidance"><p>{t('connectivity-firewall-helper-repair')}</p></div>{:else if snapshot.connectivity?.firewall === 'conflict' || snapshot.connectivity?.firewall === 'legacyExposure' || snapshot.connectivity?.firewall === 'managedPolicy' || snapshot.connectivity?.firewall === 'firewallDisabled' || snapshot.connectivity?.firewall === 'blockAllInbound'}<div class="connection-guidance"><p>{firewallGuidanceLabel()}</p><button class="secondary" onclick={() => runConnectivityAction('advancedFirewall')}>{t('connectivity-open-advanced-firewall')}</button></div>{:else if snapshot.connectivity?.systemPermission === 'denied'}<div class="connection-guidance"><p>{t('connectivity-failed')}</p><button class="secondary" onclick={() => runConnectivityAction('localNetworkPrivacy')}>{t('connectivity-open-local-network-settings')}</button></div>{/if}
                     {#if legacyLanAiGrantCount > 0}
                       <aside class="legacy-lan-ai-notice" role="note" aria-labelledby="legacy-lan-ai-title" aria-busy={legacyLanAiGrantBusy}>
                         <div><strong id="legacy-lan-ai-title">{t('desktop-legacy-lan-ai-title')}</strong><p>{t('desktop-legacy-lan-ai-body')}</p></div>
@@ -3759,7 +3696,7 @@
                 {:else}
                   <section class="integrations-settings-section">
                     <div class="section-heading">
-                      <div><p class="section-label">{t('desktop-status-ai-apps')}</p><h2>{t('integrations-title')}</h2><p>{t('desktop-integration-body')}</p></div>
+                      <div><h2>{t('integrations-title')}</h2><p>{t(snapshot.integrations?.integrations.some((integration) => integration.status === 'configured') ? 'desktop-integration-ready-body' : 'desktop-integration-body')}</p></div>
                       <button
                         class="text-action integration-refresh-action"
                         aria-busy={integrationRefreshBusy}
@@ -3822,7 +3759,7 @@
           {question}
           {includePublic}
           busy={searchBusy}
-          ready={snapshot.model?.active === true}
+          state={localSearchState(snapshot)}
           platform={snapshot.platform}
           privateScopeLabel={privateSearchScope}
           {t}

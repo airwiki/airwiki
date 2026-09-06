@@ -12,7 +12,7 @@ describe('GlobalSearch', () => {
       question: '',
       includePublic: false,
       busy: false,
-      ready: false,
+      state: 'unavailable' as const,
       platform: 'macOs' as const,
       privateScopeLabel: 'Este equipo',
       t: (id: string) => message('es', id),
@@ -25,7 +25,7 @@ describe('GlobalSearch', () => {
       onopenmodelsettings
     });
 
-    expect(screen.getByRole('button', { name: 'Preparando la búsqueda local' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'La búsqueda local no está disponible' })).toBeDisabled();
     await fireEvent.click(screen.getByRole('button', { name: 'Ver estado de la IA local' }));
     expect(onopenmodelsettings).toHaveBeenCalledTimes(1);
   });

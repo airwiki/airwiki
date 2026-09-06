@@ -109,7 +109,7 @@ if (destination === 'shared') {
     trust: 'trusted', activity: 'connected', sasWords: null, grantedWikiIds: [sharedWikiId]
   }];
 }
-if (destination === 'library' || destination === 'connections' || destination === 'share' || destination === 'ai-apps') {
+if (destination === 'library' || destination === 'connections' || destination === 'integrations' || destination === 'share' || destination === 'ai-apps') {
   snapshot.peers = [{
     peerId: '12D3KooSyntheticMacNode', deviceName: 'Atlas Mac', platform: 'macOs',
     address: '/ip4/192.0.2.2/tcp/4242', trust: 'trusted', activity: 'connected',
@@ -170,6 +170,10 @@ if (destination === 'share' || destination === 'ai-apps') {
     ownedWikiCount: 0, managedBytes: 0, grants: [{ wikiId: wiki.id, role: 'reader' }]
   });
 }
+if (destination === 'connections' && snapshot.preferences) {
+  snapshot.preferences.lanPreference = 'enabled';
+  snapshot.lanRuntime = { listener: 'listening', discovery: 'active', addressCount: 1 };
+}
 if (destination === 'graph') {
   const wiki = snapshot.wikis[0];
   snapshot.knowledge = {
@@ -191,18 +195,34 @@ if (destination === 'graph') {
 }
 if (destination === 'system') {
   snapshot.model = {
-    stateSequence: 3, profile: 'balanced', recommendedModelId: 'synthetic-local-model',
+    stateSequence: 3, profile: 'automatic', recommendedModelId: 'synthetic-local-model',
     displayName: 'Local knowledge model', recommendationReason: 'Balanced for this device',
     active: true, activeModelId: 'synthetic-local-model', installed: true, degraded: false, issues: [], pendingModelId: null,
     downloadBytes: 0, requiredFreeBytes: 0, fitsAvailableDisk: true, licenseAccepted: true,
     license: 'Apache-2.0', licenseUrl: null, revision: 'synthetic'
   };
+  const modelState = parameters.get('model');
+  if (modelState === 'missing' || modelState === 'downloading' || modelState === 'failed') {
+    snapshot.model.active = false;
+    snapshot.model.installed = false;
+    snapshot.model.licenseAccepted = false;
+    snapshot.model.activeModelId = null;
+    snapshot.model.downloadBytes = 3221225472;
+    snapshot.model.requiredFreeBytes = 4294967296;
+    if (modelState === 'failed') snapshot.model.issues = ['synthetic-activation-failed'];
+    if (modelState === 'downloading') snapshot.modelInstall = { status: 'downloading', downloaded: 1073741824, totalBytes: 3221225472 };
+  }
+  if (modelState === 'restart') {
+    snapshot.model.activeModelId = 'synthetic-previous-model';
+    snapshot.model.pendingModelId = snapshot.model.recommendedModelId;
+  }
 }
 window.location.hash = destination === 'review'
   ? 'review'
   : destination === 'graph' ? 'library/wiki'
   : destination === 'shared' || destination === 'search' ? 'library'
   : destination === 'connections' ? 'settings/connections'
+  : destination === 'integrations' ? 'settings/apps'
   : destination === 'system' ? 'settings/general'
   : destination === 'library' || destination === 'share' || destination === 'ai-apps' ? 'library' : destination;
 

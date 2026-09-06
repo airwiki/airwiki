@@ -249,6 +249,47 @@ async function setCssViewport(width: number, height: number): Promise<void> {
   throw new Error(`could not reach the ${width}x${height} CSS viewport`);
 }
 
+async function assertSettingsLayout(): Promise<void> {
+  for (const [width, height] of [[1024, 720], [1180, 760], [1440, 900]] as const) {
+    await setCssViewport(width, height);
+    await browser.execute(() => { document.querySelector('.drive-page')?.scrollTo({ top: 0, behavior: 'instant' }); });
+    const model = await browser.execute(() => {
+      const section = document.querySelector<HTMLElement>('.local-ai-settings');
+      const profile = section?.querySelector('select')?.getBoundingClientRect();
+      const header = document.querySelector('.settings-top-bar')?.getBoundingClientRect();
+      return {
+        overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+          || (section?.scrollWidth ?? 1) > (section?.clientWidth ?? 0),
+        profileVisible: !!profile && !!header && profile.top >= header.bottom && profile.bottom <= innerHeight,
+        explanationCollapsed: !section?.querySelector('details')?.open
+      };
+    });
+    expect(model).toEqual({ overflow: false, profileVisible: true, explanationCollapsed: true });
+    if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `settings-model-${width}.png`));
+    // The embedded WebKit driver's scrollIntoView command can leave the
+    // scroll region at zero; invoke the DOM operation used by focus navigation.
+    await browser.execute(() => { document.querySelector('.settings-form-actions')?.scrollIntoView({ block: 'center', behavior: 'instant' }); });
+    const preferences = await browser.execute(() => {
+      const section = document.querySelector<HTMLElement>('.device-preferences-section');
+      const actions = section?.querySelector('.settings-form-actions')?.getBoundingClientRect();
+      const header = document.querySelector('.settings-top-bar')?.getBoundingClientRect();
+      return {
+        overflow: (section?.scrollWidth ?? 1) > (section?.clientWidth ?? 0),
+        actionsVisible: !!actions && !!header && actions.top >= header.bottom && actions.bottom <= innerHeight,
+        actionsTop: actions?.top, actionsBottom: actions?.bottom, headerBottom: header?.bottom,
+        viewportHeight: innerHeight,
+        scrollRegions: Array.from(document.querySelectorAll<HTMLElement>('.drive-page, .route-page, .settings-layout, .settings-page')).map((element) => ({
+          className: element.className, top: element.scrollTop, height: element.clientHeight, scrollHeight: element.scrollHeight, overflow: getComputedStyle(element).overflowY
+        }))
+      };
+    });
+    if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `settings-preferences-${width}.png`));
+    expect(preferences.overflow).toBe(false);
+    if (!preferences.actionsVisible) throw new Error(`Preference actions were not reachable: ${JSON.stringify(preferences)}`);
+  }
+  await browser.execute(() => { document.querySelector('.drive-page')?.scrollTo({ top: 0 }); });
+}
+
 async function navigateToDestination(index: number): Promise<void> {
   const expected = required(['library', 'settings'][index], `destination ${index}`);
   const current = await browser.execute(() => document.querySelector<HTMLElement>('.route-page')?.dataset.route ?? null);
@@ -1096,7 +1137,7 @@ describe('AirWiki real IPC journey', () => {
     const globalSearch = await $('#global-search');
     const searchUnavailable = await browser.execute(() => document.querySelector<HTMLButtonElement>('.global-search button[type="submit"]')?.disabled === true);
     if (searchUnavailable) {
-      await expect($('.search-preparing-action')).toHaveText(expect.stringContaining('View local AI status'));
+      await expect($('.search-status-action')).toHaveText(expect.stringContaining('View local AI status'));
     }
     await globalSearch.click();
     expect(await browser.execute(() => document.activeElement?.id)).toBe('global-search');
@@ -1164,6 +1205,8 @@ describe('AirWiki real IPC journey', () => {
     expect(settingsShell.ordinaryHeaderPresent).toBe(false);
     expect(settingsShell.sidebarPresent).toBe(true);
     expect((await browser.getUrl()).endsWith('#settings/general')).toBe(true);
+
+    await assertSettingsLayout();
 
     await browser.execute(() => { window.location.hash = 'system/preferences'; });
     await browser.waitUntil(

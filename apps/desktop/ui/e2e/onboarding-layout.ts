@@ -32,6 +32,13 @@ export async function assertOnboardingLayout(): Promise<void> {
         );
       }
       expect(await browser.execute(() => ({ width: innerWidth, height: innerHeight }))).toEqual(target);
+      // Capture the settled page, not the first transparent frame of its entry animation.
+      await browser.waitUntil(async () => browser.execute(() => {
+        const page = document.querySelector('.onboarding-page');
+        return !!page && document.fonts.status === 'loaded'
+          && getComputedStyle(page).opacity === '1'
+          && page.getAnimations().every((animation) => animation.playState === 'finished');
+      }), { timeout: 3_000, timeoutMsg: 'onboarding page did not finish painting' });
       const layout = await browser.execute(() => {
         const footer = document.querySelector('.onboarding-actions')?.getBoundingClientRect();
         const stage = document.querySelector('.onboarding-stage');

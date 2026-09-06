@@ -154,7 +154,7 @@
             <div class="onboarding-folder-choice">
               <button class="primary" onclick={chooseFolder} disabled={folderBusy}><FolderOpen size={17} aria-hidden="true" />{t('collections-choose-folder')}</button>
               <button class="text-action" onclick={skipFolder}>{t('onboarding-skip-folder')}</button>
-              <small>{t('onboarding-skip-folder-help')}</small>
+              {#if !folderSkipped}<small>{t('onboarding-skip-folder-help')}</small>{/if}
             </div>
           {/if}
           {#if folderSkipped}<p class="privacy-note" role="status">{t('onboarding-skip-folder-help')}</p>{/if}

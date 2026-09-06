@@ -1714,7 +1714,11 @@ desktop-sidebar-hide = Hide sidebar
 desktop-sidebar-resize = Sidebar width
 desktop-review-queue-title = To review
 desktop-review-queue-body = Review proposals and their evidence before adding them to your wikis.
-desktop-wiki-reviewed-count = { $count } reviewed concepts
+desktop-wiki-reviewed-count =
+    { $count ->
+        [one] { $count } reviewed concept
+       *[other] { $count } reviewed concepts
+    }
 desktop-wiki-pending-count = { $count } to review
 desktop-sidebar-shared = Shared wiki
 

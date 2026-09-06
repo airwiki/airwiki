@@ -25,6 +25,8 @@ All notable user-visible changes to AirWiki will be documented here. The project
 - Made the review footer fill its workspace width and reserve its own space,
   keeping the end of the editor reachable. Global search stays on one row;
   local-AI recovery guidance appears in the search page when needed.
+- Library uses the singular reviewed-concept count in Spanish and English.
+- Long Wiki names stay within the sidebar and keep their pending count visible.
 - Switching the onboarding language now immediately translates the current
   page, progress label and navigation buttons.
 - Closing a panel no longer lets a delayed focus return steal focus from a

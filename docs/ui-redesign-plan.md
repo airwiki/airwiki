@@ -536,8 +536,38 @@ Escape o botón. También pasan la regresión enfocada, las 322 pruebas de UI de
 conjunto integrado y los recorridos nativos de revisión y reinicio. Esto no
 sustituye la aceptación con lector de pantalla ni la de Windows.
 
+La revisión independiente del diff completo de las PR #105 y #106, hasta
+`a181c560` y `db66ad0` respectivamente, no encontró hallazgos accionables en
+código, publicación, evidencia, permisos o persistencia. Esa revisión no
+certifica las pruebas manuales ni las referencias visuales.
+
+La comprobación visual corrigió además el contador singular de Biblioteca en
+ES/EN. Ambos textos se verificaron en el candidato instalado; el formato de
+0, 1 y 2 y las diez pruebas existentes de localización/Biblioteca pasan. La
+revisión independiente del ajuste de textos no encontró hallazgos.
+
+La QA de Windows detectó desbordamiento horizontal en la lista lateral de
+wikis. La aserción añadida lo reproduce también en macOS; limitar la pista
+de la cuadrícula al ancho disponible conserva el nombre abreviado y su contador.
+La matriz nativa de revisión pasa la nueva comprobación de ancho. Se
+inspeccionaron las 16 referencias de revisión afectadas antes de actualizarlas;
+las otras 48 capturas de macOS no cambian. La revisión independiente del ajuste
+no encontró hallazgos. En el candidato instalado de macOS se comprobó el
+nombre abreviado y el contador a 224 y 200 px, el foco visible y la apertura
+por Enter. Las comparaciones visuales finales de ambos recorridos y el reinicio
+pasan sin actualizar referencias durante la comparación. La comprobación
+instalada de Windows sigue pendiente.
+
+La comprobación instalada con la pantalla de macOS en 1280×800 confirma
+Biblioteca, apertura de revisión por teclado y, con la ventana a 1024×720,
+footer completo, final del editor alcanzable y foco visible en Aprobar. Se
+restauró la resolución original al terminar. El host ofrece resoluciones, no
+controles literales de 125/150/200%; esta evidencia no certifica toda la matriz.
+VoiceOver sigue sin verificarse: la herramienta permite activar su ajuste,
+pero no observar los anuncios, incluso con el panel de subtítulos habilitado.
+
 Siguen pendientes la persistencia local en una entrega separada, las referencias
-visuales de Windows, la revisión independiente y la aceptación instalada completa.
+visuales de Windows y la aceptación instalada completa.
 
 - [ ] Fase 1: ventana mínima, W enlazada y base visual.
 - [ ] Fase 2: navegación y biblioteca.

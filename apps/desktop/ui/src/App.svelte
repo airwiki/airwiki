@@ -30,6 +30,7 @@
   import LoadingState from './components/LoadingState.svelte';
   import LoadingSkeleton from './components/LoadingSkeleton.svelte';
   import KnowledgeReader from './components/KnowledgeReader.svelte';
+  import WikiSearchGroup from './components/WikiSearchGroup.svelte';
   import ShimmerText from './components/ShimmerText.svelte';
   import Spinner from './components/Spinner.svelte';
   import AiClientIcon from './components/identity/AiClientIcon.svelte';
@@ -69,6 +70,14 @@
     reading: ReadingContext | null;
     scrollTop: number;
     indexScrollTop: number;
+  };
+  type SearchReturnTarget = {
+    navigationId: string;
+    requestId: string;
+    filter: SearchFilter;
+    scope: LibraryScope;
+    resultKey: string;
+    conceptId: string;
   };
   type SettingsLeaveIntent =
     | { kind: 'destination'; destination: 'library' | 'review' }
@@ -177,8 +186,10 @@
   let publicCatalogRequestId: string | null = null;
   let activeSearchRequestId: string | null = null;
   let searchSubmissionSequence = 0;
-  let pendingSearchConcept: { wikiId: string; conceptId: string } | null = null;
-  let pendingKnowledgePage: { wikiId: string; page: KnowledgePageInput; requestId: string } | null = null;
+  let pendingSearchConcept: { wikiId: string; conceptId: string; requestId: string; completed: boolean } | null = null;
+  let failedSearchConcept: { wikiId: string; conceptId: string } | null = null;
+  let searchReturnTarget: SearchReturnTarget | null = null;
+  let pendingKnowledgePage: { wikiId: string; page: KnowledgePageInput; requestId: string; focusAfterLoad?: boolean } | null = null;
   // Browser history contains only opaque IDs. Reading coordinates stay in this
   // bounded session cache; content, queries and fingerprints are never retained.
   const navigationEntries = new SvelteMap<string, NavigationEntry>();
@@ -502,6 +513,22 @@
     }
   }
 
+  function currentSearchReturn(): SearchReturnTarget | null {
+    return searchReturnTarget && searchReturnTarget.requestId === activeSearchRequestId
+      && snapshot?.search?.requestId === activeSearchRequestId ? searchReturnTarget : null;
+  }
+
+  function focusSearchReturn(target: SearchReturnTarget) {
+    void tick().then(() => {
+      if (destination !== 'library' || selectedWikiId || sharedBrowseOpen || currentSearchReturn() !== target) return;
+      const group = Array.from(document.querySelectorAll<HTMLElement>('[data-search-result]'))
+        .find((element) => element.dataset.searchResult === target.resultKey);
+      const match = Array.from(group?.querySelectorAll<HTMLButtonElement>('[data-search-concept]') ?? [])
+        .find((button) => button.dataset.searchConcept === target.conceptId);
+      (match ?? group?.querySelector<HTMLButtonElement>('.search-group-wiki'))?.focus({ preventScroll: true });
+    });
+  }
+
   function registerNavigation(hash: string, replace = false, page?: KnowledgePageInput | null) {
     const id = crypto.randomUUID();
     activeNavigationId = id;
@@ -711,6 +738,11 @@
   $: filteredSearchResults = searchFilter === 'all'
     ? searchResults
     : searchResults.filter((result) => result.source.kind === searchFilter);
+  $: canReturnToSearch = searchReturnTarget !== null && searchReturnTarget.requestId === activeSearchRequestId
+    && snapshot?.search?.requestId === activeSearchRequestId;
+  $: if (destination === 'library' && pendingSearchConcept?.completed) {
+    void openPendingSearchConcept(snapshot, pendingSearchConcept.requestId);
+  }
   $: settingsStatuses = snapshot ? systemStatuses(snapshot, t) : [];
 
   $: activeDialogId = closeChoiceRequired ? 'close-choice'
@@ -851,7 +883,13 @@
       else if (window.location.hash !== canonical) window.history.replaceState(window.history.state, '', canonical);
       scrollMainTo(entry?.scrollTop ?? sharedReturnScrollTop ?? settingsReturnContext?.scrollTop ?? 0);
       if (entry || settingsReturnContext) restoreIndexScroll(entry?.indexScrollTop ?? settingsReturnContext?.indexScrollTop ?? 0);
-      if (libraryScope === 'public' && snapshot && snapshot.publicCatalog === null) {
+      const searchReturn = currentSearchReturn();
+      if (searchReturn?.navigationId === entryId && !selectedWikiId && !sharedBrowseOpen) {
+        searchFilter = searchReturn.filter;
+        libraryScope = searchReturn.scope;
+        focusSearchReturn(searchReturn);
+      }
+      if (!question.trim() && libraryScope === 'public' && snapshot && snapshot.publicCatalog === null) {
         void refreshPublicCatalog();
       }
       resumePendingSearch();
@@ -972,12 +1010,14 @@
       observePendingRequests(event.snapshot);
       void continueReadingRestore(event.requestId, event.snapshot);
       if (pendingKnowledgePage && event.requestId === pendingKnowledgePage.requestId) {
+        const focusAfterLoad = pendingKnowledgePage.focusAfterLoad;
         const page = event.snapshot.knowledgePage;
         localPageHidden = !page || page.wikiId !== pendingKnowledgePage.wikiId
           || pageKey(page.page) !== pageKey(pendingKnowledgePage.page);
         pendingKnowledgePage = null;
+        if (focusAfterLoad && !localPageHidden && page?.status === 'ready' && destination === 'library') focusRouteHeading();
       }
-      void openPendingSearchConcept(event.snapshot);
+      void openPendingSearchConcept(event.snapshot, event.requestId);
       if (event.snapshot.model?.licenseAccepted) modelLicensesConfirmed = true;
       syncPreferences(event.snapshot.preferences);
       if (selectedReview) {
@@ -1063,6 +1103,8 @@
     if (next === 'settings') openSettings(lastSettingsSection);
     else {
       if (!canLeaveSettings({ kind: 'destination', destination: next })) return;
+      const searchReturn = next === 'library' && (selectedWikiId || sharedBrowseOpen) ? currentSearchReturn() : null;
+      const searchPosition = searchReturn ? navigationEntries.get(searchReturn.navigationId)?.scrollTop : undefined;
       rememberNavigation();
       readingRestore = null;
       pendingKnowledgePage = null;
@@ -1070,13 +1112,15 @@
       selectedWikiId = null;
       dismissSharedBrowse();
       destination = next;
-      libraryScope = 'device';
+      libraryScope = searchReturn?.scope ?? 'device';
+      if (searchReturn) searchFilter = searchReturn.filter;
       settingsReturnContext = null;
-      pushHash(next === 'review' ? '#review' : '#library');
+      pushHash(next === 'review' ? '#review' : libraryScope === 'public' ? '#library/public' : '#library');
       if (next === 'review') cancelScheduledSearch();
-      scrollMainTo(0);
+      scrollMainTo(searchPosition ?? 0);
       void refreshHealth();
-      focusRouteHeading();
+      if (searchReturn) focusSearchReturn(searchReturn);
+      else focusRouteHeading();
       if (next === 'library') resumePendingSearch();
     }
   }
@@ -1266,6 +1310,7 @@
 
   function setContentFilter(filter: ContentFilter) {
     const currentTop = mainScrollRegion?.scrollTop ?? 0;
+    if (filter !== contentFilter) cancelSearchPageOpen();
     contentFilter = filter;
     if (filter !== 'all') knowledgeMode = 'document';
     scrollMainTo(currentTop);
@@ -1273,6 +1318,7 @@
 
   function setKnowledgeMode(mode: 'document' | 'graph') {
     const currentTop = mainScrollRegion?.scrollTop ?? 0;
+    if (mode !== knowledgeMode) cancelSearchPageOpen();
     knowledgeMode = mode;
     scrollMainTo(currentTop);
   }
@@ -1648,6 +1694,12 @@
 
   function resultWikiName(result: WikiSearchResultSummary): string {
     return result.wikiName ?? t('desktop-shared-wiki-fallback');
+  }
+
+  function searchResultKey(result: WikiSearchResultSummary): string {
+    const owner = result.source.kind === 'local' ? ''
+      : result.source.kind === 'nearby' ? result.source.peerId : result.source.publisherId;
+    return JSON.stringify([result.source.kind, owner, result.wikiId]);
   }
 
   function resultScopeLabel(result: WikiSearchResultSummary): string {
@@ -2085,6 +2137,7 @@
   }
 
   function updateSearchQuestion(value: string) {
+    searchReturnTarget = null;
     if (includePublic && question.trim() && value !== question) includePublic = false;
     question = value;
     if (!value.trim()) searchFilter = 'all';
@@ -2106,6 +2159,7 @@
   }
 
   function updatePublicSearch(value: boolean) {
+    searchReturnTarget = null;
     includePublic = value;
     searchSubmissionSequence += 1;
     searchBusy = false;
@@ -2161,20 +2215,29 @@
   }
 
   async function openSearchHit(result: WikiSearchResultSummary, hit: SearchHitSummary) {
+    if (result.source.kind === 'local' && !snapshot?.wikis.some((wiki) => wiki.id === result.wikiId)) {
+      actionMessage = t('search-local-unavailable');
+      return;
+    }
     rememberNavigation();
+    cancelScheduledSearch();
+    searchReturnTarget = activeNavigationId && activeSearchRequestId ? {
+      navigationId: activeNavigationId, requestId: activeSearchRequestId, filter: searchFilter,
+      scope: libraryScope, resultKey: searchResultKey(result), conceptId: hit.conceptId
+    } : null;
     readingRestore = null;
     pendingKnowledgePage = null;
     localPageHidden = false;
     if (result.source.kind === 'local') {
       destination = 'library';
       selectedWikiId = result.wikiId;
+      localPageHidden = true;
+      wikiLoadFailedId = null;
       pushHash('#library/wiki', null);
       knowledgeMode = 'document';
       scrollMainTo(0);
       focusRouteHeading();
-      pendingSearchConcept = { wikiId: result.wikiId, conceptId: hit.conceptId };
-      await loadWikiBundle(result.wikiId);
-      await openPendingSearchConcept(snapshot);
+      await loadSearchConcept(result.wikiId, hit.conceptId);
       return;
     }
     destination = 'library';
@@ -2253,13 +2316,26 @@
     sharedBrowseReturnHash = '#library';
     pushHash(returnHash);
     scrollMainTo(returnScrollTop);
-    focusRouteHeading();
+    const searchReturn = currentSearchReturn();
+    if (searchReturn) {
+      searchFilter = searchReturn.filter;
+      focusSearchReturn(searchReturn);
+    } else focusRouteHeading();
   }
 
-  async function openPendingSearchConcept(current: AppSnapshot | null) {
+  async function openPendingSearchConcept(current: AppSnapshot | null, requestId: string | null = null) {
     const pending = pendingSearchConcept;
-    if (!pending || destination !== 'library' || selectedWikiId !== pending.wikiId
-      || current?.knowledge?.wikiId !== pending.wikiId || current.knowledge.status !== 'ready') return;
+    if (!pending || pending.requestId !== requestId || selectedWikiId !== pending.wikiId) return;
+    if (destination !== 'library') {
+      pendingSearchConcept = { ...pending, completed: true };
+      return;
+    }
+    if (current?.knowledge?.wikiId !== pending.wikiId || current.knowledge.status !== 'ready') {
+      pendingSearchConcept = null;
+      failedSearchConcept = { wikiId: pending.wikiId, conceptId: pending.conceptId };
+      wikiLoadFailedId = pending.wikiId;
+      return;
+    }
     const concept = current.knowledge.concepts.find((candidate) => candidate.conceptId === pending.conceptId);
     if (!concept) {
       pendingSearchConcept = null;
@@ -2267,7 +2343,35 @@
       return;
     }
     pendingSearchConcept = null;
-    await openKnowledgePage(concept.page, concept.fingerprint, false);
+    await openKnowledgePage(concept.page, concept.fingerprint, false, true);
+  }
+
+  async function loadSearchConcept(wikiId: string, conceptId: string) {
+    const requestId = crypto.randomUUID();
+    actionMessage = '';
+    localPageHidden = true;
+    wikiLoadFailedId = null;
+    failedSearchConcept = null;
+    pendingSearchConcept = { wikiId, conceptId, requestId, completed: false };
+    try {
+      await loadWikiBundle(wikiId, requestId);
+    } catch {
+      if (pendingSearchConcept?.requestId !== requestId) return;
+      failedSearchConcept = { wikiId, conceptId };
+      pendingSearchConcept = null;
+      wikiLoadFailedId = wikiId;
+      actionMessage = t('home-wiki-failed');
+    }
+  }
+
+  async function retryWikiLoad(wikiId: string) {
+    if (failedSearchConcept?.wikiId === wikiId) await loadSearchConcept(wikiId, failedSearchConcept.conceptId);
+    else await openWiki(wikiId, wikiTab);
+  }
+
+  function cancelSearchPageOpen() {
+    pendingSearchConcept = null;
+    failedSearchConcept = null;
   }
 
   async function continueSharedBrowse(current: AppSnapshot | null) {
@@ -2616,6 +2720,7 @@
     readingRestore = null;
     pendingKnowledgePage = null;
     pendingSearchConcept = null;
+    failedSearchConcept = null;
     localPageHidden = false;
     wikiLoadFailedId = null;
     const remembered = wikiReadingContexts.get(wikiId);
@@ -2642,6 +2747,7 @@
     cancelScheduledSearch();
     dismissSharedBrowse();
     pendingSearchConcept = null;
+    failedSearchConcept = null;
     pendingKnowledgePage = null;
     readingRestore = null;
     destination = 'library';
@@ -2731,16 +2837,19 @@
     return knowledge.reservedPages.find((reserved) => pageKey(reserved.page) === pageKey(page))?.fingerprint ?? null;
   }
 
-  async function openKnowledgePage(page: KnowledgePageInput, expectedFingerprint = knowledgePageFingerprint(page), addHistory = true) {
+  async function openKnowledgePage(page: KnowledgePageInput, expectedFingerprint = knowledgePageFingerprint(page), addHistory = true, focusAfterLoad = false) {
     if (!selectedWikiId) return;
     if (!expectedFingerprint) {
       actionMessage = t('knowledge-page-unavailable');
       return;
     }
-    if (addHistory) rememberNavigation();
+    if (addHistory) {
+      rememberNavigation();
+      cancelSearchPageOpen();
+    }
     readingRestore = null;
     const requestId = crypto.randomUUID();
-    pendingKnowledgePage = { wikiId: selectedWikiId, page, requestId };
+    pendingKnowledgePage = { wikiId: selectedWikiId, page, requestId, focusAfterLoad };
     if (addHistory) pushHash('#library/wiki', page);
     scrollMainTo(0);
     actionBusy = true;
@@ -2954,7 +3063,7 @@
             <header class="page-heading library-heading">
               <div>
                 <h1 tabindex="-1">{t(question.trim() ? 'desktop-library-search-title' : libraryScope === 'public' ? 'desktop-public-library-title' : 'desktop-wiki-list-title')}</h1>
-                {#if question.trim() || libraryScope === 'public'}<p>{t(question.trim() ? 'desktop-library-search-body' : 'desktop-public-library-body')}</p>{/if}
+                {#if !question.trim() && libraryScope === 'public'}<p>{t('desktop-public-library-body')}</p>{/if}
               </div>
             </header>
             {#if !question.trim()}
@@ -3002,32 +3111,8 @@
                     <div class="search-state warning" role="status"><AlertTriangle size={17} aria-hidden="true" /><span>{searchCoverageMessage(snapshot.search.coverage)}</span></div>
                   {/if}
                   <div class="wiki-search-results">
-                    {#each filteredSearchResults as result (`${result.source.kind}:${result.wikiId}:${result.bestRank}`)}
-                      <article class="wiki-search-group" class:public-result={result.source.kind === 'public'}>
-                        <header>
-                          <div class="search-result-origin"><span class:public={result.source.kind === 'public'} class:private={result.source.kind !== 'public'} class="network-scope">{resultScopeLabel(result)}</span><DeviceIdentity name={resultOwnerName(result)} platform={resultPlatform(result)} platformLabel={result.source.kind === 'public' ? t('desktop-public-network') : platformLabel(resultPlatform(result))} source={result.source.kind === 'public' ? 'public' : 'device'} compact /></div>
-                          <button class="text-action" onclick={() => openSearchWiki(result)} disabled={sharedBrowseRequestId !== null}>{t('desktop-open-wiki')}</button>
-                        </header>
-                        <div class="wiki-search-summary">
-                          <div><h2>{resultWikiName(result)}</h2>{#if result.description}<p>{result.description}</p>{/if}</div>
-                          <span>{t('desktop-search-match-count', { count: result.totalMatches })}</span>
-                        </div>
-                        <div class="wiki-search-metadata">
-                          {#if result.source.kind === 'local'}<span>{t(result.source.private ? 'desktop-wiki-private' : 'desktop-wiki-shared')}</span><span>{t(`desktop-search-health-${result.source.health}`)}</span>{/if}
-                          {#if result.source.kind === 'nearby'}<span>{t(result.source.accessGranted ? 'desktop-search-access-granted' : 'desktop-search-access-unavailable')}</span><span>{t(result.source.available ? 'desktop-search-available' : 'desktop-search-offline')}</span>{/if}
-                          {#if result.source.kind === 'public' && result.languages.length > 0}<span>{result.languages.join(', ')}</span>{/if}
-                          {#if result.conceptCount !== null}<span>{t('desktop-search-concept-count', { count: result.conceptCount })}</span>{/if}
-                          {#if result.okfCompatibility}<span>{t(`desktop-okf-compatibility-${result.okfCompatibility.kind}`)}</span>{/if}
-                        </div>
-                        <div class="wiki-search-matches">
-                          {#each result.matches as hit (hit.conceptId)}
-                            <button onclick={() => openSearchHit(result, hit)} disabled={sharedBrowseRequestId !== null}>
-                              <span><small>{hit.headingOrPage}</small><strong>{hit.title}</strong><p>{hit.snippet}</p></span>
-                              <span class="citation-row">{t('search-revision', { revision: hit.sourceRevision })}{#if searchAssuranceLabel(hit)} · {searchAssuranceLabel(hit)}{/if}</span>
-                            </button>
-                          {/each}
-                        </div>
-                      </article>
+                    {#each filteredSearchResults as result (searchResultKey(result))}
+                      <WikiSearchGroup {result} resultKey={searchResultKey(result)} wikiName={resultWikiName(result)} ownerName={resultOwnerName(result)} scopeLabel={resultScopeLabel(result)} platform={resultPlatform(result)} platformLabel={result.source.kind === 'public' ? t('desktop-public-network') : platformLabel(resultPlatform(result))} {t} assuranceLabel={searchAssuranceLabel} disabled={sharedBrowseRequestId !== null} onopen={() => openSearchWiki(result)} onhit={(hit) => openSearchHit(result, hit)} />
                     {:else}
                       {#if snapshot.search.status === 'complete'}
                         {#if searchResults.length > 0}
@@ -3084,7 +3169,7 @@
             {@const wiki = selectedWiki}
             {@const selectedWikiIssues = snapshot.sourceIssues.filter((issue) => issue.wikiId === wiki.id)}
             <header class="page-heading wiki-heading">
-              <nav class="breadcrumb" aria-label={t('desktop-library-title')}><button onclick={() => select('library')}>{t('desktop-library-title')}</button><span aria-hidden="true">/</span><svelte:element this={localReaderVisible ? 'span' : 'h1'} class="wiki-context-name" tabindex={localReaderVisible ? undefined : -1}>{wiki.name}</svelte:element><button class="wiki-context-details" onclick={() => showWikiDetails(wiki.id)} aria-label={`${t('reader-wiki-details')}: ${wiki.name}`}><Info size={15} aria-hidden="true" /></button></nav>
+              <nav class="breadcrumb" aria-label={t('desktop-library-title')}><button onclick={() => select('library')}>{t(canReturnToSearch ? 'desktop-shared-back-results' : 'desktop-library-title')}</button><span aria-hidden="true">/</span><svelte:element this={localReaderVisible ? 'span' : 'h1'} class="wiki-context-name" tabindex={localReaderVisible ? undefined : -1}>{wiki.name}</svelte:element><button class="wiki-context-details" onclick={() => showWikiDetails(wiki.id)} aria-label={`${t('reader-wiki-details')}: ${wiki.name}`}><Info size={15} aria-hidden="true" /></button></nav>
             </header>
 
             <div class="wiki-detail-body">
@@ -3144,7 +3229,7 @@
               {#if knowledgeMode === 'graph' && readingRestore?.stage !== 'bundle' && wikiLoadFailedId !== wiki.id && snapshot.knowledge?.wikiId === wiki.id && snapshot.knowledge.status === 'ready'}
                 <section class="graph-view">{#key `${snapshot.knowledge.wikiId}:${snapshot.knowledge.version}`}<KnowledgeGraph bundle={snapshot.knowledge} onselect={selectGraphPage} {locale} />{/key}</section>
               {:else if wikiLoadFailedId === wiki.id || (snapshot.knowledge?.wikiId === wiki.id && snapshot.knowledge.status === 'failed')}
-                <div class="file-empty wiki-load-failed" role="alert"><AlertTriangle size={28} aria-hidden="true" /><h2>{t('desktop-knowledge-load-failed-title')}</h2><p>{t('desktop-knowledge-load-failed-body')}</p><button class="secondary" onclick={() => openWiki(wiki.id, wikiTab)}>{t('action-retry')}</button></div>
+                <div class="file-empty wiki-load-failed" role="alert"><AlertTriangle size={28} aria-hidden="true" /><h2>{t('desktop-knowledge-load-failed-title')}</h2><p>{t('desktop-knowledge-load-failed-body')}</p><button class="secondary" onclick={() => retryWikiLoad(wiki.id)}>{t('action-retry')}</button></div>
               {:else if readingRestore?.stage === 'bundle' || ((snapshot.knowledge?.wikiId !== wiki.id || snapshot.knowledge.status === 'updating') && filteredReviewOnlyItems.length === 0)}
                 <section class="wiki-loading-surface" aria-busy="true">
                   <LoadingState label={t('knowledge-updating-title')} detail={t('desktop-knowledge-loading-body')} tone="ai" />
@@ -3152,7 +3237,7 @@
                 </section>
               {:else}
                 <div class="file-browser" aria-live="polite">
-                    {#if pendingKnowledgePage?.wikiId === wiki.id}
+                    {#if pendingKnowledgePage?.wikiId === wiki.id || pendingSearchConcept?.wikiId === wiki.id}
                       <section class="file-preview"><LoadingState label={t('knowledge-page-loading')} detail={t('desktop-knowledge-page-loading-body')} compact /><LoadingSkeleton variant="page" /></section>
                     {:else if !localPageHidden && snapshot.knowledgePage?.wikiId === wiki.id && snapshot.knowledgePage.status === 'ready'}
                       {@const page = snapshot.knowledgePage}

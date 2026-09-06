@@ -50,13 +50,19 @@ content.
 After a brief pause in typing, AirWiki runs the latest query automatically;
 pressing Enter runs it immediately. It then replaces the inventory with
 Wiki-level result groups.
-Each group belongs to exactly one origin, owner and Wiki, shows up to two best
-matching concepts, and states the total number of matches. Filters with counts
+Each group belongs to exactly one origin, owner and Wiki. Concept titles and
+excerpts lead the group, while a compact header identifies the Wiki, source and
+owner. The group shows up to two best matching concepts and states the total
+number of matches; extended metadata is available under Wiki details. Source
+unavailability and stale assurance remain visible with details closed. Filters
+with Wiki counts
 select **All**, **This device**, **Nearby**, or **Public** without rerunning or
 re-authorizing the search. Opening a concept selects that exact match; opening
-the Wiki uses its best result. Returning restores the query, filter, completed
-results and scroll position, while clearing the query restores the previously
-selected Library view.
+the Wiki uses its best result. Within that active search, returning restores the
+query, filter, completed results, scroll position and focus on the opened match.
+Local opening first waits for its own current Wiki bundle; a failed load retries
+the same concept rather than opening a cached page from an unrelated completion.
+Clearing the query restores the previously selected Library view.
 
 **Search the public network too** is explicit consent for that search. Without
 it, **All** means this device plus currently authorized LAN peers. Successful

@@ -355,9 +355,27 @@ y las dos formas del inspector. Las pruebas incluyen metadatos incompletos,
 fuentes ausentes, enlaces relacionados rotos, contenido truncado, revisión
 cambiada, foco al cerrar y navegación bloqueada detrás del diálogo.
 
-Siguen pendientes el contexto completo de resultados de búsqueda, el editor
-dedicado y la persistencia local. La base visual y sus pruebas no completan
-por sí solas la aceptación instalada ni la matriz de accesibilidad.
+La base de la fase 4 prioriza título, fragmento y procedencia. La cabecera de
+wiki es compacta; su ficha ampliada queda en Detalles. Los grupos incluyen el
+propietario en su identidad, conservan orden, coincidencias acotadas y total del
+backend. Los avisos de desconexión, restricción y verificación desactualizada
+permanecen visibles. Volver desde un resultado de la búsqueda activa restaura
+filtro, posición y foco sin repetir la consulta. La apertura local espera su
+propia carga de bundle vigente y permite reintentar el concepto exacto.
+
+Pasan 262 pruebas de UI, incluidos propietarios distintos de la misma wiki,
+apertura de la segunda coincidencia, metadatos plegados, respuesta abandonada y
+fallo con reintento. Elegir otra página cancela la apertura pendiente; una carga
+que termina en Ajustes continúa al volver al lector y respeta el foco. Las
+capturas sintéticas de búsqueda a 1024, 1180 y 1440 px,
+en ES/EN y claro/oscuro, se inspeccionaron en un navegador aislado y no presentan
+desbordamiento horizontal. También pasan `check`, `lint`, `check:e2e`, la
+compilación y el recorrido con IPC real en macOS. Estas comprobaciones no
+sustituyen la QA instalada.
+
+Siguen pendientes la continuidad entre búsquedas distintas del historial, el
+editor dedicado y la persistencia local. La base visual y sus pruebas no
+completan por sí solas la aceptación instalada ni la matriz de accesibilidad.
 
 - [ ] Fase 1: ventana mínima, W enlazada y base visual.
 - [ ] Fase 2: navegación y biblioteca.

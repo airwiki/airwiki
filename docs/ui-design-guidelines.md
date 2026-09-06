@@ -200,6 +200,25 @@ when present. Do not repeat healthy technical states on every row. Settings
 uses a named control and textual service warnings from the shared system-status
 model; it must not introduce an independent interpretation of service health.
 
+Search groups prioritize concept titles, excerpts and provenance. Keep the Wiki
+name, source owner and total match count in a compact header; extended Wiki
+metadata belongs in a disclosure. Unavailable sources, restricted compatibility,
+stale assurance and incomplete coverage remain visible with that disclosure
+closed. Group identity includes origin, owner and Wiki; two owners of the same
+Wiki must never share component state. Preserve backend order, bounded matches
+and the total match count. Filter counts refer to Wikis, not displayed excerpts.
+
+Returning from an exact result in the same active search restores its filter,
+scroll position and focus without resubmitting the query. The return target is
+session state and is discarded when the query or public scope changes. A local
+result waits for its own bundle request to complete before resolving the concept
+against the current page fingerprint. A failed load can retry that exact concept;
+unrelated or abandoned completions cannot open a cached page. Choosing another
+page cancels that pending intent; a completed bundle waits while Settings is
+visible and continues on return. This does not add
+a durable query history or cache previous searches independently of the current
+worker snapshot.
+
 ## Controls and targets
 
 - Use 28 by 28 logical pixels as the normal macOS control target.

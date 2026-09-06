@@ -1764,7 +1764,7 @@ describe('AirWiki wiki workspace', () => {
     expect(prepareGuidedWikiRepair).toHaveBeenCalledWith(wiki.id);
   });
 
-  it('opens a local search result inside its wiki without placing the query in the URL', async () => {
+  it('opens the current local result revision and restores its query, filter, position and focus', async () => {
     const wiki = snapshot.wikis[0];
     const conceptId = 'concept-atlas';
     activateLocalSearch();
@@ -1776,15 +1776,34 @@ describe('AirWiki wiki workspace', () => {
       links: []
     };
     window.location.hash = '#search';
-    render(App);
+    const { container } = render(App);
     await submitVisibleSearch('Evidencia Atlas');
     expect(await screen.findByText(/Revisado por una persona/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Este equipo 1' }));
+    container.querySelector<HTMLElement>('.drive-page')!.scrollTop = 420;
+    const scrollTo = vi.spyOn(HTMLElement.prototype, 'scrollTo');
     await openFirstSearchMatch();
 
-    expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id);
-    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'guides/atlas.md' }, 'a'.repeat(64), expect.any(String));
+    expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id, expect.any(String));
+    expect(loadWikiPage).not.toHaveBeenCalled();
+    await deliverSnapshot('unrelated');
+    expect(loadWikiPage).not.toHaveBeenCalled();
+    await completeHistoryBundle({ ...snapshot.knowledge, concepts: snapshot.knowledge.concepts.map((concept) => ({ ...concept, fingerprint: 'b'.repeat(64) })) });
+    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'guides/atlas.md' }, 'b'.repeat(64), expect.any(String));
     expect(window.location.hash).toBe('#library/wiki');
     expect(window.location.hash).not.toContain('Evidencia');
+    expect(JSON.stringify(window.history.state)).not.toContain('Evidencia');
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a los resultados' }));
+    expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('Evidencia Atlas');
+    expect(screen.getByRole('button', { name: 'Este equipo 1' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(scrollTo).toHaveBeenLastCalledWith({ top: 420, left: 0, behavior: 'auto' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Evidencia Atlas' })).toHaveFocus());
+    expect(searchKnowledge).toHaveBeenCalledOnce();
+    expect(browsePublicWiki).not.toHaveBeenCalled();
+    await deliverSnapshot(null, { wikis: [] });
+    await fireEvent.click(screen.getByRole('button', { name: 'Evidencia Atlas' }));
+    expect(screen.getByText('Este resultado cambió. Vuelve a buscar antes de abrir su página publicada.')).toBeVisible();
+    expect(loadWikiBundle).toHaveBeenCalledOnce();
   });
 
   it('filters grouped Library results by origin with visible counts', async () => {
@@ -1818,6 +1837,67 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByRole('heading', { name: 'Guía pública' })).not.toBeInTheDocument();
   });
 
+  it('retries the exact search concept after its bundle load fails and ignores the abandoned request', async () => {
+    const { wiki, first, second, bundle, page } = readingHistoryFixture();
+    activateLocalSearch();
+    snapshot.search = searchSummary('retry-exact-search', 'complete', [{
+      conceptId: second.conceptId, wikiId: wiki.id, title: second.title, snippet: 'Exact match.',
+      headingOrPage: 'Guide', logicalResourceUri: 'urn:airwiki:retry', sourceRevision: 1, sourceSha256: 'a'.repeat(64), rank: 1,
+      nodeId: snapshot.nodeId!, route: 'deviceNetwork', assurance: null, lifecycle: 'stable'
+    }]);
+    window.history.replaceState(null, '', '#library');
+    vi.mocked(loadWikiBundle).mockRejectedValueOnce(new Error('synthetic bundle failure'));
+    render(App);
+    await submitVisibleSearch('exact match');
+    await openFirstSearchMatch();
+    const abandonedRequest = vi.mocked(loadWikiBundle).mock.calls.at(-1)?.[1];
+    expect(document.querySelector('.wiki-load-failed')).toBeVisible();
+    expect(screen.queryByText(`${first.title} body`)).not.toBeInTheDocument();
+    await fireEvent.click(within(document.querySelector('.wiki-load-failed')!).getByRole('button', { name: 'Volver a intentar' }));
+    await deliverSnapshot(abandonedRequest, { knowledge: bundle });
+    expect(loadWikiPage).not.toHaveBeenCalled();
+    await completeHistoryBundle(bundle);
+    expect(loadWikiPage).toHaveBeenLastCalledWith(wiki.id, second.page, second.fingerprint, expect.any(String));
+    await completeHistoryPage(page(second));
+    expect(screen.getByRole('heading', { name: second.title, level: 1 })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('heading', { name: second.title, level: 1 })).toHaveFocus());
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a los resultados' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: second.title })).toHaveFocus());
+    expect(searchKnowledge).toHaveBeenCalledOnce();
+  });
+
+  it.each(['choose another page', 'visit Settings'] as const)('respects a newer intent while opening a search result: %s', async (intent) => {
+    const { wiki, first, second, bundle, page } = readingHistoryFixture();
+    activateLocalSearch();
+    snapshot.search = searchSummary('interrupted-local-search', 'complete', [{
+      conceptId: second.conceptId, wikiId: wiki.id, title: second.title, snippet: 'Exact match.',
+      headingOrPage: 'Guide', logicalResourceUri: 'urn:airwiki:interrupted', sourceRevision: 1, sourceSha256: 'a'.repeat(64), rank: 1,
+      nodeId: snapshot.nodeId!, route: 'deviceNetwork', assurance: null, lifecycle: 'stable'
+    }]);
+    window.history.replaceState(null, '', '#library');
+    render(App);
+    await submitVisibleSearch('exact match');
+    await openFirstSearchMatch();
+    const requestId = vi.mocked(loadWikiBundle).mock.calls.at(-1)?.[1];
+    if (intent === 'choose another page') {
+      await fireEvent.click(screen.getByRole('button', { name: `${first.title}, first.md, Revisado` }));
+      await deliverSnapshot(requestId, { knowledge: bundle });
+      expect(loadWikiPage).toHaveBeenCalledOnce();
+      expect(loadWikiPage).toHaveBeenLastCalledWith(wiki.id, first.page, first.fingerprint, expect.any(String));
+      await completeHistoryPage(page(first));
+      expect(screen.getByRole('heading', { name: first.title, level: 1 })).toBeVisible();
+    } else {
+      await openSettingsSection('general');
+      await deliverSnapshot(requestId, { knowledge: bundle });
+      expect(loadWikiPage).not.toHaveBeenCalled();
+      await fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+      await waitFor(() => expect(loadWikiPage).toHaveBeenLastCalledWith(wiki.id, second.page, second.fingerprint, expect.any(String)));
+      await completeHistoryPage(page(second));
+      expect(screen.getByRole('heading', { name: second.title, level: 1 })).toBeVisible();
+    }
+    expect(searchKnowledge).toHaveBeenCalledOnce();
+  });
+
   it('retries a failed search without hiding its partial results', async () => {
     activateLocalSearch();
     snapshot.search = searchSummary('failed-search', 'partial', [{
@@ -1837,6 +1917,64 @@ describe('AirWiki wiki workspace', () => {
     expect(searchKnowledge).toHaveBeenCalledTimes(2);
     expect(searchKnowledge).toHaveBeenLastCalledWith('consulta parcial', false);
     expect(screen.getByText('Resultado parcial')).toBeInTheDocument();
+  });
+
+  it('keeps different owners of the same Wiki separate and opens the exact bounded match', async () => {
+    activateLocalSearch();
+    const common = {
+      wikiId: 'same-wiki', title: 'Guía compartida', snippet: 'Extracto vigente.', headingOrPage: 'Preparación',
+      logicalResourceUri: 'urn:airwiki:synthetic', sourceRevision: 7, sourceSha256: 'a'.repeat(64), rank: 1,
+      assurance: null, lifecycle: 'stable' as const, route: 'deviceNetwork' as const
+    };
+    snapshot.search = searchSummary('separate-owners', 'partial', [
+      { ...common, conceptId: 'first-match', nodeId: 'owner-a' },
+      { ...common, conceptId: 'second-match', nodeId: 'owner-b' }
+    ]);
+    const [first, second] = snapshot.search.results;
+    first.wikiName = 'Guía del equipo A';
+    second.wikiName = 'Guía del equipo B';
+    second.totalMatches = 9;
+    second.matches.push({ ...second.matches[0], conceptId: 'exact-match', title: 'Recuperación exacta', rank: 2 });
+    render(App);
+    await submitVisibleSearch('recuperación');
+
+    const groups = screen.getAllByRole('article');
+    expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual(['Guía del equipo A', 'Guía del equipo B']);
+    expect(within(groups[1]).getByText('9 coincidencias')).toBeVisible();
+    expect(within(groups[1]).getAllByRole('heading', { level: 2 })).toHaveLength(2);
+    expect(screen.getByText('Una parte de la búsqueda no pudo completarse. Se muestran los resultados disponibles.')).toBeVisible();
+    const accessibility = await axe.run(document.body, { rules: { region: { enabled: false } } });
+    expect(accessibility.violations.filter((violation) => ['critical', 'serious'].includes(violation.impact ?? ''))).toEqual([]);
+    await fireEvent.click(screen.getByRole('button', { name: 'Cercanas 2' }));
+    expect(searchKnowledge).toHaveBeenCalledOnce();
+    await fireEvent.click(within(groups[1]).getByRole('button', { name: 'Recuperación exacta' }));
+
+    expect(browseNearbyWiki).toHaveBeenCalledWith('owner-b', 'same-wiki', {
+      targetConceptId: 'exact-match', graphCursor: 0,
+      page: { page: { kind: 'concept', conceptId: 'exact-match' }, expectedFingerprint: null }
+    });
+    expect(browsePublicWiki).not.toHaveBeenCalled();
+  });
+
+  it('keeps unavailable source warnings visible while secondary search metadata is collapsed', async () => {
+    activateLocalSearch();
+    snapshot.search = searchSummary('unavailable-result', 'offlineDevices', [{
+      conceptId: 'available-copy', wikiId: 'nearby-wiki', title: 'Resultado recibido', snippet: 'Extracto ya recibido.',
+      headingOrPage: 'Guía', logicalResourceUri: 'urn:airwiki:nearby', sourceRevision: 2, sourceSha256: 'b'.repeat(64), rank: 1,
+      nodeId: 'offline-peer', route: 'deviceNetwork', assurance: { trust: 'humanReviewed', freshness: 'stale', verificationOutdated: true }, lifecycle: 'stable'
+    }]);
+    snapshot.search.results[0].source = { kind: 'nearby', peerId: 'offline-peer', deviceName: 'Equipo sin conexión', platform: null, accessGranted: true, available: false };
+    render(App);
+    await submitVisibleSearch('resultado');
+
+    const group = screen.getByRole('article');
+    expect(group.querySelector('.search-group-warning')).toHaveTextContent('Equipo sin conexión');
+    expect(group.querySelector('.search-group-warning')).toBeVisible();
+    expect(within(group).getByText('Verificación desactualizada')).toBeVisible();
+    expect(within(group).getByText('OKF v0.2')).not.toBeVisible();
+    await fireEvent.click(within(group).getByText('Detalles de la wiki'));
+    expect(within(group).getByText('OKF v0.2')).toBeVisible();
+    expect(searchKnowledge).toHaveBeenCalledOnce();
   });
 
   it('exposes the current Wiki view with pressed state', async () => {

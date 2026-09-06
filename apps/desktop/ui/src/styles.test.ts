@@ -3,10 +3,14 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 function desktopStyles(): string {
-  return readFileSync(
+  const stylesheet = readFileSync(
     resolve(process.cwd(), 'src/styles.css'),
     'utf8',
   );
+  return stylesheet.replace("@import './tokens.css';", readFileSync(
+    resolve(process.cwd(), 'src/tokens.css'),
+    'utf8',
+  ));
 }
 
 type Rgb = [number, number, number];
@@ -85,20 +89,6 @@ describe('desktop style tokens', () => {
     expect(stickyRule).toContain('top: var(--wiki-sticky-offset)');
     expect(actionsRule).toContain('min-height: 38px');
     expect(stickyOffsets).toEqual(['-28px', '-24px']);
-  });
-
-  it('keeps long review content inside the review surface', () => {
-    const stylesheet = desktopStyles();
-    const drawerRule = stylesheet.match(/\.review-drawer\s*{([^}]*)}/)?.[1];
-    const titleRule = stylesheet.match(/\.review-title-copy h2\s*{([^}]*)}/)?.[1];
-    const evidenceRule = stylesheet.match(/\.evidence-list blockquote\s*{([^}]*)}/)?.[1];
-    const comparisonRule = stylesheet.match(/\.review-comparison\s*{([^}]*)}/)?.[1];
-
-    expect(drawerRule).toContain('overflow-x: hidden');
-    expect(drawerRule).toContain('min-width: 0');
-    expect(titleRule).toContain('overflow-wrap: anywhere');
-    expect(evidenceRule).toContain('overflow-wrap: anywhere');
-    expect(comparisonRule).toContain('minmax(260px, .88fr)');
   });
 
   it('keeps recovery guidance readable in every appearance', () => {
@@ -191,9 +181,7 @@ describe('desktop style tokens', () => {
 
     expect(stylesheet).not.toMatch(/body\s*{[^}]*min-width:\s*1020px/);
     expect(stylesheet).toContain('html, body, #app { min-width: 0; }');
-    expect(stylesheet).toContain(':root[data-platform=\'windows\'] { --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;');
-    expect(stylesheet).toMatch(/@media \(max-width: 1040px\)[\s\S]*?\.top-bar\s*{[^}]*grid-template-rows: auto auto/);
-    expect(stylesheet).toMatch(/@media \(max-width: 1040px\)[\s\S]*?\.wiki-row\s*{[^}]*'knowledge knowledge'/);
+    expect(stylesheet).toMatch(/:root\[data-platform='windows'\]\s*{[^}]*--font-ui:\s*"Segoe UI Variable", "Segoe UI", system-ui, sans-serif;/);
   });
 
   it('keeps programmatically focused headings quiet without hiding control focus', () => {

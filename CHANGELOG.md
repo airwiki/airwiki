@@ -4,6 +4,43 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Keep onboarding navigation visible in shorter desktop windows. Long setup
+  steps scroll independently so finishing without local AI remains reachable.
+
+- Added a shared contextual sidebar for Library, local and remote Wiki indexes,
+  and Settings, with a visible reading-mode toggle and keyboard resizing. The
+  To review destination groups current proposals by Wiki using the existing
+  evidence checks. Library rows show content and access more simply; Settings
+  now uses a named control with textual warnings. A pending search no longer
+  interrupts the review queue when the local model becomes available. Returning
+  from Settings preserves reading and index positions, including remote page
+  selection. Discarding edited preferences continues the requested navigation.
+  Reduced motion disables transitions entirely, preventing a temporary layout
+  animation from shortening the restored reading position.
+
+- Began the reading-focused desktop redesign: the linked-W symbol identifies
+  local and remote Wikis, and a long concept index no longer pushes the reader
+  below the list at the supported 1024-pixel window width. The index scrolls
+  independently while the article retains a single reading scroll region.
+  Trust, freshness and warnings stay near the title; expanded metadata follows
+  the content. Appearance and typography roles now share one token file.
+
+- Made the review footer fill its workspace width and reserve its own space,
+  keeping the end of the editor reachable. Global search stays on one row;
+  local-AI recovery guidance appears in the search page when needed.
+- Compacted the review heading and placed progress beside the return action,
+  leaving more of the proposal editor visible when a review opens.
+  Compact panels use their tab label without repeating a visible section title.
+- Library uses the singular reviewed-concept count in Spanish and English.
+- Long Wiki names stay within the sidebar and keep their pending count visible.
+- Switching the onboarding language now immediately translates the current
+  page, progress label and navigation buttons.
+- Closing a panel no longer lets a delayed focus return steal focus from a
+  newer dialog. Focus restoration waits for the DOM update and cancels outdated
+  requests.
+- Fixed approval of a previously excluded proposal with current source evidence.
+  Stale source evidence still blocks approval and preserves the proposal for retry.
+
 - Added a protected platform-split release-candidate channel. It can publish a
   Developer ID signed and notarized Apple-silicon macOS RC beside two clearly
   labeled unsigned Windows technical-beta MSIs, while remaining a non-Latest,

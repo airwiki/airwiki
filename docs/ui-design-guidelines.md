@@ -63,7 +63,9 @@ behavior; do not replace it with decorative WebView chrome.
 ## Appearance roles
 
 The compact palette below defines roles, not a license to scatter raw values
-through components. Components consume the existing CSS custom properties.
+through components. Components consume the CSS custom properties in
+`apps/desktop/ui/src/tokens.css`, which owns appearance, platform typography,
+control geometry, motion and shared spacing roles.
 
 | Role | Dark | Light |
 | --- | --- | --- |
@@ -133,6 +135,164 @@ reading order. Keep reading widths comfortable, support continuous window
 resizing, and avoid nested scroll regions. Never put the only critical action at
 the bottom edge of a macOS window.
 
+Onboarding keeps its header and navigation actions within the window. A long
+step scrolls in the space between them, so Back, Next and Finish stay reachable
+at the minimum window size in either language. Startup status views retain
+their separate layout.
+
+The normal workspace has one contextual sidebar and one reading region. Library
+and To review are global destinations. The Wiki picker and concept index share
+the sidebar; Settings replaces that context with its section navigation. Local
+and remote reading use the same frame, while each keeps its existing data and
+permission checks. Creation and Settings remain reachable at the sidebar foot.
+
+The sidebar starts at 224 logical pixels and can be resized between 200 and a
+viewport-dependent maximum of 360. Its focusable separator supports arrow keys,
+Home and End. Enter hides it and returns focus to the visible restore control.
+Hiding the sidebar preserves its index DOM and scroll position; it does not
+change the selected page. Geometry is currently session state, pending the
+planned local persistence contract.
+
+Returning from Settings restores the article and index scroll positions. A
+remote reader also retains its page and list/graph choice within the same live
+browse; current unavailability still hides its content. If navigation requires
+discarding edited preferences, continue the action the person requested after
+that decision. Cancelling keeps the edits and the current Settings section.
+
+Back/Forward navigation and the local Wiki picker retain the page, view, filter
+and reading/index positions within the session. The app keeps at most 100
+history entries and 100 recent Wiki contexts in memory. Browser history stores
+only opaque entry IDs; it never stores queries, article content or revisions.
+Restoration loads the current bundle, resolves the page and requests its current
+fingerprint. Only the matching worker completion restores the article and scroll.
+A missing page leaves the current index usable; a missing Wiki or expired
+history entry returns to Library. Failed loads retain the selection for retry.
+Remote history retains the exact origin, owner, Wiki, page and list/graph choice.
+An explicit traversal requests that page again against the current remote
+workspace; only the matching completed request may display content. It never
+replays a free-form search. A failed reopen hides the earlier body, and a blocked
+public publisher cannot be reopened from history. Reloading a shared route
+without its in-memory entry returns to Library without network activity.
+Back/Forward supports Command/Control with `[` / `]`, and Alt with Left/Right,
+outside editable fields and dialogs. These session controls do not implement
+the planned SQLite persistence across application restarts.
+
+The concept index has its own bounded scroll region beside the article at the
+supported 1024-pixel minimum width. A long index must never push the selected
+article below the entire list. The article retains one reading scroll surface.
+The index may be hidden for reading and recovered from the persistent header.
+
+The local and remote article share `KnowledgeReader`: the page title, essential
+state and text lead the reading surface. Show an identical leading Markdown
+heading only once. Keep invalid metadata, stale assurance and truncation visible
+before the body. Wiki controls retain separate Share and AI Apps actions; normal
+reading does not repeat the Wiki identity or show a permanent exposure diagram.
+
+Sources and page Details open a contextual inspector. At widths below 1360
+logical pixels it uses a native modal dialog without narrowing the article;
+larger windows use a side pane. Closing returns focus to the originating control.
+Page or revision changes remove the old inspector. Details contains extended
+metadata and the existing explicit human-verification action. Current backlinks
+remain navigable; unavailable targets are labeled without an active control.
+
+Source declarations are concept metadata, not paragraph citations. The current
+`KnowledgeBlock` contract has no source reference or evidence locator, and the
+Markdown-to-block adapter does not retain link-to-source associations. The UI
+therefore shows “Concept sources” with available title, resource, author and date,
+without inventing numbered citations or opening source documents. Remote pages
+currently provide published metadata but no typed source declarations; their
+inspector states that distinction and preserves the published metadata in
+Details. A changed remote page fingerprint hides its cached body until a current
+page is requested. These presentation changes add no source-document exposure.
+
+Library rows prioritize name, available description, reviewed and pending
+concept counts, and real network access. Show attention and work in progress
+when present. Do not repeat healthy technical states on every row. Settings
+uses a named control and textual service warnings from the shared system-status
+model; it must not introduce an independent interpretation of service health.
+
+General Settings leads with the selected model, its current status and the next
+available action. Keep download size, required disk space, license, installation
+progress and recovery guidance visible. The longer explanation of local AI lives
+in a closed disclosure; a ready installation uses a short introduction. Show
+measured download progress only when a total is known, and keep cancellation
+available during preparation. Unsupported hardware and insufficient space explain
+why installation is unavailable. A pending model change explains the required
+complete restart without mislabeling the selected model as active.
+
+Settings sections and integration rows use simple separators. Connections keeps
+the LAN preference next to the actual device state. AI Apps preserves separate
+connection and workflow states, errors and recovery actions. Public search remains
+an explicit per-app control, separate from the Wiki's AI access permissions.
+Preparation language in global search requires an actual preparation in progress;
+an unavailable local runtime instead points to its state in General Settings.
+An already active runtime remains usable while another model awaits restart.
+Keep the global search bar to one row. When a person enters a query while local
+search is unavailable or preparing, show the explanation and Settings recovery
+action in the search page rather than a permanent second row in the input.
+
+Search groups prioritize concept titles, excerpts and provenance. Keep the Wiki
+name, source owner and total match count in a compact header; extended Wiki
+metadata belongs in a disclosure. Unavailable sources, restricted compatibility,
+stale assurance and incomplete coverage remain visible with that disclosure
+closed. Group identity includes origin, owner and Wiki; two owners of the same
+Wiki must never share component state. Preserve backend order, bounded matches
+and the total match count. Filter counts refer to Wikis, not displayed excerpts.
+
+Returning from an exact result restores its query, filter, scroll position and
+focus without resubmitting the query. Keep at most twenty searches in memory,
+including their bounded received results. Back/Forward between queries labels
+earlier results and offers an explicit refresh; it restores no public-search
+consent. A superseded incomplete search keeps its received partial results and
+states that it did not finish. A newer completion cannot replace the historical
+view. Evicted searches return to Library without replay. Blocking a publisher
+removes its results from every cached search; unblocking does not revive them.
+Queries and snippets never enter browser history, durable state or logs.
+Deferred search focus must respect a newer navigation and a destroyed view.
+
+A local
+result waits for its own bundle request to complete before resolving the concept
+against the current page fingerprint. A failed load can retry that exact concept;
+unrelated or abandoned completions cannot open a cached page. Choosing another
+page cancels that pending intent; a completed bundle waits while Settings is
+visible and continues on return. Session history does not change worker ranking,
+publication or authorization; opening any result checks its current availability.
+
+Review uses a dedicated workspace with a global queue grouped by Wiki. Keep
+excluded proposals recoverable and identify drafts blocked by a Wiki restriction
+or an ongoing update. Show evidence and editable title/summary side by side
+when they fit; otherwise switch between them without recreating the edited
+draft. Keep the decision actions reachable during comparison and wrap long
+source names and excerpts.
+Keep the review heading compact so the initial viewport prioritizes evidence
+and editing. Progress can share the return-action row and wrap when needed;
+Wiki identity, proposal title, source revision and explanatory copy remain visible.
+In the compact layout, the active tab names its panel without repeating a
+visible section heading. Keep the heading available semantically and preserve
+the editor controls and at least 120 logical pixels of its initial visible area.
+The decision footer fills the review region's width and occupies its own bottom
+row. Evidence and proposal share one scrolling content region above it; the
+footer must never cover the end of the editor. Returning from Settings restores
+that content region's position.
+
+Approval and exclusion advance only after the worker confirms the actual
+operation. An enqueue acknowledgement is not success. Count confirmed decisions
+and current pending proposals separately, keep the existing queue order when
+new drafts arrive, and retain edits after failure. Current concept, source
+revision, request ID, draft version, restrictions and reanalysis state still
+gate each decision. A changed or withdrawn proposal keeps the editor visible
+with actions blocked; opening its current version requires resolving any edits.
+
+Leaving an edited proposal through application navigation or a native quit
+request offers continuing the review or discarding those edits. This includes
+the menu, tray and window preference to quit directly. Discarding
+continues the requested navigation; it neither approves nor excludes. Returning
+from Settings resolves the proposal again and requests current evidence.
+Unsaved preferences receive the same protection on quit. A decision already
+in progress finishes before the application exits; failure preserves edits.
+Approval can make content accessible under existing Wiki permissions; its copy
+must explain that consequence without implying new grants or verification.
+
 ## Controls and targets
 
 - Use 28 by 28 logical pixels as the normal macOS control target.
@@ -140,6 +300,9 @@ the bottom edge of a macOS window.
   hit region, and a keyboard path.
 - Prefer 40–44 pixels for isolated primary actions or touch-capable hardware.
 - Provide visible hover, pressed, disabled, selected, and keyboard-focus states.
+- Restore focus after a dialog's DOM update without waiting for an animation
+  frame. A newer dialog or a destroyed view cancels the earlier focus request;
+  an old close must never move focus outside the current dialog.
 - Reserve visible focus rings for interactive controls. A noninteractive route
   heading may receive programmatic focus for semantic navigation without
   drawing a full-width control outline.
@@ -150,6 +313,15 @@ the bottom edge of a macOS window.
 AirWiki uses its cross-platform icon system by default. SF Symbols can inform
 icon semantics, weight, and alignment but must not be copied into unsupported
 platforms or used outside Apple terms.
+
+Wikis use the linked-W geometry in `WikiIcon.svelte`, consistently across local
+and remote libraries, page indexes and empty states. It inherits text color and
+is decorative beside a named control; labels convey identity and access state.
+The official application logo remains a separate brand asset.
+
+Reduced motion disables CSS animations and transitions. Do not assign a small
+nonzero transition duration globally: it also animates otherwise static layout
+properties and can clamp a restored reading position during a route change.
 
 ## Windows and Fluent adaptation
 

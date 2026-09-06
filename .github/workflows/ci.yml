@@ -191,6 +191,12 @@ jobs:
           # runs the same journey with the visual matrix enabled.
           AIRWIKI_E2E_VISUAL: "0"
         run: pnpm --dir apps/desktop/ui e2e
+      - name: Native desktop review E2E
+        shell: bash
+        env:
+          AIRWIKI_E2E_REVIEW_FIXTURE: "1"
+          AIRWIKI_E2E_VISUAL: "0"
+        run: pnpm --dir apps/desktop/ui exec node scripts/run-e2e.mjs
 
   supply-chain:
     name: Advisories, licenses and sources

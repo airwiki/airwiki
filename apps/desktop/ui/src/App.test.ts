@@ -3,7 +3,7 @@ import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
 import { allowPeerPairingAgain, approveProjectMemoryRequest, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmLegacyLanAiGrants, connect, createProjectMemory, detachProjectMemory, explorePublicWikis, installModels, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, refreshApplicationAccess, refreshConnectivity, refreshWikiHealth, rejectProjectMemoryRequest, rejectReview, rescanWiki, searchKnowledge, setApplicationWikiRole, setWikiGrant, updatePreferences, updateWikiPolicy, validateOkfImport, verifyWikiConcept } from './api';
-import { setModelProfile } from './api';
+import { setModelProfile, refreshAutostart } from './api';
 import type { AppSnapshot, SearchCoverage, SearchHitSummary, SearchStatus, UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
 
@@ -122,6 +122,40 @@ async function submitVisibleSearch(query = 'fixture search') {
   await waitFor(() => expect(searchKnowledge).toHaveBeenCalled());
 }
 
+function historySearch(requestId: string, title: string, source: 'local' | 'public' = 'local', status: SearchStatus = 'complete') {
+  return searchSummary(requestId, status === 'searching' ? 'partial' : 'complete', [{
+    conceptId: title, wikiId: source === 'local' ? snapshot.wikis[0].id : 'history-public-wiki', title,
+    snippet: `${title} received excerpt`, headingOrPage: 'Guide', logicalResourceUri: 'urn:airwiki:search-history',
+    sourceRevision: 1, sourceSha256: 'a'.repeat(64), rank: 1,
+    nodeId: source === 'local' ? snapshot.nodeId! : 'history-publisher',
+    route: source === 'local' ? 'deviceNetwork' : 'publicNetwork', assurance: null, lifecycle: 'stable'
+  }], status);
+}
+
+function reviewSessionFixture() {
+  const wiki = snapshot.wikis[0];
+  const first: AppSnapshot['reviews'][number] = {
+    conceptId: 'first-review', wikiId: wiki.id, wikiName: wiki.name, sourceName: 'first-source.md', sourceRevision: 3, excluded: false,
+    draft: { type: 'Reference', title: 'First proposal', summary: 'First proposed summary', description: '', language: 'en',
+      tags: [], entities: [], links: [], classificationConfidence: 1, classificationExplanation: 'Synthetic fixture' }
+  };
+  const second = { ...first, conceptId: 'second-review', sourceName: 'second-source.md', draft: { ...first.draft, title: 'Second proposal', summary: 'Second proposed summary' } };
+  snapshot.reviews = [first, second];
+  wiki.needsReviewCount = 2;
+  const evidence = (review = first, requestId = `evidence-${review.conceptId}`): NonNullable<AppSnapshot['reviewEvidence']> => ({
+    requestId, conceptId: review.conceptId, sourceRevision: review.sourceRevision, status: 'ready',
+    excerpts: [{ ordinal: 0, headingOrPage: 'Source section', text: `${review.draft.title} source evidence`, truncated: false }],
+    totalChunks: 1, nextOrdinal: null
+  });
+  vi.mocked(loadReviewEvidence).mockImplementation(async (review) => {
+    const current = evidence(review, crypto.randomUUID());
+    await deliverSnapshot(current.requestId, { reviewEvidence: current });
+    return current.requestId;
+  });
+  window.history.replaceState(null, '', '#review');
+  return { first, second, evidence };
+}
+
 async function openSettingsSection(section: 'general' | 'connections' | 'apps') {
   await waitFor(() => {
     expect(
@@ -135,6 +169,50 @@ async function openSettingsSection(section: 'general' | 'connections' | 'apps') 
   const link = screen.getByRole('link', { name });
   if (link.getAttribute('aria-current') !== 'page') await fireEvent.click(link);
   return screen.findByRole('heading', { name: section === 'general' ? 'General' : section === 'connections' ? 'Conexiones' : 'Apps de IA', level: 1 });
+}
+
+function readingHistoryFixture() {
+  const wiki = snapshot.wikis[0];
+  const first = {
+    conceptId: 'first', page: { kind: 'concept' as const, path: 'first.md' }, title: 'First article',
+    description: '', conceptType: 'Reference', tags: [], lifecycle: 'stable', generatedBy: null,
+    verifiedBy: [], sources: [], staleAfter: null,
+    assurance: { trust: 'unverified' as const, freshness: 'notDeclared' as const, verificationOutdated: false },
+    warnings: [], executionAvailable: false, fingerprint: 'a'.repeat(64)
+  };
+  const second = { ...first, conceptId: 'second', page: { kind: 'concept' as const, path: 'second.md' }, title: 'Second article', fingerprint: 'b'.repeat(64) };
+  const bundle: NonNullable<AppSnapshot['knowledge']> = {
+    wikiId: wiki.id, wikiName: wiki.name, version: 'reading-history', status: 'ready',
+    reservedPages: [], concepts: [first, second], links: [], errorCount: 0, warningCount: 0
+  };
+  const page = (concept = first): NonNullable<AppSnapshot['knowledgePage']> => ({
+    wikiId: wiki.id, page: concept.page, concept, title: concept.title, status: 'ready',
+    blocks: [{ kind: 'paragraph', text: `${concept.title} body` }], metadata: [], backlinks: [], truncated: false
+  });
+  snapshot.knowledge = bundle;
+  snapshot.knowledgePage = page();
+  window.history.replaceState(null, '', `#wikis/${wiki.id}`);
+  return { wiki, first, second, bundle, page };
+}
+
+async function deliverSnapshot(requestId: string | null = null, update: Partial<AppSnapshot> = {}) {
+  snapshot = { ...snapshot, ...update, sequence: snapshot.sequence + 1 };
+  await act(() => snapshotListener?.({
+    schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence,
+    requestId, kind: 'stateChanged', snapshot
+  }));
+}
+
+async function completeHistoryBundle(bundle: NonNullable<AppSnapshot['knowledge']>) {
+  const requestId = vi.mocked(loadWikiBundle).mock.calls.at(-1)?.[1];
+  expect(requestId).toEqual(expect.any(String));
+  await deliverSnapshot(requestId, { knowledge: bundle });
+}
+
+async function completeHistoryPage(page: NonNullable<AppSnapshot['knowledgePage']>) {
+  const requestId = vi.mocked(loadWikiPage).mock.calls.at(-1)?.[3];
+  expect(requestId).toEqual(expect.any(String));
+  await deliverSnapshot(requestId, { knowledgePage: page });
 }
 
 async function openFirstSearchMatch(scope: ParentNode = document) {
@@ -190,7 +268,7 @@ vi.mock('./api', async (importOriginal) => {
     detachProjectMemory: vi.fn(async () => undefined),
     loadWikiBundle: vi.fn(async () => undefined),
     loadWikiPage: vi.fn(async () => undefined),
-    loadReviewEvidence: vi.fn(async () => 'review-evidence-request'),
+    loadReviewEvidence: vi.fn(async () => snapshot.reviewEvidence?.requestId ?? 'review-evidence-request'),
     verifyWikiConcept: vi.fn(async () => undefined),
     approveReview: vi.fn(async () => undefined),
     rejectReview: vi.fn(async () => undefined),
@@ -228,13 +306,16 @@ describe('AirWiki wiki workspace', () => {
   });
 
   beforeEach(() => {
-    window.location.hash = '';
+    window.history.replaceState(null, '', window.location.pathname);
     snapshot = readySnapshot();
     snapshotListener = null;
     tauriListeners.clear();
+    vi.mocked(loadReviewEvidence).mockReset().mockImplementation(async () => snapshot.reviewEvidence?.requestId ?? 'review-evidence-request');
+    vi.mocked(approveReview).mockReset().mockResolvedValue(undefined);
+    vi.mocked(rejectReview).mockReset().mockResolvedValue(undefined);
   });
 
-  it('renders one wiki workspace with global search and no redundant sidebar', async () => {
+  it('renders global search and one contextual navigation column', async () => {
     render(App);
 
     expect((await screen.findAllByText('Atlas')).length).toBeGreaterThan(0);
@@ -246,7 +327,109 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('button', { name: 'Nueva wiki' })).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Tus wikis' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Atlas 2 de 2 revisados/ })).toBeInTheDocument();
-    expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Navegación' })).toBeInTheDocument();
+  });
+
+  it('settles an unavailable startup check and refreshes its status without changing language', async () => {
+    snapshot.autostart = null;
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /^Configuración\./ }));
+    await screen.findByText('Inicio de sesión: comprobando…');
+    const firstRequest = vi.mocked(refreshAutostart).mock.calls.at(-1)?.[0];
+    expect(firstRequest).toEqual(expect.any(String));
+    await deliverSnapshot(firstRequest!, { autostart: null });
+    await screen.findByText('Inicio de sesión: estado no disponible. Actualiza para volver a intentarlo.');
+    const startup = screen.getByRole('heading', { name: 'Inicio automático' }).closest('section')!;
+    await fireEvent.click(within(startup).getByRole('button', { name: 'Actualizar' }));
+    await screen.findByText('Inicio de sesión: comprobando…');
+    const retryRequest = vi.mocked(refreshAutostart).mock.calls.at(-1)?.[0];
+    expect(retryRequest).not.toBe(firstRequest);
+    await deliverSnapshot(retryRequest!, { autostart: 'disabled' });
+    await screen.findByText('Inicio de sesión: desactivado');
+  });
+
+  it('opens the global review queue without exploring public wikis and restores it from Settings', async () => {
+    window.location.hash = '#review';
+    render(App);
+    expect(await screen.findByRole('heading', { name: 'Por revisar' })).toBeInTheDocument();
+    expect(explorePublicWikis).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: /^Configuración\./ }));
+    expect(await screen.findByRole('heading', { name: 'General' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+    expect(await screen.findByRole('heading', { name: 'Por revisar' })).toHaveFocus();
+    expect(window.location.hash).toBe('#review');
+  });
+
+  it('keeps edited settings when the sidebar requests review navigation', async () => {
+    render(App);
+    await openSettingsSection('general');
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Al cerrar' }), { target: { value: 'hide_to_tray' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Por revisar' }));
+    const dialog = await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' });
+    expect(window.location.hash).toBe('#settings/general');
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Continuar editando' }));
+    expect(screen.getByRole('combobox', { name: 'Al cerrar' })).toHaveValue('hide_to_tray');
+    expect(updatePreferences).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Por revisar' }));
+    await fireEvent.click(within(await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' })).getByRole('button', { name: 'Descartar cambios' }));
+    expect(await screen.findByRole('heading', { name: 'Por revisar' })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#review');
+  });
+
+  it('continues the search shortcut after the person discards settings edits', async () => {
+    render(App);
+    await openSettingsSection('general');
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Al cerrar' }), { target: { value: 'hide_to_tray' } });
+    await fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    const dialog = await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' });
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Descartar cambios' }));
+    const input = within(await screen.findByRole('search')).getByRole('textbox');
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(window.location.hash).toBe('#library');
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
+  it('opens the requested wiki source dialog after discarding settings edits', async () => {
+    render(App);
+    await openSettingsSection('general');
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Al cerrar' }), { target: { value: 'hide_to_tray' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Nueva wiki' }));
+    await fireEvent.click(within(await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' })).getByRole('button', { name: 'Descartar cambios' }));
+    expect(await screen.findByRole('dialog', { name: '¿De dónde viene esta wiki?' })).toBeInTheDocument();
+    expect(pickWikiFolder).not.toHaveBeenCalled();
+    expect(updatePreferences).not.toHaveBeenCalled();
+  });
+
+  it('does not resume a pending search when the model becomes ready in the review queue', async () => {
+    render(App);
+    const search = within(await screen.findByRole('search')).getByRole('textbox');
+    vi.useFakeTimers();
+    try {
+      await fireEvent.input(search, { target: { value: 'pending local query' } });
+      await fireEvent.click(screen.getByRole('button', { name: 'Por revisar' }));
+      activateLocalSearch();
+      snapshot = { ...snapshot, sequence: snapshot.sequence + 1 };
+      await act(() => snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: null, kind: 'stateChanged', snapshot }));
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      expect(window.location.hash).toBe('#review');
+      expect(searchKnowledge).not.toHaveBeenCalled();
+      expect(explorePublicWikis).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recovers sidebar controls after Enter enters reading mode', async () => {
+    render(App);
+    const splitter = await screen.findByRole('separator', { name: 'Ancho de la barra lateral' });
+    await fireEvent.keyDown(splitter, { key: 'Enter' });
+    const restore = screen.getByRole('button', { name: 'Mostrar barra lateral' });
+    await waitFor(() => expect(restore).toHaveFocus());
+    expect(screen.queryByRole('complementary', { name: 'Navegación' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Tus wikis' })).toBeInTheDocument();
+    await fireEvent.click(restore);
+    expect(screen.getByRole('complementary', { name: 'Navegación' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ocultar barra lateral' })).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('uses the same attention classification for the Wiki filters and rows', async () => {
@@ -511,7 +694,7 @@ describe('AirWiki wiki workspace', () => {
 
     const settings = await screen.findByRole('button', { name: /Conocimiento local: Configura la búsqueda local.*Conexiones: Solo este dispositivo.*Apps de IA: Disponible/ });
     expect(settings).toBeInTheDocument();
-    expect(container.querySelectorAll('.system-status-button .status-segment')).toHaveLength(3);
+    expect(container.querySelector('.system-status-button')).toHaveTextContent('Configuración');
     expect(screen.queryByRole('button', { name: /MCP:/ })).not.toBeInTheDocument();
   });
 
@@ -1056,7 +1239,7 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByText('Vinculada y disponible')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Desvincular' })).not.toBeInTheDocument();
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Detalles' }));
+    await fireEvent.click(screen.getByRole('button', { name: /^Detalles de la wiki:/ }));
     const dialog = screen.getByRole('dialog', { name: 'Atlas' });
     expect(within(dialog).getByText('Memoria portátil del proyecto')).toBeInTheDocument();
     expect(within(dialog).getByText('Vinculada y disponible')).toBeInTheDocument();
@@ -1201,7 +1384,6 @@ describe('AirWiki wiki workspace', () => {
     render(App);
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 2 revisados/ }));
 
-    expect(screen.getByLabelText('Local: Activa')).toBeInTheDocument();
     expect(screen.getByLabelText('LAN: Habilitada')).toBeInTheDocument();
   });
 
@@ -1340,11 +1522,26 @@ describe('AirWiki wiki workspace', () => {
     expect(document.querySelector('.action-message.error')).toBeNull();
   });
 
+  it.each([/^Detalles de la wiki:/, /^Compartir$/, /Gestionar apps de IA/])(
+    'returns focus to the clicked Wiki panel trigger %s even when another element had focus',
+    async (name) => {
+      render(App);
+      await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 2 revisados/ }));
+      const trigger = screen.getByRole('button', { name });
+      screen.getByRole('heading', { name: 'Atlas', level: 1 }).focus();
+      // A WebKit pointer click does not focus buttons automatically.
+      await fireEvent.click(trigger);
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Cerrar' })).toHaveFocus());
+      await fireEvent.keyDown(window, { key: 'Escape' });
+      await waitFor(() => expect(trigger).toHaveFocus());
+    }
+  );
+
   it('keeps wiki details and sharing as separate actions', async () => {
     const { container } = render(App);
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 2 revisados/ }));
 
-    const detailsButton = screen.getByRole('button', { name: 'Detalles' });
+    const detailsButton = screen.getByRole('button', { name: /^Detalles de la wiki:/ });
     detailsButton.focus();
     await fireEvent.click(detailsButton);
     expect(screen.getByRole('dialog', { name: 'Atlas' })).toHaveTextContent('Estado de la fuente');
@@ -1367,11 +1564,34 @@ describe('AirWiki wiki workspace', () => {
     expect(results.violations.filter((violation) => violation.impact === 'critical' || violation.impact === 'serious')).toEqual([]);
   });
 
+  it('keeps focus inside a newer dialog when an earlier close waits for a paint', async () => {
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 2 revisados/ }));
+    await fireEvent.click(screen.getByRole('button', { name: /^Detalles de la wiki:/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cerrar' })).toHaveFocus());
+
+    const frames: FrameRequestCallback[] = [];
+    const animationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    try {
+      await fireEvent.keyDown(window, { key: 'Escape' });
+      await fireEvent.click(screen.getByRole('button', { name: 'Compartir' }));
+      const close = screen.getByRole('button', { name: 'Cerrar' });
+      await waitFor(() => expect(close).toHaveFocus());
+      await act(() => { for (const callback of frames.splice(0)) callback(0); });
+      expect(close).toHaveFocus();
+    } finally {
+      animationFrame.mockRestore();
+    }
+  });
+
   it('distinguishes maintenance from an empty source-issue state', async () => {
     snapshot.wikis[0].maintenanceRequired = true;
     render(App);
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 2 revisados/ }));
-    await fireEvent.click(screen.getAllByRole('button', { name: 'Detalles' }).at(-1)!);
+    await fireEvent.click(screen.getByRole('button', { name: /^Detalles de la wiki:/ }));
 
     expect(screen.getByText('El contenido publicado necesita una comprobación')).toBeInTheDocument();
     expect(screen.queryByText('No hay problemas con la fuente')).not.toBeInTheDocument();
@@ -1419,6 +1639,294 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('button', { name: /^Borradores/ })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('compares source and proposal in a dedicated workspace and keeps edits when switching panels', async () => {
+    reviewSessionFixture();
+    const { container } = render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    const workspace = await screen.findByRole('region', { name: 'Revisión de propuesta' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'First proposal', level: 1 })).toHaveFocus());
+    expect(await screen.findByText('First proposal source evidence')).toBeInTheDocument();
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Resumen propuesto' }), { target: { value: 'Human revised summary' } });
+    const switcher = within(workspace.querySelector('.review-view-switch') as HTMLElement);
+    await fireEvent.click(switcher.getByRole('button', { name: 'Evidencia' }));
+    expect(switcher.getByRole('button', { name: 'Evidencia' })).toHaveAttribute('aria-pressed', 'true');
+    await fireEvent.click(switcher.getByRole('button', { name: /Propuesta/ }));
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('Human revised summary');
+    expect(screen.getByText(/Al aprobar, el contenido pasa a ser buscable/)).toBeVisible();
+    const accessibility = await axe.run(container, { rules: { region: { enabled: false } } });
+    expect(accessibility.violations.filter((violation) => ['critical', 'serious'].includes(violation.impact ?? ''))).toEqual([]);
+  });
+
+  it('waits for confirmed publication and preserves the next position when the review queue changes', async () => {
+    const { first, second } = reviewSessionFixture();
+    let confirm: () => void = vi.fn();
+    vi.mocked(approveReview).mockImplementationOnce(() => new Promise<void>((resolve) => { confirm = resolve; }));
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    const approve = await screen.findByRole('button', { name: 'Aprobar y continuar' });
+    await fireEvent.click(approve);
+    await fireEvent.click(approve);
+    expect(approveReview).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Guardando decisión…')).toBeVisible();
+    const inserted = { ...first, conceptId: 'new-before-current', draft: { ...first.draft, title: 'New earlier proposal' } };
+    await deliverSnapshot(null, { reviews: [inserted, second] });
+    expect(screen.getByRole('heading', { name: 'First proposal', level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText('Decisiones confirmadas: 1 · Pendientes: 2')).not.toBeInTheDocument();
+    await act(() => confirm());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Second proposal', level: 1 })).toHaveFocus());
+    expect(screen.getByText('Decisiones confirmadas: 1 · Pendientes: 2')).toBeVisible();
+    expect(loadReviewEvidence).toHaveBeenLastCalledWith(second);
+  });
+
+  it('keeps the edited draft after a failed decision and retries the same proposal', async () => {
+    const { first, second } = reviewSessionFixture();
+    vi.mocked(approveReview).mockRejectedValueOnce({ code: 'invalidInput', messageKey: 'reviewDecisionFailed', retryable: false });
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Título propuesto' }), { target: { value: 'Human edited title' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Aprobar y continuar' }));
+    expect(await screen.findByText(/No se pudo confirmar la decisión/)).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Título propuesto' })).toHaveValue('Human edited title');
+    vi.mocked(approveReview).mockImplementationOnce(async () => { await deliverSnapshot(null, { reviews: [second] }); });
+    await fireEvent.click(screen.getByRole('button', { name: 'Aprobar y continuar' }));
+    expect(approveReview).toHaveBeenLastCalledWith(first.conceptId, first.sourceRevision, { ...first.draft, title: 'Human edited title' });
+    expect(approveReview).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole('heading', { name: 'Second proposal', level: 1 })).toBeVisible();
+  });
+
+  it('preserves edits when the source changes and requires a choice before opening the current proposal', async () => {
+    const { first, second } = reviewSessionFixture();
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Resumen propuesto' }), { target: { value: 'My retained edit' } });
+    const changed = { ...first, sourceRevision: 4, draft: { ...first.draft, title: 'Current proposal', summary: 'Current summary' } };
+    await deliverSnapshot(null, { reviews: [changed, second] });
+    expect(screen.getByText('Esta propuesta cambió')).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('My retained edit');
+    expect(screen.getByRole('button', { name: 'Aprobar y continuar' })).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Abrir versión actual' }));
+    expect(await screen.findByRole('dialog', { name: '¿Descartar los cambios de esta propuesta?' })).toBeVisible();
+    await fireEvent.click(screen.getByRole('button', { name: 'Seguir revisando' }));
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('My retained edit');
+    await fireEvent.click(screen.getByRole('button', { name: 'Abrir versión actual' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios y salir' }));
+    expect(await screen.findByRole('heading', { name: 'Current proposal', level: 1 })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('Current summary');
+    expect(approveReview).not.toHaveBeenCalled();
+  });
+
+  it.each(['library', 'settings', 'queue', 'history', 'search', 'wiki', 'hash'] as const)('guards edited review navigation to %s and continues the requested action after discard', async (target) => {
+    reviewSessionFixture();
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Resumen propuesto' }), { target: { value: 'Keep this edit' } });
+    const leave = async () => {
+      if (target === 'history' || target === 'search') {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        await fireEvent.keyDown(window, { key: target === 'history' ? '[' : 'k', metaKey: true });
+      }
+      else if (target === 'hash') { window.history.pushState(null, '', '#settings/connections'); await fireEvent(window, new PopStateEvent('popstate')); }
+      else if (target === 'wiki') await fireEvent.click(within(screen.getByRole('complementary', { name: 'Navegación' })).getByRole('button', { name: /^Atlas/ }));
+      else await fireEvent.click(screen.getByRole('button', { name: target === 'library' ? 'Biblioteca' : target === 'queue' ? 'Revisar más tarde' : /^Configuración\./ }));
+    };
+    await leave();
+    await screen.findByRole('dialog', { name: '¿Descartar los cambios de esta propuesta?' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Seguir revisando' }));
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('Keep this edit');
+    await leave();
+    await screen.findByRole('dialog', { name: '¿Descartar los cambios de esta propuesta?' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios y salir' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Revisión de propuesta' })).not.toBeInTheDocument());
+    if (target === 'library' || target === 'search') expect(screen.getByRole('heading', { name: 'Tus wikis' })).toBeVisible();
+    else if (target === 'wiki') expect(loadWikiBundle).toHaveBeenLastCalledWith(snapshot.wikis[0].id);
+    else if (target === 'hash') expect(screen.getByRole('heading', { name: 'Conexiones', level: 1 })).toBeVisible();
+    else if (target === 'settings') expect(screen.getByRole('navigation', { name: 'Configuración' })).toBeVisible();
+    else expect(screen.getByRole('heading', { name: 'Por revisar', level: 1 })).toBeVisible();
+    expect(approveReview).not.toHaveBeenCalled();
+    expect(rejectReview).not.toHaveBeenCalled();
+  });
+
+  it('keeps excluded proposals recoverable in the global queue', async () => {
+    const { first } = reviewSessionFixture();
+    snapshot.reviews = [{ ...first, excluded: true }];
+    render(App);
+    await fireEvent.click(await screen.findByText('Excluidos (1)'));
+    await fireEvent.click(screen.getByRole('button', { name: /First proposal.*first-source.md/ }));
+    expect(screen.getByText(/Excluiste este borrador/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Excluir de esta wiki' })).not.toBeInTheDocument();
+    vi.mocked(approveReview).mockImplementationOnce(async () => { await deliverSnapshot(null, { reviews: [] }); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Aprobar y continuar' })).toBeEnabled());
+    await fireEvent.click(screen.getByRole('button', { name: 'Aprobar y continuar' }));
+    await waitFor(() => expect({
+      headings: Array.from(document.querySelectorAll('h1'), (heading) => heading.textContent),
+      error: screen.queryByRole('alert')?.textContent ?? null,
+      approvalCount: vi.mocked(approveReview).mock.calls.length
+    }).toEqual({ headings: ['Por revisar'], error: null, approvalCount: 1 }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Por revisar', level: 1 })).toHaveFocus());
+    expect(screen.getByText('Decisiones confirmadas: 1 · Pendientes: 0')).toBeVisible();
+  });
+
+  it('waits for exclusion to finish before advancing and leaves the excluded proposal recoverable', async () => {
+    const { first, second } = reviewSessionFixture();
+    let confirm: () => void = vi.fn();
+    vi.mocked(rejectReview).mockImplementationOnce(() => new Promise<void>((resolve) => { confirm = resolve; }));
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    const exclude = screen.getByRole('button', { name: 'Excluir de esta wiki' });
+    await waitFor(() => expect(exclude).toBeEnabled());
+    await fireEvent.click(exclude);
+    await fireEvent.click(exclude);
+    expect(rejectReview).toHaveBeenCalledExactlyOnceWith(first.conceptId, first.sourceRevision);
+    await deliverSnapshot(null, { reviews: [{ ...first, excluded: true }, second] });
+    expect(screen.getByRole('heading', { name: 'First proposal', level: 1 })).toBeVisible();
+    await act(() => confirm());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Second proposal', level: 1 })).toHaveFocus());
+    expect(screen.getByText('Decisiones confirmadas: 1 · Pendientes: 1')).toBeVisible();
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a Por revisar' }));
+    expect(screen.getByText('Excluidos (1)')).toBeVisible();
+    expect(approveReview).not.toHaveBeenCalled();
+  });
+
+  it('blocks evidence from another request and recovers without losing the edited proposal', async () => {
+    const { first, evidence } = reviewSessionFixture();
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await screen.findByText('First proposal source evidence');
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Resumen propuesto' }), { target: { value: 'Retained summary' } });
+    await deliverSnapshot('other-request', { reviewEvidence: { ...evidence(first, 'other-request'), excerpts: [{ ordinal: 0, headingOrPage: '', text: 'Unmatched evidence must stay hidden', truncated: false }] } });
+    expect(screen.queryByText('Unmatched evidence must stay hidden')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Aprobar y continuar' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Excluir de esta wiki' })).toBeDisabled();
+    vi.mocked(loadReviewEvidence).mockRejectedValueOnce(new Error('Synthetic evidence failure'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a intentar' }));
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('Retained summary');
+    expect(screen.getByRole('button', { name: 'Aprobar y continuar' })).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a intentar' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Aprobar y continuar' })).toBeEnabled());
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('Retained summary');
+    expect(approveReview).not.toHaveBeenCalled();
+  });
+
+  it('returns from Settings to the current proposal and requests its evidence again', async () => {
+    const { first, second } = reviewSessionFixture();
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await screen.findByText('First proposal source evidence');
+    await fireEvent.click(screen.getByRole('button', { name: /^Configuración\./ }));
+    const current = { ...first, sourceRevision: 4, draft: { ...first.draft, title: 'Changed during Settings' } };
+    await deliverSnapshot(null, { reviews: [current, second] });
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Changed during Settings', level: 1 })).toHaveFocus());
+    expect(loadReviewEvidence).toHaveBeenLastCalledWith(current);
+    expect(screen.queryByText('First proposal source evidence')).not.toBeInTheDocument();
+    expect(await screen.findByText('Changed during Settings source evidence')).toBeVisible();
+  });
+
+  it('does not let delayed search focus replace a newer review navigation', async () => {
+    reviewSessionFixture();
+    const frames: FrameRequestCallback[] = [];
+    const animationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    try {
+      render(App);
+      await screen.findByRole('heading', { name: 'Por revisar', level: 1 });
+      await fireEvent.keyDown(window, { key: 'k', metaKey: true });
+      await fireEvent.click(screen.getByRole('button', { name: /^Por revisar/ }));
+      await fireEvent.click(screen.getByRole('button', { name: /First proposal.*first-source.md/ }));
+      await screen.findByText('First proposal source evidence');
+      await act(() => { for (const callback of frames.splice(0)) callback(0); });
+      expect(screen.getByRole('heading', { name: 'First proposal', level: 1 })).toBeVisible();
+      expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).not.toHaveFocus();
+      expect(searchKnowledge).not.toHaveBeenCalled();
+    } finally {
+      animationFrame.mockRestore();
+    }
+  });
+
+  it.each(['native', 'close-choice'] as const)('resolves edited proposals before quitting through %s', async (origin) => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    reviewSessionFixture();
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await screen.findByText('First proposal source evidence');
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Resumen propuesto' }), { target: { value: 'Retain before quitting' } });
+    const requestExit = async () => {
+      await act(() => { tauriListeners.get(origin === 'native' ? 'quit-requested' : 'close-choice-required')?.({ payload: null }); });
+      if (origin === 'close-choice') await fireEvent.click(await screen.findByRole('button', { name: 'Salir completamente' }));
+    };
+    await requestExit();
+    const dialog = await screen.findByRole('dialog', { name: '¿Descartar los cambios de esta propuesta?' });
+    expect(quitCompletely).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Seguir revisando' })).toHaveFocus());
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Seguir revisando' }));
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('Retain before quitting');
+    await requestExit();
+    await fireEvent.click(await screen.findByRole('button', { name: 'Descartar cambios y salir' }));
+    await waitFor(() => expect(quitCompletely).toHaveBeenCalledOnce());
+    expect(approveReview).not.toHaveBeenCalled();
+    expect(rejectReview).not.toHaveBeenCalled();
+  });
+
+  it.each(['confirmed', 'failed'] as const)('waits for a pending review decision before processing native quit: %s', async (outcome) => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    const { second } = reviewSessionFixture();
+    let settle: () => void = vi.fn();
+    vi.mocked(approveReview).mockImplementationOnce(() => new Promise<void>((resolve, reject) => {
+      settle = outcome === 'confirmed' ? resolve : () => reject(new Error('Synthetic publication failure'));
+    }));
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await screen.findByText('First proposal source evidence');
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Título propuesto' }), { target: { value: 'Edited before decision' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Aprobar y continuar' }));
+    await act(() => {
+      tauriListeners.get('quit-requested')?.({ payload: null });
+      tauriListeners.get('quit-requested')?.({ payload: null });
+    });
+    expect(quitCompletely).not.toHaveBeenCalled();
+    expect(screen.getByText('Guardando decisión…')).toBeVisible();
+    if (outcome === 'confirmed') await deliverSnapshot(null, { reviews: [second] });
+    await act(() => settle());
+    if (outcome === 'confirmed') {
+      await waitFor(() => expect(quitCompletely).toHaveBeenCalledOnce());
+      expect(loadReviewEvidence).toHaveBeenCalledOnce();
+    } else {
+      await screen.findByRole('dialog', { name: '¿Descartar los cambios de esta propuesta?' });
+      expect(quitCompletely).not.toHaveBeenCalled();
+      await fireEvent.click(screen.getByRole('button', { name: 'Seguir revisando' }));
+      expect(screen.getByRole('textbox', { name: 'Título propuesto' })).toHaveValue('Edited before decision');
+      expect(screen.getByText(/No se pudo confirmar la decisión/)).toBeVisible();
+    }
+  });
+
+  it('preserves edited settings on native quit until the person decides to discard them', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    render(App);
+    await openSettingsSection('general');
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Al cerrar' }), { target: { value: 'hide_to_tray' } });
+    await act(() => { tauriListeners.get('quit-requested')?.({ payload: null }); });
+    await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' });
+    expect(quitCompletely).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar editando' }));
+    expect(screen.getByRole('combobox', { name: 'Al cerrar' })).toHaveValue('hide_to_tray');
+    await act(() => { tauriListeners.get('quit-requested')?.({ payload: null }); });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Descartar cambios' }));
+    await waitFor(() => expect(quitCompletely).toHaveBeenCalledOnce());
+    expect(updatePreferences).not.toHaveBeenCalled();
+  });
+
+  it('quits a clean view directly after the native request', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    render(App);
+    await screen.findByRole('heading', { name: 'Tus wikis' });
+    await act(() => { tauriListeners.get('quit-requested')?.({ payload: null }); });
+    expect(quitCompletely).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('keeps review decisions unavailable while the Wiki update replaces that draft', async () => {
     const wiki = snapshot.wikis[0];
     wiki.needsReviewCount = 1;
@@ -1444,7 +1952,7 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 3 revisados/ }));
     await fireEvent.click(screen.getByRole('button', { name: /^Borradores/ }));
     await fireEvent.click(screen.getByRole('button', { name: 'updating.md, Borrador' }));
-    const dialog = await screen.findByRole('dialog', { name: 'updating.md' });
+    const dialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
 
     expect(within(dialog).getByText('Volviendo a analizar los borradores actuales')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Excluir de esta wiki' })).toBeDisabled();
@@ -1470,7 +1978,7 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 3 revisados/ }));
     await fireEvent.click(screen.getByRole('button', { name: /^Borradores/ }));
     await fireEvent.click(screen.getByRole('button', { name: 'without-evidence.md, Borrador' }));
-    const dialog = await screen.findByRole('dialog', { name: 'without-evidence.md' });
+    const dialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
     const exclude = within(dialog).getByRole('button', { name: 'Excluir de esta wiki' });
 
     expect(exclude).toBeDisabled();
@@ -1501,15 +2009,15 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(screen.getByRole('button', { name: /^Borradores/ }));
     await fireEvent.click(screen.getByRole('button', { name: 'draft.md, Borrador' }));
 
-    let dialog = await screen.findByRole('dialog', { name: 'draft.md' });
+    let dialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
     expect(within(dialog).getByRole('status')).toHaveTextContent('Cargando el texto extraído…');
     expect(container.querySelector('.action-message')).not.toBeInTheDocument();
     expect(loadReviewEvidence).toHaveBeenCalledWith(review);
 
-    await fireEvent.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
-    expect(screen.queryByRole('dialog', { name: 'draft.md' })).not.toBeInTheDocument();
-    await fireEvent.click(screen.getByRole('button', { name: 'draft.md, Borrador' }));
-    dialog = await screen.findByRole('dialog', { name: 'draft.md' });
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Volver a Por revisar' }));
+    expect(screen.queryByRole('region', { name: 'Revisión de propuesta' })).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: /Draft proposal.*draft.md/ }));
+    dialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
 
     snapshot = {
       ...snapshot,
@@ -1567,7 +2075,7 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 3 revisados/ }));
     await fireEvent.click(screen.getByRole('button', { name: /^Borradores/ }));
     await fireEvent.click(screen.getByRole('button', { name: 'legacy.md, Borrador' }));
-    const legacyDialog = await screen.findByRole('dialog', { name: 'legacy.md' });
+    const legacyDialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
 
     expect(within(legacyDialog).getByText(/Vuelve a crearla desde la carpeta de origen/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Aprobar y continuar' })).toBeDisabled();
@@ -1592,9 +2100,9 @@ describe('AirWiki wiki workspace', () => {
 
     expect(screen.getByText(/AirWiki detuvo su indexación y uso compartido/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Actualizar' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Compartir' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Compartir' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Gestionar acceso' })).not.toBeInTheDocument();
-    await fireEvent.click(screen.getAllByRole('button', { name: 'Detalles' }).at(-1)!);
+    await fireEvent.click(screen.getByRole('button', { name: /^Detalles de la wiki:/ }));
     expect(screen.queryByRole('checkbox', { name: 'Mantener actualizada automáticamente' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Volver a vincular carpeta' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Eliminar wiki' })).toBeInTheDocument();
@@ -1637,7 +2145,7 @@ describe('AirWiki wiki workspace', () => {
     expect(prepareGuidedWikiRepair).toHaveBeenCalledWith(wiki.id);
   });
 
-  it('opens a local search result inside its wiki without placing the query in the URL', async () => {
+  it('opens the current local result revision and restores its query, filter, position and focus', async () => {
     const wiki = snapshot.wikis[0];
     const conceptId = 'concept-atlas';
     activateLocalSearch();
@@ -1649,15 +2157,34 @@ describe('AirWiki wiki workspace', () => {
       links: []
     };
     window.location.hash = '#search';
-    render(App);
+    const { container } = render(App);
     await submitVisibleSearch('Evidencia Atlas');
     expect(await screen.findByText(/Revisado por una persona/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Este equipo 1' }));
+    container.querySelector<HTMLElement>('.drive-page')!.scrollTop = 420;
+    const scrollTo = vi.spyOn(HTMLElement.prototype, 'scrollTo');
     await openFirstSearchMatch();
 
-    expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id);
-    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'guides/atlas.md' }, 'a'.repeat(64));
+    expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id, expect.any(String));
+    expect(loadWikiPage).not.toHaveBeenCalled();
+    await deliverSnapshot('unrelated');
+    expect(loadWikiPage).not.toHaveBeenCalled();
+    await completeHistoryBundle({ ...snapshot.knowledge, concepts: snapshot.knowledge.concepts.map((concept) => ({ ...concept, fingerprint: 'b'.repeat(64) })) });
+    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'guides/atlas.md' }, 'b'.repeat(64), expect.any(String));
     expect(window.location.hash).toBe('#library/wiki');
     expect(window.location.hash).not.toContain('Evidencia');
+    expect(JSON.stringify(window.history.state)).not.toContain('Evidencia');
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a los resultados' }));
+    expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('Evidencia Atlas');
+    expect(screen.getByRole('button', { name: 'Este equipo 1' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(scrollTo).toHaveBeenLastCalledWith({ top: 420, left: 0, behavior: 'auto' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Evidencia Atlas' })).toHaveFocus());
+    expect(searchKnowledge).toHaveBeenCalledOnce();
+    expect(browsePublicWiki).not.toHaveBeenCalled();
+    await deliverSnapshot(null, { wikis: [] });
+    await fireEvent.click(screen.getByRole('button', { name: 'Evidencia Atlas' }));
+    expect(screen.getByText('Este resultado cambió. Vuelve a buscar antes de abrir su página publicada.')).toBeVisible();
+    expect(loadWikiBundle).toHaveBeenCalledOnce();
   });
 
   it('filters grouped Library results by origin with visible counts', async () => {
@@ -1691,6 +2218,67 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByRole('heading', { name: 'Guía pública' })).not.toBeInTheDocument();
   });
 
+  it('retries the exact search concept after its bundle load fails and ignores the abandoned request', async () => {
+    const { wiki, first, second, bundle, page } = readingHistoryFixture();
+    activateLocalSearch();
+    snapshot.search = searchSummary('retry-exact-search', 'complete', [{
+      conceptId: second.conceptId, wikiId: wiki.id, title: second.title, snippet: 'Exact match.',
+      headingOrPage: 'Guide', logicalResourceUri: 'urn:airwiki:retry', sourceRevision: 1, sourceSha256: 'a'.repeat(64), rank: 1,
+      nodeId: snapshot.nodeId!, route: 'deviceNetwork', assurance: null, lifecycle: 'stable'
+    }]);
+    window.history.replaceState(null, '', '#library');
+    vi.mocked(loadWikiBundle).mockRejectedValueOnce(new Error('synthetic bundle failure'));
+    render(App);
+    await submitVisibleSearch('exact match');
+    await openFirstSearchMatch();
+    const abandonedRequest = vi.mocked(loadWikiBundle).mock.calls.at(-1)?.[1];
+    expect(document.querySelector('.wiki-load-failed')).toBeVisible();
+    expect(screen.queryByText(`${first.title} body`)).not.toBeInTheDocument();
+    await fireEvent.click(within(document.querySelector('.wiki-load-failed')!).getByRole('button', { name: 'Volver a intentar' }));
+    await deliverSnapshot(abandonedRequest, { knowledge: bundle });
+    expect(loadWikiPage).not.toHaveBeenCalled();
+    await completeHistoryBundle(bundle);
+    expect(loadWikiPage).toHaveBeenLastCalledWith(wiki.id, second.page, second.fingerprint, expect.any(String));
+    await completeHistoryPage(page(second));
+    expect(screen.getByRole('heading', { name: second.title, level: 1 })).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('heading', { name: second.title, level: 1 })).toHaveFocus());
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a los resultados' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: second.title })).toHaveFocus());
+    expect(searchKnowledge).toHaveBeenCalledOnce();
+  });
+
+  it.each(['choose another page', 'visit Settings'] as const)('respects a newer intent while opening a search result: %s', async (intent) => {
+    const { wiki, first, second, bundle, page } = readingHistoryFixture();
+    activateLocalSearch();
+    snapshot.search = searchSummary('interrupted-local-search', 'complete', [{
+      conceptId: second.conceptId, wikiId: wiki.id, title: second.title, snippet: 'Exact match.',
+      headingOrPage: 'Guide', logicalResourceUri: 'urn:airwiki:interrupted', sourceRevision: 1, sourceSha256: 'a'.repeat(64), rank: 1,
+      nodeId: snapshot.nodeId!, route: 'deviceNetwork', assurance: null, lifecycle: 'stable'
+    }]);
+    window.history.replaceState(null, '', '#library');
+    render(App);
+    await submitVisibleSearch('exact match');
+    await openFirstSearchMatch();
+    const requestId = vi.mocked(loadWikiBundle).mock.calls.at(-1)?.[1];
+    if (intent === 'choose another page') {
+      await fireEvent.click(screen.getByRole('button', { name: `${first.title}, first.md, Revisado` }));
+      await deliverSnapshot(requestId, { knowledge: bundle });
+      expect(loadWikiPage).toHaveBeenCalledOnce();
+      expect(loadWikiPage).toHaveBeenLastCalledWith(wiki.id, first.page, first.fingerprint, expect.any(String));
+      await completeHistoryPage(page(first));
+      expect(screen.getByRole('heading', { name: first.title, level: 1 })).toBeVisible();
+    } else {
+      await openSettingsSection('general');
+      await deliverSnapshot(requestId, { knowledge: bundle });
+      expect(loadWikiPage).not.toHaveBeenCalled();
+      await fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+      await waitFor(() => expect(loadWikiPage).toHaveBeenLastCalledWith(wiki.id, second.page, second.fingerprint, expect.any(String)));
+      await completeHistoryPage(page(second));
+      expect(screen.getByRole('heading', { name: second.title, level: 1 })).toBeVisible();
+    }
+    expect(searchKnowledge).toHaveBeenCalledOnce();
+  });
+
   it('retries a failed search without hiding its partial results', async () => {
     activateLocalSearch();
     snapshot.search = searchSummary('failed-search', 'partial', [{
@@ -1710,6 +2298,64 @@ describe('AirWiki wiki workspace', () => {
     expect(searchKnowledge).toHaveBeenCalledTimes(2);
     expect(searchKnowledge).toHaveBeenLastCalledWith('consulta parcial', false);
     expect(screen.getByText('Resultado parcial')).toBeInTheDocument();
+  });
+
+  it('keeps different owners of the same Wiki separate and opens the exact bounded match', async () => {
+    activateLocalSearch();
+    const common = {
+      wikiId: 'same-wiki', title: 'Guía compartida', snippet: 'Extracto vigente.', headingOrPage: 'Preparación',
+      logicalResourceUri: 'urn:airwiki:synthetic', sourceRevision: 7, sourceSha256: 'a'.repeat(64), rank: 1,
+      assurance: null, lifecycle: 'stable' as const, route: 'deviceNetwork' as const
+    };
+    snapshot.search = searchSummary('separate-owners', 'partial', [
+      { ...common, conceptId: 'first-match', nodeId: 'owner-a' },
+      { ...common, conceptId: 'second-match', nodeId: 'owner-b' }
+    ]);
+    const [first, second] = snapshot.search.results;
+    first.wikiName = 'Guía del equipo A';
+    second.wikiName = 'Guía del equipo B';
+    second.totalMatches = 9;
+    second.matches.push({ ...second.matches[0], conceptId: 'exact-match', title: 'Recuperación exacta', rank: 2 });
+    render(App);
+    await submitVisibleSearch('recuperación');
+
+    const groups = screen.getAllByRole('article');
+    expect(groups.map((group) => group.getAttribute('aria-label'))).toEqual(['Guía del equipo A', 'Guía del equipo B']);
+    expect(within(groups[1]).getByText('9 coincidencias')).toBeVisible();
+    expect(within(groups[1]).getAllByRole('heading', { level: 2 })).toHaveLength(2);
+    expect(screen.getByText('Una parte de la búsqueda no pudo completarse. Se muestran los resultados disponibles.')).toBeVisible();
+    const accessibility = await axe.run(document.body, { rules: { region: { enabled: false } } });
+    expect(accessibility.violations.filter((violation) => ['critical', 'serious'].includes(violation.impact ?? ''))).toEqual([]);
+    await fireEvent.click(screen.getByRole('button', { name: 'Cercanas 2' }));
+    expect(searchKnowledge).toHaveBeenCalledOnce();
+    await fireEvent.click(within(groups[1]).getByRole('button', { name: 'Recuperación exacta' }));
+
+    expect(browseNearbyWiki).toHaveBeenCalledWith('owner-b', 'same-wiki', {
+      targetConceptId: 'exact-match', graphCursor: 0,
+      page: { page: { kind: 'concept', conceptId: 'exact-match' }, expectedFingerprint: null }
+    });
+    expect(browsePublicWiki).not.toHaveBeenCalled();
+  });
+
+  it('keeps unavailable source warnings visible while secondary search metadata is collapsed', async () => {
+    activateLocalSearch();
+    snapshot.search = searchSummary('unavailable-result', 'offlineDevices', [{
+      conceptId: 'available-copy', wikiId: 'nearby-wiki', title: 'Resultado recibido', snippet: 'Extracto ya recibido.',
+      headingOrPage: 'Guía', logicalResourceUri: 'urn:airwiki:nearby', sourceRevision: 2, sourceSha256: 'b'.repeat(64), rank: 1,
+      nodeId: 'offline-peer', route: 'deviceNetwork', assurance: { trust: 'humanReviewed', freshness: 'stale', verificationOutdated: true }, lifecycle: 'stable'
+    }]);
+    snapshot.search.results[0].source = { kind: 'nearby', peerId: 'offline-peer', deviceName: 'Equipo sin conexión', platform: null, accessGranted: true, available: false };
+    render(App);
+    await submitVisibleSearch('resultado');
+
+    const group = screen.getByRole('article');
+    expect(group.querySelector('.search-group-warning')).toHaveTextContent('Equipo sin conexión');
+    expect(group.querySelector('.search-group-warning')).toBeVisible();
+    expect(within(group).getByText('Verificación desactualizada')).toBeVisible();
+    expect(within(group).getByText('OKF v0.2')).not.toBeVisible();
+    await fireEvent.click(within(group).getByText('Detalles de la wiki'));
+    expect(within(group).getByText('OKF v0.2')).toBeVisible();
+    expect(searchKnowledge).toHaveBeenCalledOnce();
   });
 
   it('exposes the current Wiki view with pressed state', async () => {
@@ -1764,7 +2410,8 @@ describe('AirWiki wiki workspace', () => {
     expect(loadWikiPage).toHaveBeenCalledWith(
       wiki.id,
       { kind: 'concept', path: 'guide.md' },
-      fingerprint
+      fingerprint,
+      expect.any(String)
     );
   });
 
@@ -1858,7 +2505,7 @@ describe('AirWiki wiki workspace', () => {
       snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'nearby-browse-request', kind: 'stateChanged', snapshot });
     });
 
-    const sharedWikiHeading = screen.getByRole('heading', { name: 'Guía del equipo' });
+    const sharedWikiHeading = within(container.querySelector('.shared-wiki-heading') as HTMLElement).getByText('Guía del equipo');
     expect(sharedWikiHeading).toBeInTheDocument();
     await waitFor(() => expect(sharedWikiHeading).toHaveFocus());
     expect(container.querySelector('.drive-page')).toHaveClass('shared-wiki-open');
@@ -2011,7 +2658,7 @@ describe('AirWiki wiki workspace', () => {
       snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'nearby-browse-request', kind: 'stateChanged', snapshot });
     });
 
-    expect(screen.getByRole('heading', { name: 'Wiki remota B' })).toBeInTheDocument();
+    expect(document.querySelector('.shared-wiki-heading')).toHaveTextContent('Wiki remota B');
     expect(screen.queryByText('Abriendo wiki compartida')).not.toBeInTheDocument();
   });
 
@@ -2277,7 +2924,9 @@ describe('AirWiki wiki workspace', () => {
       snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'public-browse-request', kind: 'stateChanged', snapshot });
     });
 
+    await fireEvent.click(await screen.findByRole('button', { name: 'Detalles' }));
     expect(await screen.findByText('OKF v0.2')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Cerrar' }));
     expect(await screen.findByText('Confirmado por proceso · Necesita revalidación · stable')).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: /Concepto anterior/ }));
     await waitFor(() => expect(browsePublicWiki).toHaveBeenLastCalledWith(
@@ -2310,6 +2959,7 @@ describe('AirWiki wiki workspace', () => {
     await act(() => {
       snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'public-browse-request', kind: 'stateChanged', snapshot });
     });
+    await fireEvent.click(screen.getByRole('button', { name: 'Detalles' }));
     expect(screen.getByText('Compatibilidad OKF no informada (nodo anterior)')).toBeInTheDocument();
   });
 
@@ -2355,9 +3005,9 @@ describe('AirWiki wiki workspace', () => {
       snapshotListener?.({ schemaVersion: snapshot.schemaVersion, sequence: snapshot.sequence, requestId: 'public-browse-request', kind: 'stateChanged', snapshot });
     });
 
-    expect(screen.getByRole('heading', { name: 'Wiki pública' })).toBeInTheDocument();
+    expect(document.querySelector('.shared-wiki-heading')).toHaveTextContent('Wiki pública');
     expect(screen.queryByRole('heading', { name: 'Buscar evidencia' })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Concepto público', level: 2 })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Concepto público', level: 1 })).toBeInTheDocument();
     expect(screen.getByText('Contenido público OKF completo.')).toBeInTheDocument();
     expect(screen.getByText('Conexión directa autenticada')).toBeInTheDocument();
     const accessibility = await axe.run(container, { rules: { region: { enabled: false } } });
@@ -2382,6 +3032,225 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByText('No encontramos evidencia coincidente')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Tus wikis' })).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Tus wikis' })).toBeInTheDocument();
+  });
+
+  it('restores different completed queries, origin filters and scroll without restoring public consent', async () => {
+    activateLocalSearch();
+    snapshot.search = historySearch('public-history', 'Public history result', 'public');
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (this: HTMLElement, options: ScrollToOptions | number) {
+      if (typeof options === 'object') this.scrollTop = options.top ?? 0;
+    });
+    const { container } = render(App);
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
+    await submitVisibleSearch('consulta pública anterior');
+    await fireEvent.click(screen.getByRole('button', { name: 'Públicas 1' }));
+    const main = container.querySelector<HTMLElement>('.drive-page')!;
+    main.scrollTop = 417;
+    const firstEntry = window.history.state;
+    await deliverSnapshot('unrelated', { search: historySearch('local-history', 'Local history result') });
+    await submitVisibleSearch('consulta local nueva');
+    await fireEvent.click(screen.getByRole('button', { name: 'Este equipo 1' }));
+    main.scrollTop = 86;
+    expect(window.history.state).not.toEqual(firstEntry);
+    expect(Object.keys(window.history.state)).toEqual(['airwikiNavigation']);
+    expect(JSON.stringify(window.history.state)).not.toMatch(/consulta|history|excerpt|publisher/);
+    await fireEvent.keyDown(window, { key: '[', metaKey: true });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('consulta pública anterior'));
+    expect(screen.getByRole('button', { name: 'Públicas 1' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Public history result received excerpt')).toBeVisible();
+    expect(screen.queryByText('Local history result received excerpt')).not.toBeInTheDocument();
+    expect(screen.getByText('Resultados anteriores de esta sesión')).toBeVisible();
+    expect(screen.getByRole('checkbox', { name: 'Incluir públicas' })).not.toBeChecked();
+    await waitFor(() => expect(main.scrollTop).toBe(417));
+    await fireEvent.keyDown(window, { key: ']', metaKey: true });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('consulta local nueva'));
+    expect(screen.getByText('Local history result received excerpt')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Este equipo 1' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(main.scrollTop).toBe(86));
+    expect(searchKnowledge).toHaveBeenCalledTimes(2);
+    expect(explorePublicWikis).not.toHaveBeenCalled();
+    expect(browsePublicWiki).not.toHaveBeenCalled();
+    scroll.mockRestore();
+  });
+
+  it('keeps received partial results in history while a newer search completes in the background', async () => {
+    activateLocalSearch();
+    snapshot.search = null;
+    vi.mocked(searchKnowledge).mockResolvedValueOnce('first-inflight').mockResolvedValueOnce('second-inflight');
+    render(App);
+    await submitVisibleSearch('primera consulta');
+    await deliverSnapshot('first-inflight', { search: historySearch('first-inflight', 'Partial history result', 'local', 'searching') });
+    await submitVisibleSearch('segunda consulta');
+    await fireEvent.keyDown(window, { key: '[', metaKey: true });
+    await waitFor(() => expect(screen.getByText('Partial history result received excerpt')).toBeVisible());
+    expect(screen.getByText('Esta búsqueda no se completó. Se conservan los resultados recibidos; puedes volver a intentarlo.')).toBeVisible();
+    await deliverSnapshot('second-inflight', { search: historySearch('second-inflight', 'Background result') });
+    expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('primera consulta');
+    expect(screen.queryByText('Background result received excerpt')).not.toBeInTheDocument();
+    await fireEvent.keyDown(window, { key: ']', metaKey: true });
+    await waitFor(() => expect(screen.getByText('Background result received excerpt')).toBeVisible());
+    expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('segunda consulta');
+    expect(searchKnowledge).toHaveBeenCalledTimes(2);
+  });
+
+  it('refreshes a restored public query with the currently selected private scope', async () => {
+    activateLocalSearch();
+    snapshot.search = historySearch('public-before-refresh', 'Previous public evidence', 'public');
+    render(App);
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
+    await submitVisibleSearch('consulta pública recibida');
+    await deliverSnapshot(null, { search: historySearch('next-private', 'Private evidence') });
+    await submitVisibleSearch('otra consulta');
+    await fireEvent.keyDown(window, { key: '[', metaKey: true });
+    await waitFor(() => expect(screen.getByText('Previous public evidence received excerpt')).toBeVisible());
+    vi.mocked(searchKnowledge).mockResolvedValueOnce('private-refresh');
+    await fireEvent.click(screen.getByRole('button', { name: 'Actualizar resultados' }));
+    expect(searchKnowledge).toHaveBeenLastCalledWith('consulta pública recibida', false);
+    expect(screen.queryByText('Previous public evidence received excerpt')).not.toBeInTheDocument();
+  });
+
+  it.each(['nearby', 'public'] as const)('reopens a %s reading from query history using its exact owner, page and current revision', async (source) => {
+    activateLocalSearch();
+    const ownerId = 'history-owner';
+    const browseApi = source === 'public' ? browsePublicWiki : browseNearbyWiki;
+    const initialId = 'initial-history-browse';
+    const restoredId = 'restored-history-browse';
+    vi.mocked(browseApi).mockResolvedValueOnce(initialId).mockResolvedValueOnce(restoredId);
+    snapshot.search = searchSummary('remote-query', 'complete', [{
+      conceptId: 'remembered-concept', wikiId: 'remembered-wiki', title: 'Remembered result',
+      snippet: 'Received search evidence', headingOrPage: 'Guide', logicalResourceUri: 'urn:airwiki:history',
+      sourceRevision: 1, sourceSha256: 'c'.repeat(64), rank: 1, nodeId: ownerId,
+      route: source === 'public' ? 'publicNetwork' : 'deviceNetwork', assurance: null, lifecycle: 'stable'
+    }]);
+    const { container } = render(App);
+    if (source === 'public') await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
+    await submitVisibleSearch('consulta remota recordada');
+    await fireEvent.click(screen.getByRole('button', { name: source === 'public' ? 'Públicas 1' : 'Cercanas 1' }));
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (this: HTMLElement, options: ScrollToOptions | number) {
+      if (typeof options === 'object') this.scrollTop = options.top ?? 0;
+    });
+    container.querySelector<HTMLElement>('.drive-page')!.scrollTop = 137;
+    await openFirstSearchMatch();
+    const base = { ...publishedRemoteWorkspace('remembered-concept', 'Remembered article', 'Previously received remote body'),
+      requestId: initialId, wikiId: 'remembered-wiki', wikiName: 'Remembered Wiki',
+      okfCompatibility: { kind: 'declaredV02' as const }, nextCursor: null, appendFailed: false, concepts: [] };
+    const original = source === 'nearby'
+      ? { nearbyBrowse: { ...base, peerId: ownerId, status: 'available' as const } }
+      : { publicBrowse: { ...base, publisherId: ownerId, status: 'direct' as const, description: null, languages: [] } };
+    await deliverSnapshot(initialId, original);
+    expect(screen.getByText('Previously received remote body')).toBeVisible();
+    await fireEvent.click(screen.getByRole('button', { name: 'Grafo' }));
+    container.querySelector<HTMLElement>('.drive-page')!.scrollTop = 269;
+    const remoteEntry = window.history.state;
+    await deliverSnapshot(null, { search: historySearch('different-query', 'Different query result') });
+    await submitVisibleSearch('otra consulta más reciente');
+    expect(screen.queryByText('Previously received remote body')).not.toBeInTheDocument();
+
+    window.history.replaceState(remoteEntry, '', '#library/shared');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await waitFor(() => expect(browseApi).toHaveBeenCalledTimes(2));
+    expect(browseApi).toHaveBeenLastCalledWith(ownerId, 'remembered-wiki', {
+      graphCursor: 0, targetConceptId: 'remembered-concept',
+      page: { page: { kind: 'concept', conceptId: 'remembered-concept' }, expectedFingerprint: null }
+    });
+    expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('consulta remota recordada');
+    expect(screen.getByRole('checkbox', { name: 'Incluir públicas' })).not.toBeChecked();
+    expect(screen.queryByText('Previously received remote body')).not.toBeInTheDocument();
+    expect(screen.getByText('Abriendo wiki compartida')).toBeVisible();
+    const workspace = publishedRemoteWorkspace('remembered-concept', 'Current article', 'Currently confirmed remote body');
+    workspace.documents[0].fingerprint = 'e'.repeat(64);
+    workspace.page.descriptor.fingerprint = 'e'.repeat(64);
+    const currentBase = { ...base, ...workspace, requestId: restoredId };
+    await deliverSnapshot(restoredId, source === 'nearby'
+      ? { nearbyBrowse: { ...currentBase, peerId: ownerId, status: 'available' } }
+      : { publicBrowse: { ...currentBase, publisherId: ownerId, status: 'direct', description: null, languages: [] } });
+    expect(screen.getByRole('button', { name: 'Grafo' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(container.querySelector<HTMLElement>('.drive-page')!.scrollTop).toBe(269));
+    await fireEvent.click(screen.getByRole('button', { name: 'Lista' }));
+    expect(screen.getByText('Currently confirmed remote body')).toBeVisible();
+    expect(screen.queryByText('Previously received remote body')).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a los resultados' }));
+    expect(screen.getByRole('button', { name: source === 'public' ? 'Públicas 1' : 'Cercanas 1' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(container.querySelector<HTMLElement>('.drive-page')!.scrollTop).toBe(137));
+    expect(searchKnowledge).toHaveBeenCalledTimes(2);
+    scroll.mockRestore();
+  });
+
+  it.each(['failed', 'blocked', 'wrong-owner'] as const)('hides previously received public content when a history reopen is %s', async (failure) => {
+    activateLocalSearch();
+    snapshot.search = historySearch('public-reopen-query', 'Remembered public result', 'public');
+    vi.mocked(browsePublicWiki).mockResolvedValueOnce('initial-public-history');
+    render(App);
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
+    await submitVisibleSearch('consulta pública recordada');
+    await openFirstSearchMatch();
+    const original: NonNullable<AppSnapshot['publicBrowse']> = {
+      ...publishedRemoteWorkspace('Remembered public result', 'Public article', 'Previously received public body'),
+      requestId: 'initial-public-history', wikiId: 'history-public-wiki', wikiName: 'Public Wiki',
+      publisherId: 'history-publisher', status: 'direct', description: null, languages: [],
+      okfCompatibility: { kind: 'declaredV02' }, nextCursor: null, appendFailed: false, concepts: []
+    };
+    await deliverSnapshot(original.requestId, { publicBrowse: original });
+    expect(screen.getByText('Previously received public body')).toBeVisible();
+    const remoteEntry = window.history.state;
+    await deliverSnapshot(null, { search: historySearch('new-query', 'New result') });
+    await submitVisibleSearch('consulta nueva');
+    if (failure === 'blocked') await deliverSnapshot(null, { blockedPublicPublishers: ['history-publisher'] });
+    else if (failure === 'failed') vi.mocked(browsePublicWiki).mockRejectedValueOnce(new Error('unavailable'));
+    else vi.mocked(browsePublicWiki).mockResolvedValueOnce('wrong-owner-reply');
+    window.history.replaceState(remoteEntry, '', '#library/shared');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    if (failure === 'wrong-owner') {
+      await waitFor(() => expect(browsePublicWiki).toHaveBeenCalledTimes(2));
+      await deliverSnapshot('wrong-owner-reply', { publicBrowse: { ...original,
+        requestId: 'wrong-owner-reply', publisherId: 'different-owner' } });
+    }
+    await waitFor(() => expect(screen.queryByText('Abriendo wiki compartida')).not.toBeInTheDocument());
+    expect(screen.queryByText('Previously received public body')).not.toBeInTheDocument();
+    expect(screen.queryByText('Public Wiki')).not.toBeInTheDocument();
+    expect(browsePublicWiki).toHaveBeenCalledTimes(failure === 'blocked' ? 1 : 2);
+    expect(searchKnowledge).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: 'Volver a los resultados' })).toBeVisible();
+    if (failure === 'blocked') {
+      await fireEvent.click(screen.getByRole('button', { name: 'Volver a los resultados' }));
+      await waitFor(() => expect(screen.getByRole('heading', { name: 'Resultados de búsqueda', level: 1 })).toHaveFocus());
+    }
+  });
+
+  it('removes a blocked publisher from previous searches and does not revive it on unblock', async () => {
+    activateLocalSearch();
+    snapshot.search = historySearch('blocked-history', 'Publisher history result', 'public');
+    render(App);
+    await fireEvent.click(await screen.findByRole('checkbox', { name: 'Incluir públicas' }));
+    await submitVisibleSearch('consulta del publicador');
+    await deliverSnapshot('unrelated', { search: historySearch('safe-history', 'Safe local result') });
+    await submitVisibleSearch('consulta segura');
+    await deliverSnapshot(null, { blockedPublicPublishers: ['history-publisher'] });
+    await fireEvent.keyDown(window, { key: '[', metaKey: true });
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('consulta del publicador'));
+    expect(screen.queryByText('Publisher history result received excerpt')).not.toBeInTheDocument();
+    await deliverSnapshot(null, { blockedPublicPublishers: [] });
+    expect(screen.queryByText('Publisher history result received excerpt')).not.toBeInTheDocument();
+    expect(searchKnowledge).toHaveBeenCalledTimes(2);
+    expect(browsePublicWiki).not.toHaveBeenCalled();
+  });
+
+  it('returns to Library for an evicted search without replaying its query', async () => {
+    activateLocalSearch();
+    render(App);
+    let firstEntry: unknown;
+    for (let index = 0; index < 21; index++) {
+      await deliverSnapshot(null, { search: searchSummary(`bounded-${index}`, 'complete', []) });
+      await submitVisibleSearch(`bounded query ${index}`);
+      await waitFor(() => expect(searchKnowledge).toHaveBeenCalledTimes(index + 1));
+      if (index === 0) firstEntry = window.history.state;
+    }
+    window.history.replaceState(firstEntry, '', '#library');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    expect(await screen.findByText('Esta búsqueda ya no está en el historial de la sesión. Puedes hacer una nueva consulta.')).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).toHaveValue('');
+    expect(searchKnowledge).toHaveBeenCalledTimes(21);
+    expect(explorePublicWikis).not.toHaveBeenCalled();
   });
 
   it('searches the latest query automatically after typing pauses', async () => {
@@ -2629,6 +3498,7 @@ describe('AirWiki wiki workspace', () => {
     window.location.hash = '#search';
     render(App);
     const form = await screen.findByRole('search');
+    expect(within(form).queryByRole('button', { name: 'Ver estado de la IA local' })).not.toBeInTheDocument();
     const input = form.querySelector('input');
     expect(input).not.toBeNull();
     input!.focus();
@@ -2636,8 +3506,8 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.input(input!, { target: { value: 'consulta preparada' } });
     expect(input).toHaveValue('consulta preparada');
 
-    expect(await screen.findByRole('heading', { name: 'Preparando la búsqueda local' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Preparando la búsqueda local' })).toBeDisabled();
+    expect(await screen.findByRole('heading', { name: 'La búsqueda local no está disponible' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'La búsqueda local no está disponible' })).toBeDisabled();
     await fireEvent.click(screen.getByRole('button', { name: 'Ver estado de la IA local' }));
     expect(window.location.hash).toBe('#settings/general');
   });
@@ -2653,6 +3523,49 @@ describe('AirWiki wiki workspace', () => {
     await waitFor(() => expect(updatePreferences).toHaveBeenCalledWith(expect.objectContaining({ completeOnboarding: true })));
     expect(await screen.findByRole('heading', { name: 'General' })).toBeInTheDocument();
     expect(window.location.hash).toBe('#settings/general');
+  });
+
+  it('reports search preparation only while a real preparation is in progress', async () => {
+    window.location.hash = '#search';
+    render(App);
+    const input = (await screen.findByRole('search')).querySelector('input');
+    expect(input).not.toBeNull();
+    input!.focus();
+    await fireEvent.input(input!, { target: { value: 'consulta sin preparar' } });
+    await screen.findByRole('heading', { name: 'La búsqueda local no está disponible' });
+    await deliverSnapshot(null, { modelInstall: { status: 'queued', downloaded: 0, totalBytes: 0 } });
+    expect(await screen.findByRole('heading', { name: 'Preparando la búsqueda local' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Preparando la búsqueda local' })).toBeDisabled();
+    await deliverSnapshot(null, { modelInstall: null });
+    expect(await screen.findByRole('heading', { name: 'La búsqueda local no está disponible' })).toBeVisible();
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
+  it('keeps download requirements and recovery visible before installing local AI', async () => {
+    window.location.hash = '#settings/general';
+    activateLocalSearch();
+    snapshot.model = { ...snapshot.model!, active: false, installed: false, licenseAccepted: false, downloadBytes: 3221225472, requiredFreeBytes: 4294967296, fitsAvailableDisk: false, issues: ['synthetic-unavailable'] };
+    render(App);
+    await screen.findByRole('heading', { name: 'IA local de AirWiki' });
+    expect(screen.getByText('Descarga: 3.0 GiB')).toBeVisible();
+    expect(screen.getByText('Espacio necesario: 4.0 GiB')).toBeVisible();
+    expect(screen.getByText('No hay espacio libre suficiente para preparar este modelo.')).toBeVisible();
+    expect(screen.getByText(/Vuelve a preparar el modelo para comprobar sus archivos/)).toBeVisible();
+    expect(screen.queryByText('synthetic-unavailable')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Instalar IA local' })).toBeDisabled();
+    await deliverSnapshot(null, { model: { ...snapshot.model!, fitsAvailableDisk: true } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Instalar IA local' }));
+    await waitFor(() => expect(installModels).toHaveBeenCalledOnce());
+  });
+
+  it('explains unsupported hardware without offering an installation that cannot run', async () => {
+    window.location.hash = '#settings/general';
+    snapshot.hardware = { ...snapshot.hardware!, canInstall: false };
+    render(App);
+    await screen.findByRole('heading', { name: 'IA local de AirWiki' });
+    expect(screen.getByRole('button', { name: 'Instalar IA local' })).toBeDisabled();
+    expect(screen.getByText(/Este equipo no puede preparar un perfil de IA local compatible/)).toBeVisible();
+    expect(installModels).not.toHaveBeenCalled();
   });
 
   it('keeps an onboarding recovery error visible when saving completion fails', async () => {
@@ -2704,9 +3617,13 @@ describe('AirWiki wiki workspace', () => {
     render(App);
 
     expect(await screen.findByRole('heading', { name: 'IA local de AirWiki' })).toBeInTheDocument();
-    expect(screen.getByText('No publica, comparte ni modifica tus documentos fuente.')).toBeInTheDocument();
+    const explanation = screen.getByText('Cómo funciona la IA local').closest('details');
+    expect(explanation).not.toHaveAttribute('open');
+    await fireEvent.click(screen.getByText('Cómo funciona la IA local'));
+    expect(within(explanation!).getByText('No publica, comparte ni modifica tus documentos fuente.')).toBeInTheDocument();
     expect(screen.getByText('Gemma 4 E4B Q4')).toBeInTheDocument();
-    expect(screen.getByText('En uso')).toBeInTheDocument();
+    expect(screen.getByText('Preparación y búsqueda disponibles en este equipo. Tus documentos permanecen en local.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ver licencia' })).toBeEnabled();
     const selector = screen.getByRole('combobox', { name: 'Perfil del modelo' });
     expect(selector).toHaveValue('automatic');
 
@@ -2729,7 +3646,8 @@ describe('AirWiki wiki workspace', () => {
     await screen.findByRole('heading', { name: 'IA local de AirWiki' });
     const settings = container.querySelector<HTMLElement>('.local-ai-settings');
     expect(settings).not.toBeNull();
-    expect(await within(settings!).findAllByText('Reinicio necesario')).toHaveLength(2);
+    expect(await within(settings!).findAllByText('Reinicio necesario')).toHaveLength(1);
+    expect(within(settings!).getByText('Cierra AirWiki completamente y vuelve a abrirlo para activar el modelo seleccionado.')).toBeVisible();
     expect(within(settings!).queryByText('En uso')).not.toBeInTheDocument();
     expect(within(settings!).queryByRole('button', { name: 'Instalar IA local' })).not.toBeInTheDocument();
   });
@@ -2792,7 +3710,7 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(await screen.findByRole('button', { name: 'Atlas concept' }));
 
     expect(graphButton).toHaveClass('active');
-    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'architecture/atlas.md' }, 'a'.repeat(64));
+    expect(loadWikiPage).toHaveBeenCalledWith(wiki.id, { kind: 'concept', path: 'architecture/atlas.md' }, 'a'.repeat(64), expect.any(String));
     await fireEvent.click(screen.getByRole('button', { name: /^Configuración\./ }));
     expect(await screen.findByRole('button', { name: 'Guardar preferencias' })).toBeDisabled();
   });
@@ -2813,10 +3731,202 @@ describe('AirWiki wiki workspace', () => {
     window.location.hash = `#wikis/${wiki.id}`;
     render(App);
 
+    await fireEvent.click(await screen.findByRole('button', { name: 'Detalles' }));
     await fireEvent.click(await screen.findByRole('button', { name: 'Marcar como revisado por una persona' }));
 
     expect(verifyWikiConcept).toHaveBeenCalledWith(wiki.id, 'memory/decision.md', fingerprint);
     expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id);
+  });
+
+  it.each([false, true])('restores reading after Settings and respects later navigation (%s)', async (leaveReading) => {
+    const { first } = readingHistoryFixture();
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (this: HTMLElement, options: ScrollToOptions | number) {
+      if (typeof options === 'object') this.scrollTop = options.top ?? 0;
+    });
+    try {
+      const { container } = render(App);
+      await screen.findByRole('heading', { name: first.title });
+      const main = container.querySelector<HTMLElement>('.drive-page')!;
+      main.scrollTop = 318;
+      await fireEvent.click(screen.getByRole('button', { name: /^Configuración\./ }));
+      await screen.findByRole('heading', { name: 'General', level: 1 });
+      await fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+      await screen.findByRole('heading', { name: first.title });
+      if (leaveReading) await fireEvent.click(screen.getByRole('button', { name: 'AirWiki' }));
+      await waitFor(() => expect(main.scrollTop).toBe(leaveReading ? 0 : 318));
+      expect(screen.getByRole('heading', { name: leaveReading ? 'Tus wikis' : first.title })).toBeVisible();
+    } finally {
+      scroll.mockRestore();
+    }
+  });
+
+  it('restores Back and Forward with fresh fingerprints and reading coordinates', async () => {
+    const { wiki, first, second, bundle, page } = readingHistoryFixture();
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(function (this: HTMLElement, options: ScrollToOptions | number) {
+      if (typeof options === 'object') this.scrollTop = options.top ?? 0;
+    });
+    try {
+      const { container } = render(App);
+      await screen.findByRole('heading', { name: first.title });
+      const main = container.querySelector<HTMLElement>('.drive-page')!;
+      const index = container.querySelector<HTMLElement>('.file-list')!;
+      main.scrollTop = 318;
+      index.scrollTop = 87;
+      const firstEntry = window.history.state;
+      await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+      expect(window.history.state).not.toEqual(firstEntry);
+      expect(Object.keys(window.history.state)).toEqual(['airwikiNavigation']);
+      expect(JSON.stringify(window.history.state)).not.toMatch(/first|second|article|\.md|Atlas/);
+      await completeHistoryPage(page(second));
+      await screen.findByRole('heading', { name: second.title });
+      main.scrollTop = 144;
+      index.scrollTop = 55;
+      await fireEvent.keyDown(window, { key: '[', metaKey: true });
+      await waitFor(() => expect(loadWikiBundle).toHaveBeenCalledWith(wiki.id, expect.any(String)));
+      expect(screen.queryByRole('heading', { name: second.title })).not.toBeInTheDocument();
+      const refreshed = { ...first, fingerprint: 'c'.repeat(64) };
+      await completeHistoryBundle({ ...bundle, concepts: [refreshed, second] });
+      expect(loadWikiPage).toHaveBeenLastCalledWith(wiki.id, first.page, refreshed.fingerprint, expect.any(String));
+      // A matching page in an unrelated snapshot is not this request's completion.
+      await deliverSnapshot('unrelated-request', { knowledgePage: page(refreshed) });
+      expect(screen.queryByRole('heading', { name: first.title })).not.toBeInTheDocument();
+      await completeHistoryPage(page(refreshed));
+      expect(await screen.findByRole('heading', { name: first.title })).toBeInTheDocument();
+      expect(main.scrollTop).toBe(318);
+      expect(index.scrollTop).toBe(87);
+      const bundleCalls = vi.mocked(loadWikiBundle).mock.calls.length;
+      await fireEvent.keyDown(window, { key: 'ArrowRight', altKey: true });
+      await waitFor(() => expect(loadWikiBundle).toHaveBeenCalledTimes(bundleCalls + 1));
+      await completeHistoryBundle(bundle);
+      await completeHistoryPage(page(second));
+      expect(await screen.findByRole('heading', { name: second.title })).toBeInTheDocument();
+      expect(main.scrollTop).toBe(144);
+      expect(index.scrollTop).toBe(55);
+    } finally {
+      scroll.mockRestore();
+    }
+  });
+
+  it('resumes each local wiki after switching through the sidebar', async () => {
+    const { wiki, first, second, bundle, page } = readingHistoryFixture();
+    const otherWiki = { ...wiki, id: 'other-wiki', name: 'Boreal', needsReviewCount: 0 };
+    snapshot.wikis.push(otherWiki);
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+    await completeHistoryPage(page(second));
+    await fireEvent.click(screen.getByRole('button', { name: 'Grafo' }));
+    const index = document.querySelector<HTMLElement>('.file-list')!;
+    index.scrollTop = 87;
+    await fireEvent.click(screen.getByRole('button', { name: 'Atlas', expanded: false }));
+    expect(index.closest('[hidden]')).not.toBeNull();
+    await fireEvent.click(within(screen.getByRole('navigation', { name: 'Mis wikis' })).getByRole('button', { name: 'Boreal' }));
+    expect(loadWikiBundle).toHaveBeenLastCalledWith(otherWiki.id);
+    await deliverSnapshot(null, { knowledge: { ...bundle, wikiId: otherWiki.id, wikiName: otherWiki.name }, knowledgePage: null });
+    await fireEvent.click(screen.getByRole('button', { name: 'Boreal', expanded: false }));
+    await fireEvent.click(within(screen.getByRole('navigation', { name: 'Mis wikis' })).getByRole('button', { name: /Atlas/ }));
+    await completeHistoryBundle(bundle);
+    await completeHistoryPage(page(second));
+    expect(screen.getByRole('button', { name: 'Grafo' })).toHaveAttribute('aria-pressed', 'true');
+    expect(document.querySelector('.file-list')?.scrollTop).toBe(87);
+    await fireEvent.click(screen.getByRole('button', { name: 'Lista' }));
+    expect(await screen.findByRole('heading', { name: second.title })).toBeInTheDocument();
+    expect(browseNearbyWiki).not.toHaveBeenCalled();
+    expect(browsePublicWiki).not.toHaveBeenCalled();
+  });
+
+  it('keeps a removed historical page hidden and leaves its current index usable', async () => {
+    const { first, second, bundle, page } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+    await completeHistoryPage(page(second));
+    window.history.back();
+    await waitFor(() => expect(loadWikiBundle).toHaveBeenCalled());
+    const pageCalls = vi.mocked(loadWikiPage).mock.calls.length;
+    await completeHistoryBundle({ ...bundle, concepts: [second] });
+    expect(loadWikiPage).toHaveBeenCalledTimes(pageCalls);
+    expect(screen.queryByRole('heading', { name: first.title })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: second.title })).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+    await completeHistoryPage(page(second));
+    expect(await screen.findByRole('heading', { name: second.title })).toBeInTheDocument();
+  });
+
+  it('abandons a historical restore when a newer page is selected', async () => {
+    const { first, second, bundle, page } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+    await completeHistoryPage(page(second));
+    window.history.back();
+    await waitFor(() => expect(loadWikiBundle).toHaveBeenCalled());
+    await completeHistoryBundle(bundle);
+    const obsoleteRequest = vi.mocked(loadWikiPage).mock.calls.at(-1)?.[3];
+    await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+    await deliverSnapshot(obsoleteRequest, { knowledgePage: page(first) });
+    expect(screen.queryByRole('heading', { name: first.title })).not.toBeInTheDocument();
+    await completeHistoryPage(page(second));
+    expect(await screen.findByRole('heading', { name: second.title })).toBeInTheDocument();
+  });
+
+  it('returns to the library when the historical wiki has been removed', async () => {
+    const { wiki, first } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await fireEvent.click(within(screen.getByRole('navigation', { name: 'Navegación' })).getByRole('button', { name: 'Biblioteca' }));
+    await deliverSnapshot(null, { wikis: snapshot.wikis.filter((candidate) => candidate.id !== wiki.id) });
+    window.history.back();
+    await waitFor(() => expect(window.location.hash).toBe('#library'));
+    expect(loadWikiBundle).not.toHaveBeenCalled();
+    expect(loadWikiPage).not.toHaveBeenCalled();
+    expect(screen.queryByRole('heading', { name: first.title })).not.toBeInTheDocument();
+  });
+
+  it('retains the requested historical page when discarding edited Settings', async () => {
+    const { first, bundle, page } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await fireEvent.click(screen.getByRole('button', { name: /^Configuración\./ }));
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Al cerrar' }), { target: { value: 'hide_to_tray' } });
+    window.history.back();
+    const dialog = await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' });
+    expect(loadWikiBundle).not.toHaveBeenCalled();
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Descartar cambios' }));
+    await waitFor(() => expect(loadWikiBundle).toHaveBeenCalled());
+    await completeHistoryBundle(bundle);
+    await completeHistoryPage(page(first));
+    expect(await screen.findByRole('heading', { name: first.title })).toBeInTheDocument();
+    expect(updatePreferences).not.toHaveBeenCalled();
+  });
+
+  it('returns to Library for a history entry from an expired session', async () => {
+    const { first } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    window.history.pushState({ airwikiNavigation: 'expired-session-entry' }, '', '#library/wiki');
+    await fireEvent(window, new PopStateEvent('popstate'));
+    expect(await screen.findByRole('heading', { name: 'Tus wikis' })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#library');
+    expect(loadWikiBundle).not.toHaveBeenCalled();
+  });
+
+  it('retries a failed history load without revealing its old page', async () => {
+    const { first, second, bundle, page } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await fireEvent.click(screen.getByRole('button', { name: 'Second article, second.md, Revisado' }));
+    await completeHistoryPage(page(second));
+    vi.mocked(loadWikiBundle).mockRejectedValueOnce(new Error('synthetic dispatch failure'));
+    window.history.back();
+    const retry = await screen.findByRole('button', { name: 'Volver a intentar' });
+    expect(screen.queryByRole('heading', { name: second.title })).not.toBeInTheDocument();
+    await deliverSnapshot('unrelated-status-refresh');
+    expect(retry).toBeInTheDocument();
+    await fireEvent.click(retry);
+    await completeHistoryBundle(bundle);
+    await completeHistoryPage(page(first));
+    expect(await screen.findByRole('heading', { name: first.title })).toBeInTheDocument();
   });
 
   it('keeps concept assurance atomic with the loaded page', async () => {
@@ -2852,6 +3962,7 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.mouseDown(secondPage);
     expect(secondPageFocus).toHaveBeenCalledWith({ preventScroll: true });
     expect(screen.getByText('Revisado por una persona')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Detalles' }));
     expect(screen.getByText('process:first')).toBeInTheDocument();
 
     snapshot = {
@@ -2875,10 +3986,109 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('heading', { name: 'Second' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'First, first.md, Revisado' })).not.toHaveAttribute('aria-current');
     expect(screen.getByRole('button', { name: 'Second, second.md, Revisado' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Detalles' }));
     expect(screen.getByText('Reference')).toBeInTheDocument();
     expect(screen.getByText('Sin verificar')).toBeInTheDocument();
     expect(screen.queryByText('Revisado por una persona')).not.toBeInTheDocument();
     expect(screen.queryByText('process:first')).not.toBeInTheDocument();
+  });
+
+  it('shows declared sources in a temporary inspector without inventing passage citations', async () => {
+    const { first } = readingHistoryFixture();
+    snapshot.knowledge!.concepts[0].sources = [
+      { id: 'source-a', title: 'Design record', resource: 'urn:fixture:design', author: 'Synthetic team', lastModified: '2026-09-01', usageCount: null },
+      { id: null, title: null, resource: 'urn:fixture:incomplete', author: null, lastModified: null, usageCount: null }
+    ];
+    snapshot.knowledgePage!.truncated = true;
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    expect(screen.getByText('Sin verificar')).toBeInTheDocument();
+    expect(document.querySelector('.reader-article .evidence-warning')).toBeInTheDocument();
+    const sources = screen.getByRole('button', { name: /^Fuentes/ });
+    await fireEvent.click(sources);
+    const dialog = await screen.findByRole('dialog', { name: 'Fuentes del concepto' });
+    expect(within(dialog).getByText('Design record')).toBeInTheDocument();
+    expect(within(dialog).getByText('urn:fixture:design')).toBeInTheDocument();
+    expect(within(dialog).getByText('Synthetic team')).toBeInTheDocument();
+    expect(within(dialog).getByText('2026-09-01')).toBeInTheDocument();
+    expect(within(dialog).getByText('urn:fixture:incomplete')).toBeInTheDocument();
+    expect(within(dialog).getByText(/no están asociadas a fragmentos concretos/)).toBeInTheDocument();
+    expect(within(dialog).queryByRole('link')).not.toBeInTheDocument();
+    expect(document.querySelector('.knowledge-blocks a')).toBeNull();
+    await fireEvent.keyDown(within(dialog).getByRole('button', { name: 'Cerrar' }), { key: '1', metaKey: true });
+    expect(window.location.hash).toBe('#library/wiki');
+    await fireEvent.keyDown(within(dialog).getByRole('button', { name: 'Cerrar' }), { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(sources).toHaveFocus();
+    expect(browsePublicWiki).not.toHaveBeenCalled();
+  });
+
+  it('ignores a delayed close event from the previous reader dialog after reopening sources', async () => {
+    const close = vi.spyOn(HTMLDialogElement.prototype, 'close').mockImplementation(function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    });
+    try {
+      const { first } = readingHistoryFixture();
+      render(App);
+      await screen.findByRole('heading', { name: first.title });
+      await fireEvent.click(screen.getByRole('button', { name: 'Detalles' }));
+      const previousDialog = await screen.findByRole('dialog', { name: 'Detalles de la página' });
+      await fireEvent.click(within(previousDialog).getByRole('button', { name: 'Cerrar' }));
+      const sources = screen.getByRole('button', { name: /^Fuentes/ });
+      await fireEvent.click(sources);
+      const currentDialog = await screen.findByRole('dialog', { name: 'Fuentes del concepto' });
+      // Native close events are queued. The event for Details may arrive after
+      // the same dialog element has already been reopened for Sources.
+      await fireEvent(previousDialog, new Event('close'));
+      expect(currentDialog).toBeVisible();
+      expect(sources).toHaveAttribute('aria-expanded', 'true');
+      currentDialog.removeAttribute('open');
+      await fireEvent(currentDialog, new Event('close'));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(sources).toHaveFocus();
+    } finally {
+      close.mockRestore();
+    }
+  });
+
+  it('keeps the selected details while changing from a side inspector to a narrow dialog', async () => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
+    try {
+      const { first } = readingHistoryFixture();
+      render(App);
+      await screen.findByRole('heading', { name: first.title });
+      const details = screen.getByRole('button', { name: 'Detalles' });
+      await fireEvent.click(details);
+      const inspector = await screen.findByRole('complementary', { name: 'Detalles de la página' });
+      expect(inspector).toHaveFocus();
+      expect(within(inspector).getByText('first.md')).toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+      await fireEvent.resize(window);
+      const dialog = await screen.findByRole('dialog', { name: 'Detalles de la página' });
+      expect(within(dialog).getByText('first.md')).toBeInTheDocument();
+      await fireEvent.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
+      expect(details).toHaveFocus();
+      expect(screen.getByRole('heading', { name: first.title })).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: previousWidth });
+      await fireEvent.resize(window);
+    }
+  });
+
+  it('keeps broken backlinks inert and labels a concept with no sources', async () => {
+    const { first } = readingHistoryFixture();
+    snapshot.knowledgePage!.backlinks = [{ kind: 'concept', path: 'missing.md' }];
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    expect(document.querySelector('.reader-links')).toHaveTextContent('missing.md');
+    expect(document.querySelector('.reader-links button')).toBeNull();
+    await fireEvent.click(screen.getByRole('button', { name: /^Fuentes/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Fuentes del concepto' });
+    expect(within(dialog).getByText('Este concepto no declara fuentes.')).toBeInTheDocument();
+    expect(loadWikiPage).not.toHaveBeenCalled();
   });
 
   it('uses independent Settings sections and returns to the previous Library context', async () => {
@@ -3034,7 +4244,7 @@ describe('AirWiki wiki workspace', () => {
   });
 
   it('redirects previous top-level routes without retaining the old UI', async () => {
-    for (const route of ['#library', '#review', '#home', '#shared/public']) {
+    for (const route of ['#library', '#home', '#shared/public']) {
       window.location.hash = route;
       render(App);
       expect(await screen.findByRole('heading', { name: 'Tus wikis' })).toBeInTheDocument();

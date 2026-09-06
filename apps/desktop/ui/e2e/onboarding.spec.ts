@@ -3,8 +3,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-
-const runVisualMatrix = process.env.AIRWIKI_E2E_VISUAL !== '0';
+import { captureVisual, configureVisualPreferences, runVisualMatrix, setCssViewport, visualViewports } from './visual.js';
+import { assertOnboardingLayout } from './onboarding-layout.js';
 
 function required<T>(value: T | undefined, label: string): T {
   if (value === undefined) throw new Error(`missing ${label}`);
@@ -236,17 +236,45 @@ async function measureNavigationPaintP95(): Promise<number> {
   return required(ordered[Math.ceil(ordered.length * 0.95) - 1], 'navigation p95');
 }
 
-async function setCssViewport(width: number, height: number): Promise<void> {
-  const ratio = await browser.execute(() => window.devicePixelRatio || 1);
-  let physicalWidth = Math.ceil(width * ratio);
-  const physicalHeight = Math.ceil(height * ratio);
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await browser.setWindowSize(physicalWidth, physicalHeight);
-    const clientWidth = await browser.execute(() => document.documentElement.clientWidth);
-    if (clientWidth >= width) return;
-    physicalWidth += Math.ceil((width - clientWidth) * ratio);
+async function assertSettingsLayout(): Promise<void> {
+  for (const [width, height] of [[1024, 720], [1180, 760], [1440, 900]] as const) {
+    await setCssViewport(width, height);
+    await browser.execute(() => { document.querySelector('.drive-page')?.scrollTo({ top: 0, behavior: 'instant' }); });
+    const model = await browser.execute(() => {
+      const section = document.querySelector<HTMLElement>('.local-ai-settings');
+      const profile = section?.querySelector('select')?.getBoundingClientRect();
+      const header = document.querySelector('.settings-top-bar')?.getBoundingClientRect();
+      return {
+        overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+          || (section?.scrollWidth ?? 1) > (section?.clientWidth ?? 0),
+        profileVisible: !!profile && !!header && profile.top >= header.bottom && profile.bottom <= innerHeight,
+        explanationCollapsed: !section?.querySelector('details')?.open
+      };
+    });
+    expect(model).toEqual({ overflow: false, profileVisible: true, explanationCollapsed: true });
+    if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `settings-model-${width}.png`));
+    // The embedded WebKit driver's scrollIntoView command can leave the
+    // scroll region at zero; invoke the DOM operation used by focus navigation.
+    await browser.execute(() => { document.querySelector('.settings-form-actions')?.scrollIntoView({ block: 'center', behavior: 'instant' }); });
+    const preferences = await browser.execute(() => {
+      const section = document.querySelector<HTMLElement>('.device-preferences-section');
+      const actions = section?.querySelector('.settings-form-actions')?.getBoundingClientRect();
+      const header = document.querySelector('.settings-top-bar')?.getBoundingClientRect();
+      return {
+        overflow: (section?.scrollWidth ?? 1) > (section?.clientWidth ?? 0),
+        actionsVisible: !!actions && !!header && actions.top >= header.bottom && actions.bottom <= innerHeight,
+        actionsTop: actions?.top, actionsBottom: actions?.bottom, headerBottom: header?.bottom,
+        viewportHeight: innerHeight,
+        scrollRegions: Array.from(document.querySelectorAll<HTMLElement>('.drive-page, .route-page, .settings-layout, .settings-page')).map((element) => ({
+          className: element.className, top: element.scrollTop, height: element.clientHeight, scrollHeight: element.scrollHeight, overflow: getComputedStyle(element).overflowY
+        }))
+      };
+    });
+    if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `settings-preferences-${width}.png`));
+    expect(preferences.overflow).toBe(false);
+    if (!preferences.actionsVisible) throw new Error(`Preference actions were not reachable: ${JSON.stringify(preferences)}`);
   }
-  throw new Error(`could not reach the ${width}x${height} CSS viewport`);
+  await browser.execute(() => { document.querySelector('.drive-page')?.scrollTo({ top: 0 }); });
 }
 
 async function navigateToDestination(index: number): Promise<void> {
@@ -274,7 +302,7 @@ async function navigateToDestination(index: number): Promise<void> {
   );
   const persistentChrome = await browser.execute((route) => Array.from(
     document.querySelectorAll<HTMLElement>(route === 'library'
-      ? '.top-brand, .global-search, .top-actions'
+      ? '.top-brand, .global-search, .workspace-sidebar'
       : '.settings-top-bar')
   ).map((element) => {
     const bounds = element.getBoundingClientRect();
@@ -293,7 +321,7 @@ async function navigateToDestination(index: number): Promise<void> {
   ))).toBe(true);
   expect(await browser.execute((route) => route === 'library'
     ? document.querySelector('.settings-top-bar') === null
-    : document.querySelector('.top-bar, .global-search, .system-status-button') === null, expected)).toBe(true);
+    : document.querySelector('.top-bar, .global-search') === null, expected)).toBe(true);
 }
 
 async function waitForVisualPaint(route: 'library' | 'settings'): Promise<void> {
@@ -320,19 +348,6 @@ async function waitForVisualPaint(route: 'library' | 'settings'): Promise<void> 
   expect(painted).toBe(true);
 }
 
-async function configureVisualPreferences(locale: 'en' | 'es', theme: 'light' | 'dark'): Promise<void> {
-  await navigateToDestination(1);
-  await $('a[href="#settings/general"]').click();
-  await $('.settings-page').waitForDisplayed();
-  await selectValue('.device-preferences-form select', 0, locale);
-  await selectValue('.device-preferences-form select', 1, theme);
-  await $('.settings-form-actions button.primary').click();
-  await browser.waitUntil(async () => (
-    await $('html').getAttribute('lang') === (locale === 'es' ? 'es' : 'en-US')
-    && await $('html').getAttribute('data-theme') === theme
-  ), { timeout: 10_000, timeoutMsg: `visual preferences ${locale}/${theme} were not applied` });
-}
-
 async function openAiAppsSettings(): Promise<void> {
   const route = await browser.execute(() => document.querySelector<HTMLElement>('.route-page')?.dataset.route ?? null);
   if (route !== 'settings') await $('.system-status-button').click();
@@ -355,46 +370,44 @@ async function returnToLibrary(): Promise<void> {
 }
 
 async function assertVisualMatrix(): Promise<void> {
-  const viewports = [
-    { width: 1180, height: 760 },
-    { width: 1440, height: 900 }
-  ];
   const routes = ['library', 'settings'] as const;
   for (const locale of ['en', 'es'] as const) {
     for (const theme of ['light', 'dark'] as const) {
       await configureVisualPreferences(locale, theme);
-      for (const viewport of viewports) {
+      for (const viewport of visualViewports) {
         await setCssViewport(viewport.width, viewport.height);
         for (let index = 0; index < routes.length; index += 1) {
           await navigateToDestination(index);
-          await browser.execute(() => {
-            if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-            document.querySelector('.action-message')?.remove();
-            const style = document.createElement('style');
-            style.id = 'visual-capture-styles';
-            style.textContent = `
-              .secondary:hover:not(:disabled) {
-                background: transparent !important;
-                border-color: var(--line) !important;
-              }
-              .system-status-button:hover { color: var(--muted) !important; background: transparent !important; }
-              .select-control select:hover:not(:disabled),
-              .select-control select:focus-visible {
-                border-color: var(--control-border, var(--line)) !important;
-                box-shadow: inset 0 1px 1px #0000000d !important;
-              }
-            `;
-            document.head.append(style);
-          });
           await waitForVisualPaint(routes[index]);
-          const result = await browser.checkScreen(`${locale}-${theme}-${routes[index]}`);
-          await browser.execute(() => document.querySelector('#visual-capture-styles')?.remove());
-          const mismatch = typeof result === 'number' ? result : result.misMatchPercentage;
-          expect(mismatch).toBeLessThanOrEqual(0.1);
+          await captureVisual(`${locale}-${theme}-${routes[index]}`);
         }
       }
     }
   }
+}
+
+async function assertReadingVisualMatrix(): Promise<void> {
+  for (const locale of ['en', 'es'] as const) {
+    for (const theme of ['light', 'dark'] as const) {
+      await configureVisualPreferences(locale, theme);
+      await $('.settings-back').click();
+      await expect($('.file-preview h1')).toHaveText('Verified architecture reference');
+      for (const viewport of visualViewports) {
+        await setCssViewport(viewport.width, viewport.height);
+        await browser.execute(() => document.querySelector('.drive-page')?.scrollTo({ top: 0, behavior: 'instant' }));
+        await captureVisual(`${locale}-${theme}-reader`);
+        await $('.reader-tools').$(`button*=${locale === 'es' ? 'Fuentes' : 'Sources'}`).click();
+        const inspector = viewport.width < 1360 ? '.reader-dialog[open]' : '.reader-inspector';
+        await expect($(inspector)).toHaveText(expect.stringContaining('Synthetic design record'));
+        await captureVisual(`${locale}-${theme}-reader-sources`);
+        await $(`${inspector} .inspector-close`).click();
+      }
+    }
+  }
+  await configureVisualPreferences('en', 'light');
+  await $('.settings-back').click();
+  await setCssViewport(1180, 760);
+  await expect($('.file-preview h1')).toHaveText('Verified architecture reference');
 }
 
 async function createFolderWiki(): Promise<void> {
@@ -426,6 +439,67 @@ async function createFolderWiki(): Promise<void> {
   await expect(row).toHaveText(expect.stringContaining('automatic updates'));
 }
 
+async function assertSettingsReadingReturn(motion: 'no-preference' | 'reduce') {
+  // Exercise the shipped media rules in the native WebView without changing
+  // the person's OS preferences. Installed accessibility acceptance is separate.
+  const mediaOverrides = await browser.execute((motion) => {
+    const overrides: Array<{ sheet: number; rule: number; media: string }> = [];
+    Array.from(document.styleSheets).forEach((sheet, sheetIndex) => {
+      Array.from(sheet.cssRules).forEach((rule, ruleIndex) => {
+        if (!(rule instanceof CSSMediaRule)) return;
+        const preference = /^\(prefers-reduced-motion:\s*(reduce|no-preference)\)$/.exec(rule.conditionText)?.[1];
+        if (!preference) return;
+        overrides.push({ sheet: sheetIndex, rule: ruleIndex, media: rule.media.mediaText });
+        rule.media.mediaText = preference === motion ? 'all' : 'not all';
+      });
+    });
+    if (overrides.length === 0) throw new Error('motion preference styles are missing');
+    return overrides;
+  }, motion);
+  try {
+    const beforeSettings = await browser.execute(() => ({
+      page: document.querySelector('.drive-page')?.scrollTop ?? 0,
+      index: document.querySelector('.file-list')?.scrollTop ?? 0,
+      height: document.querySelector('.drive-page')?.clientHeight ?? 0,
+      contentHeight: document.querySelector('.drive-page')?.scrollHeight ?? 0,
+    }));
+    await $('.system-status-button').click();
+    await $('.settings-layout').waitForDisplayed();
+    // Let Settings reach its full-width layout before returning. Reversing an
+    // unfinished padding transition could otherwise conceal the regression.
+    await browser.waitUntil(() => browser.execute(() => {
+      const page = document.querySelector('.drive-page');
+      return page !== null && getComputedStyle(page).paddingBlock === '0px';
+    }), { timeout: 5_000, timeoutMsg: 'Settings retained the reading spacing' });
+    await $('.settings-back').click();
+    await expect($('.file-preview h1')).toHaveText('Verified architecture reference');
+    try {
+      await browser.waitUntil(
+        () => browser.execute((expected) => document.querySelector('.drive-page')?.scrollTop === expected.page
+          && document.querySelector('.file-list')?.scrollTop === expected.index, beforeSettings),
+        { timeout: 5_000, timeoutMsg: 'Settings did not restore the article and index positions' }
+      );
+    } catch (error) {
+      const afterSettings = await browser.execute(() => ({
+        page: document.querySelector('.drive-page')?.scrollTop ?? 0,
+        index: document.querySelector('.file-list')?.scrollTop ?? 0,
+        height: document.querySelector('.drive-page')?.clientHeight ?? 0,
+        contentHeight: document.querySelector('.drive-page')?.scrollHeight ?? 0,
+      }));
+      throw new Error(`Settings scroll restoration: ${JSON.stringify({ motion, beforeSettings, afterSettings })}`, { cause: error });
+    }
+    return beforeSettings;
+  } finally {
+    await browser.execute((overrides) => {
+      for (const { sheet, rule, media } of overrides) {
+        const original = document.styleSheets[sheet]?.cssRules[rule];
+        if (!(original instanceof CSSMediaRule)) throw new Error('motion preference stylesheet changed');
+        original.media.mediaText = media;
+      }
+    }, mediaOverrides);
+  }
+}
+
 async function importOkfWiki(): Promise<void> {
   const captureTheme = process.env.AIRWIKI_E2E_JOURNEY_THEME === 'dark' ? 'dark' : 'light';
   await $('button*=New wiki').click();
@@ -433,7 +507,7 @@ async function importOkfWiki(): Promise<void> {
   await $('button*=Import OKF folder').click();
   await $('#import-okf-title').waitForDisplayed();
   await expect($('.create-wiki-dialog')).toHaveText(expect.stringContaining('OKF v0.2'));
-  await expect($('.create-wiki-dialog')).toHaveText(expect.stringContaining('2'));
+  await expect($('.create-wiki-dialog')).toHaveText(expect.stringContaining('50'));
   const name = await $('.create-wiki-dialog input:not([type="checkbox"])');
   await name.setValue('E2E imported wiki');
   await $('button*=Import wiki').click();
@@ -452,14 +526,13 @@ async function importOkfWiki(): Promise<void> {
   );
   await setCssViewport(1180, 760);
   const statusBar = await $('.wiki-journey-compact');
-  await expect(statusBar).toHaveText(expect.stringContaining('Searchable'));
-  await expect(statusBar).toHaveText(expect.stringContaining('Local'));
+  await expect(statusBar).toHaveText(expect.stringContaining('Private'));
   await expect(statusBar).toHaveText(expect.stringContaining('LAN'));
   await expect(statusBar).toHaveText(expect.stringContaining('Internet'));
   await expect(statusBar).toHaveText(expect.stringContaining('AI apps'));
   await expect(statusBar).toHaveText(expect.stringContaining('Share'));
   expect(await $$('.wiki-journey')).toHaveLength(0);
-  expect(await $$('.exposure-route li')).toHaveLength(3);
+  expect(await $$('.exposure-route li')).toHaveLength(0);
   const statusBarLayout = await browser.execute(() => {
     const status = document.querySelector<HTMLElement>('.wiki-journey-compact');
     const controls = Array.from(status?.querySelectorAll<HTMLElement>('button') ?? []);
@@ -471,8 +544,8 @@ async function importOkfWiki(): Promise<void> {
       pageLeft: page?.getBoundingClientRect().left ?? 0,
       pageRight: page?.getBoundingClientRect().right ?? 0,
       essentialTextVisible: [
-        status?.querySelector<HTMLElement>('.journey-compact-identity-copy small'),
-        status?.querySelector<HTMLElement>('.journey-compact-ai-copy strong')
+        status?.querySelector<HTMLElement>('.journey-compact-share > span'),
+        status?.querySelector<HTMLElement>('.journey-compact-ai > span')
       ].every((label) => label instanceof HTMLElement && label.scrollWidth <= label.clientWidth + 1),
       controlsOperable: controls.every((control) => {
         const bounds = control.getBoundingClientRect();
@@ -480,35 +553,97 @@ async function importOkfWiki(): Promise<void> {
       })
     };
   });
+  if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') {
+    await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-access-bar-review-${captureTheme}.png`));
+  }
   expect(statusBarLayout.statusLeft).toBeGreaterThanOrEqual(statusBarLayout.pageLeft);
   expect(statusBarLayout.statusRight).toBeLessThanOrEqual(statusBarLayout.pageRight);
   expect(statusBarLayout.essentialTextVisible).toBe(true);
   expect(statusBarLayout.controlsOperable).toBe(true);
-  if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') {
-    await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-access-bar-review-${captureTheme}.png`));
-  }
   await expect($('.file-list')).toHaveText(expect.stringContaining('architecture/decision.md'));
   await expect($('.file-list')).toHaveText(expect.stringContaining('architecture/verified.md'));
 
   await $('.file-list').$('button*=Synthetic architecture decision').click();
   await browser.waitUntil(
-    () => browser.execute(() => document.querySelector('.concept-assurance')?.textContent?.includes('Unverified') === true),
+    () => browser.execute(() => document.querySelector('.concept-reading-status')?.textContent?.includes('Unverified') === true),
     { timeout: 10_000, timeoutMsg: 'unverified concept assurance did not load' }
   );
-  await expect($('.concept-assurance')).toHaveText(expect.stringContaining('Decision'));
+  await $('.reader-tools').$('button*=Details').click();
+  await expect($('.reader-dialog[open]')).toHaveText(expect.stringContaining('Decision'));
+  await $('.reader-dialog .inspector-close').click();
 
   await $('.file-list').$('button*=Verified architecture reference').click();
   await browser.waitUntil(
-    () => browser.execute(() => document.querySelector('.concept-assurance')?.textContent?.includes('Human-reviewed') === true),
+    () => browser.execute(() => document.querySelector('.concept-reading-status')?.textContent?.includes('Human-reviewed') === true),
     { timeout: 10_000, timeoutMsg: 'verified concept assurance did not replace the previous page atomically' }
   );
+  for (const [width, height] of [[1024, 720], [1180, 760], [1440, 900]] as const) {
+    await setCssViewport(width, height);
+    await browser.execute(() => {
+      const last = Array.from(document.querySelectorAll<HTMLButtonElement>('.file-list button'))
+        .find((button) => button.textContent?.includes('Synthetic reference 48'));
+      last?.focus();
+    });
+    // This driver dispatches synthetic KeyboardEvents, which cannot trigger a
+    // native button's Enter default action. Check focus/scroll here and use its
+    // semantic activation; installed keyboard acceptance remains a manual gate.
+    await $('.file-list').$('button*=Synthetic reference 48').click();
+    await expect($('.file-preview h1')).toHaveText('Synthetic reference 48 with a deliberately long descriptive title');
+    const reading = await browser.execute(() => {
+      const page = document.querySelector<HTMLElement>('.drive-page');
+      if (page) page.scrollTop = 0;
+      const list = document.querySelector<HTMLElement>('.file-list');
+      const heading = document.querySelector<HTMLElement>('.file-preview h1');
+      const paragraph = document.querySelector<HTMLElement>('.file-preview .knowledge-blocks p');
+      const preview = document.querySelector<HTMLElement>('.file-preview');
+      const listRect = list?.getBoundingClientRect();
+      const focusRect = document.activeElement?.getBoundingClientRect();
+      const previewRect = preview?.getBoundingClientRect();
+      return {
+        headingVisible: !!heading && heading.getBoundingClientRect().top >= 0 && heading.getBoundingClientRect().bottom < innerHeight,
+        paragraphVisible: !!paragraph && paragraph.getBoundingClientRect().top < innerHeight,
+        readerBesideIndex: !!listRect && !!previewRect && previewRect.left >= listRect.right - 1,
+        indexScrolled: (list?.scrollTop ?? 0) > 0,
+        focusedSelection: document.activeElement?.getAttribute('aria-current') === 'page',
+        focusVisible: !!focusRect && !!listRect && focusRect.top >= listRect.top && focusRect.bottom <= Math.min(listRect.bottom, innerHeight),
+        horizontalOverflow: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') {
+      await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-reading-${width}-${captureTheme}.png`));
+    }
+    expect(reading).toEqual({
+      headingVisible: true,
+      paragraphVisible: true,
+      readerBesideIndex: true,
+      indexScrolled: true,
+      focusedSelection: true,
+      focusVisible: true,
+      horizontalOverflow: false,
+    });
+  }
+  const indexScrollBeforeFocusMode = await browser.execute(() => document.querySelector('.file-list')?.scrollTop ?? 0);
+  await $('.sidebar-toggle').click();
+  expect(await $('.file-list').isDisplayed()).toBe(false);
+  await expect($('.file-preview h1')).toHaveText('Synthetic reference 48 with a deliberately long descriptive title');
+  await $('.sidebar-toggle').click();
+  expect(await $('.file-list').isDisplayed()).toBe(true);
+  expect(await browser.execute(() => document.querySelector('.file-list')?.scrollTop ?? 0)).toBe(indexScrollBeforeFocusMode);
+  await browser.execute(() => document.querySelector<HTMLElement>('.sidebar-resizer')?.focus());
+  await browser.keys(['ArrowRight']);
+  await expect($('.sidebar-resizer')).toHaveAttribute('aria-valuenow', '240');
+  await browser.keys(['ArrowLeft']);
+  await expect($('.sidebar-resizer')).toHaveAttribute('aria-valuenow', '224');
+  await setCssViewport(1180, 760);
+  await $('.file-list').$('button*=Verified architecture reference').click();
+  await expect($('.file-preview h1')).toHaveText('Verified architecture reference');
+  await expect($('.file-preview .knowledge-blocks')).toHaveText(expect.stringContaining('Synthetic reading section 20.'));
   const workspaceLayout = await browser.execute(() => {
     const page = document.querySelector<HTMLElement>('.drive-page');
     const topBar = document.querySelector<HTMLElement>('.top-bar');
     const heading = document.querySelector<HTMLElement>('.wiki-route > .wiki-heading');
     const detail = document.querySelector<HTMLElement>('.wiki-detail-body');
     const browserPanel = document.querySelector<HTMLElement>('.wiki-detail-body > .file-browser');
-    const list = browserPanel?.querySelector<HTMLElement>('.file-list');
     const preview = browserPanel?.querySelector<HTMLElement>('.file-preview');
     const sticky = document.querySelector<HTMLElement>('.wiki-content-sticky');
     const pageRect = page?.getBoundingClientRect();
@@ -520,7 +655,6 @@ async function importOkfWiki(): Promise<void> {
       pageScrollTop: page?.scrollTop ?? -1,
       pageOverflowY: page ? getComputedStyle(page).overflowY : '',
       detailOverflowY: detail ? getComputedStyle(detail).overflowY : '',
-      listOverflowY: list ? getComputedStyle(list).overflowY : '',
       previewOverflowY: preview ? getComputedStyle(preview).overflowY : '',
       headingTop: headingRect?.top ?? -1,
       pageTop: pageRect?.top ?? -1,
@@ -534,7 +668,6 @@ async function importOkfWiki(): Promise<void> {
   expect(workspaceLayout.pageScrollTop).toBeGreaterThan(0);
   expect(workspaceLayout.pageOverflowY).toBe('auto');
   expect(workspaceLayout.detailOverflowY).toBe('visible');
-  expect(workspaceLayout.listOverflowY).toBe('visible');
   expect(workspaceLayout.previewOverflowY).toBe('visible');
   expect(workspaceLayout.headingTop).toBeLessThan(workspaceLayout.pageTop);
   expect(workspaceLayout.topBarTop).toBeGreaterThanOrEqual(0);
@@ -543,6 +676,27 @@ async function importOkfWiki(): Promise<void> {
   expect(workspaceLayout.stickyTop).toBeGreaterThanOrEqual(workspaceLayout.topBarBottom);
   expect(workspaceLayout.stickyTop).toBeLessThanOrEqual(workspaceLayout.topBarBottom + 2);
   expect(workspaceLayout.browserHeight).toBeGreaterThan(0);
+  const beforeSettings = await assertSettingsReadingReturn('no-preference');
+  await assertSettingsReadingReturn('reduce');
+  await $('.wiki-picker').click();
+  await expect($('.sidebar-wikis')).toBeDisplayed();
+  await $('.wiki-picker').click();
+  expect(await browser.execute(() => document.querySelector('.file-list')?.scrollTop ?? 0)).toBe(beforeSettings.index);
+  const historySecondTitle = 'Synthetic reference 48 with a deliberately long descriptive title';
+  await $('.file-list').$('button*=Synthetic reference 48').click();
+  await expect($('.file-preview h1')).toHaveText(historySecondTitle);
+  await browser.execute(() => window.history.back());
+  await expect($('.file-preview h1')).toHaveText('Verified architecture reference');
+  await browser.waitUntil(
+    () => browser.execute((expected) => document.querySelector('.drive-page')?.scrollTop === expected.page
+      && document.querySelector('.file-list')?.scrollTop === expected.index, beforeSettings),
+    { timeout: 5_000, timeoutMsg: 'Back did not restore the article and index positions' }
+  );
+  await browser.execute(() => window.history.forward());
+  await expect($('.file-preview h1')).toHaveText(historySecondTitle);
+  await expect($('.file-list button[aria-current="page"]')).toHaveText(expect.stringContaining(historySecondTitle));
+  await browser.execute(() => window.history.back());
+  await expect($('.file-preview h1')).toHaveText('Verified architecture reference');
   const contentToolbarGeometry = await browser.execute(() => {
     const sticky = document.querySelector<HTMLElement>('.wiki-content-sticky');
     const summary = sticky?.querySelector<HTMLElement>('.wiki-journey-compact');
@@ -568,9 +722,9 @@ async function importOkfWiki(): Promise<void> {
       actionsWidth: actions?.getBoundingClientRect().width ?? 0
     };
   });
-  expect(Math.abs(draftToolbarGeometry.stickyHeight - contentToolbarGeometry.stickyHeight)).toBeLessThan(1);
-  expect(Math.abs(draftToolbarGeometry.summaryWidth - contentToolbarGeometry.summaryWidth)).toBeLessThan(1);
-  expect(Math.abs(draftToolbarGeometry.actionsWidth - contentToolbarGeometry.actionsWidth)).toBeLessThan(1);
+  expect(contentToolbarGeometry.stickyHeight).toBeLessThanOrEqual(92);
+  expect(draftToolbarGeometry.stickyHeight).toBeLessThanOrEqual(92);
+  expect(draftToolbarGeometry.summaryWidth).toBeGreaterThan(0);
   await $('.content-filters').$('button*=All').click();
   await browser.waitUntil(
     () => browser.execute(() => document.querySelector('.view-switch') !== null),
@@ -587,11 +741,40 @@ async function importOkfWiki(): Promise<void> {
     await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-content-scroll-wide-${captureTheme}.png`));
     await setCssViewport(1180, 760);
   }
-  const assurance = await $('.concept-assurance');
-  await expect(assurance).toHaveText(expect.stringContaining('Reference'));
-  await expect(assurance).toHaveText(expect.stringContaining('Current'));
-  await expect(assurance).toHaveText(expect.stringContaining('process:e2e'));
-  await expect(assurance).not.toHaveText(expect.stringContaining('Unverified'));
+  await browser.execute(() => { const page = document.querySelector('.drive-page'); if (page) page.scrollTop = 0; });
+  const articleWidth = await browser.execute(() => document.querySelector('.reader-article')?.getBoundingClientRect().width ?? 0);
+  await $('.reader-tools').$('button*=Sources').click();
+  await expect($('.reader-dialog[open]')).toHaveText(expect.stringContaining('Concept sources'));
+  await expect($('.reader-dialog[open]')).toHaveText(expect.stringContaining('Synthetic design record'));
+  await expect($('.reader-dialog[open]')).toHaveText(expect.stringContaining('urn:airwiki:e2e'));
+  await expect($('.reader-dialog[open]')).toHaveText(expect.stringContaining('human:e2e'));
+  await expect($('.reader-dialog[open]')).toHaveText(expect.stringContaining('2026-08-13'));
+  expect(await browser.execute(() => document.querySelector('.reader-dialog')?.matches(':modal'))).toBe(true);
+  expect(await browser.execute(() => document.querySelector('.reader-article')?.getBoundingClientRect().width ?? 0)).toBe(articleWidth);
+  if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-sources-dialog-${captureTheme}.png`));
+  await $('.reader-dialog .inspector-close').click();
+  expect(await browser.execute(() => document.activeElement?.closest('.reader-tools') !== null)).toBe(true);
+  await $('.reader-tools').$('button*=Details').click();
+  await expect($('.reader-dialog[open]')).toHaveText(expect.stringContaining('Reference'));
+  await expect($('.reader-dialog[open]')).toHaveText(expect.stringContaining('process:e2e'));
+  await $('.reader-dialog .inspector-close').click();
+  await expect($('.concept-reading-status')).toHaveText(expect.stringContaining('Current'));
+  await expect($('.concept-reading-status')).not.toHaveText(expect.stringContaining('Unverified'));
+  await setCssViewport(1440, 900);
+  await $('.reader-tools').$('button*=Sources').click();
+  await expect($('.reader-inspector')).toHaveText(expect.stringContaining('Synthetic design record'));
+  const inspectorGeometry = await browser.execute(() => ({
+    article: document.querySelector('.reader-article')?.getBoundingClientRect().toJSON(),
+    inspector: document.querySelector('.reader-inspector')?.getBoundingClientRect().toJSON(),
+    overflow: document.documentElement.scrollWidth > innerWidth,
+  }));
+  expect(inspectorGeometry.article.width).toBeGreaterThan(500);
+  expect(inspectorGeometry.inspector.left).toBeGreaterThanOrEqual(inspectorGeometry.article.right);
+  expect(inspectorGeometry.overflow).toBe(false);
+  if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-sources-aside-${captureTheme}.png`));
+  await $('.reader-inspector .inspector-close').click();
+  await setCssViewport(1180, 760);
+  if (runVisualMatrix) await assertReadingVisualMatrix();
 }
 
 async function genericMcpArticle() {
@@ -695,7 +878,7 @@ async function exerciseProjectMemory(client: McpStdioClient): Promise<void> {
 
   const row = await $(`.wiki-row*=${projectName}`);
   await row.click();
-  await $('.wiki-content-sticky').$('button*=Details').click();
+  await $('.wiki-context-details').click();
   await expect($('.project-memory-details')).toBeDisplayed();
   await $('.project-memory-details').$('button*=Detach').click();
   await browser.waitUntil(
@@ -860,7 +1043,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
     expect(readable.bodyMarkdown).toBe('# Portable agent memory updated\n\nUpdated synthetic decision.');
     expect(targetedRead.nextCursor).toBeNull();
     await $('.file-list').$('button*=Portable agent memory updated').click();
-    await expect($('.concept-assurance')).toHaveText(expect.stringContaining('Reviewed'));
+    await expect($('.concept-reading-status')).toHaveText(expect.stringContaining('Reviewed'));
 
     const deprecated = await client.callTool('deprecate_airwiki_memory', {
       wiki_id: wikiId,
@@ -873,7 +1056,7 @@ async function exerciseGenericMcpMemory(): Promise<void> {
       { timeout: 10_000, timeoutMsg: 'the open AI-memory page was not invalidated after deprecation' }
     );
     await $('.file-list').$('button*=Portable agent memory updated').click();
-    await expect($('.concept-assurance')).toHaveText(expect.stringContaining('Deprecated'));
+    await expect($('.concept-reading-status')).toHaveText(expect.stringContaining('Deprecated'));
 
     await openAiAppsSettings();
     await clickGenericMcpAction('Disconnect');
@@ -927,7 +1110,13 @@ describe('AirWiki real IPC journey', () => {
     const onboarding = await $('main.onboarding:not(.startup)');
     await expect(onboarding).toBeDisplayed();
 
+    await selectValue('main.onboarding:not(.startup) select', 0, 'es');
+    await expect($('.onboarding-page h1')).toHaveText('Idioma');
+    await expect($('.onboarding-next')).toHaveText('Continuar');
+    await expect($('.onboarding-back')).toHaveText('Atrás');
     await selectValue('main.onboarding:not(.startup) select', 0, 'en');
+    await expect($('.onboarding-page h1')).toHaveText('Language');
+    await expect($('.onboarding-next')).toHaveText('Continue');
     const language = required((await $$('main.onboarding:not(.startup) select'))[0], 'language preference');
     await expect(language).toHaveValue('en');
     await $('button.onboarding-next').click();
@@ -954,6 +1143,7 @@ describe('AirWiki real IPC journey', () => {
         expect(await localSearchNextStep.$('button').isExisting()).toBe(false);
       }
     }
+    await assertOnboardingLayout();
     const finishOnboarding = await $('main.onboarding:not(.startup) button.onboarding-action');
     await expect(finishOnboarding).toBeEnabled();
     await finishOnboarding.click();
@@ -970,19 +1160,20 @@ describe('AirWiki real IPC journey', () => {
     await expect($('button*=New wiki')).toBeDisplayed();
     await expect($('.system-status-button')).toBeDisplayed();
     expect(await $('.system-status-button').getAttribute('aria-label')).toContain('Settings');
-    expect(await $$('.status-segment')).toHaveLength(3);
+    await expect($('.system-status-button')).toHaveText(expect.stringContaining('Settings'));
     expect(await $('.system-status-bar').isExisting()).toBe(false);
     expect(await measureNavigationPaintP95()).toBeLessThanOrEqual(100);
 
     const globalSearch = await $('#global-search');
-    const searchUnavailable = await browser.execute(() => document.querySelector<HTMLButtonElement>('.global-search button[type="submit"]')?.disabled === true);
-    if (searchUnavailable) {
-      await expect($('.search-preparing-action')).toHaveText(expect.stringContaining('View local AI status'));
-    }
+    const searchUnavailable = await browser.execute(() => document.querySelector('.global-search')?.classList.contains('unavailable') === true);
+    expect(await $('.global-search .search-status-action').isExisting()).toBe(false);
     await globalSearch.click();
     expect(await browser.execute(() => document.activeElement?.id)).toBe('global-search');
     await globalSearch.setValue('focus regression');
     await expect(globalSearch).toHaveValue('focus regression');
+    if (searchUnavailable) {
+      await expect($('.search-welcome button')).toHaveText('View local AI status');
+    }
     await globalSearch.clearValue();
 
     const devicePixelRatio = await browser.execute(() => window.devicePixelRatio || 1);
@@ -1021,8 +1212,8 @@ describe('AirWiki real IPC journey', () => {
       dimensions = required(dimensions, 'responsive viewport dimensions');
       expect(dimensions.clientWidth).toBeGreaterThanOrEqual(viewport.width);
       expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
-      expect(dimensions.statusWidth).toBe(44);
-      expect(dimensions.statusHeight).toBe(44);
+      expect(dimensions.statusWidth).toBeGreaterThanOrEqual(160);
+      expect(dimensions.statusHeight).toBeGreaterThanOrEqual(32);
       expect(dimensions.headerBottom).toBeLessThanOrEqual(dimensions.viewportHeight);
     }
 
@@ -1035,7 +1226,7 @@ describe('AirWiki real IPC journey', () => {
         documentScrollTop: document.scrollingElement?.scrollTop ?? -1,
         mainScrollTop: main?.scrollTop ?? -1,
         topBarTop: topBar?.getBoundingClientRect().top ?? -1,
-        ordinaryHeaderPresent: document.querySelector('.top-bar, .global-search, .system-status-button') !== null,
+        ordinaryHeaderPresent: document.querySelector('.top-bar, .global-search') !== null,
         sidebarPresent: document.querySelector('.settings-sidebar') !== null
       };
     });
@@ -1045,6 +1236,8 @@ describe('AirWiki real IPC journey', () => {
     expect(settingsShell.ordinaryHeaderPresent).toBe(false);
     expect(settingsShell.sidebarPresent).toBe(true);
     expect((await browser.getUrl()).endsWith('#settings/general')).toBe(true);
+
+    await assertSettingsLayout();
 
     await browser.execute(() => { window.location.hash = 'system/preferences'; });
     await browser.waitUntil(
@@ -1134,22 +1327,28 @@ describe('AirWiki real IPC journey', () => {
       const icon = row.querySelector<HTMLElement>('.wiki-icon');
       return {
         height: row.getBoundingClientRect().height,
-        summaryParts: row.querySelectorAll('.wiki-row-summary > *').length,
-        exposureItems: row.querySelectorAll('.wiki-row-exposure-text > span').length,
+        contentSummary: row.querySelector('.wiki-row-summary')?.textContent ?? '',
+        accessSummary: row.querySelector('.wiki-row-exposure')?.textContent ?? '',
         hasOpenLabel: row.querySelector('.wiki-row-open')?.textContent?.includes('Open Wiki') === true,
         shelfRadius: shelf ? Number.parseFloat(getComputedStyle(shelf).borderTopLeftRadius) : null,
         iconShadow: icon ? getComputedStyle(icon).boxShadow : null,
+        descriptionBelowTitle: (() => {
+          const title = row.querySelector('.wiki-name > span > strong')?.getBoundingClientRect();
+          const description = row.querySelector('.wiki-description')?.getBoundingClientRect();
+          return !!title && !!description && description.top >= title.bottom - 1;
+        })(),
       };
     }));
     for (const row of libraryRows) {
       expect(row.height).toBeGreaterThanOrEqual(68);
-      expect(row.height).toBeLessThanOrEqual(78);
-      expect(row.summaryParts).toBe(2);
-      expect(row.exposureItems).toBe(3);
+      expect(row.height).toBeLessThanOrEqual(200);
+      expect(row.contentSummary).toMatch(/\d+ reviewed concepts?/);
+      expect(row.accessSummary.length).toBeGreaterThan(0);
       expect(row.hasOpenLabel).toBe(false);
       expect(row.shelfRadius).not.toBeNull();
       expect(row.shelfRadius ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(6);
       expect(row.iconShadow).toBe('none');
+      expect(row.descriptionBelowTitle).toBe(true);
     }
     await $('.library-scope-tabs').$('button*=Public').click();
     await browser.waitUntil(

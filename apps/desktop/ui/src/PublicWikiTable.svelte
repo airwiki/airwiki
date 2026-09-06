@@ -1,5 +1,5 @@
 <script lang="ts">
-  import BookOpen from '@lucide/svelte/icons/book-open';
+  import WikiIcon from './components/WikiIcon.svelte';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import type { PublicCatalogWikiSummary } from './api';
   import type { MessageArgs } from './i18n';
@@ -31,7 +31,7 @@
     <div role="listitem">
       <button class="public-wiki-row" aria-label={rowLabel(wiki)} onclick={() => onopen(wiki)}>
         <span class="public-wiki-identity">
-          <span class="wiki-icon"><BookOpen size={17} aria-hidden="true" /></span>
+          <span class="wiki-icon"><WikiIcon size={17} /></span>
           <span>
             <strong>{wiki.name}</strong>
             <small>{wiki.description || t('desktop-public-wiki-no-description')}</small>

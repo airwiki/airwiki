@@ -99,7 +99,7 @@ describe('IntegrationList', () => {
     expect(within(item as HTMLElement).getByText('Assisted memory')).toBeInTheDocument();
     expect(within(item as HTMLElement).getByText('Configured')).toBeInTheDocument();
     expect(within(item as HTMLElement).getByText('Installed')).toBeInTheDocument();
-    expect(within(item as HTMLElement).getByText('AirWiki is connected to this chat app.')).toBeInTheDocument();
+    expect(within(item as HTMLElement).queryByText('AirWiki is connected to this chat app.')).not.toBeInTheDocument();
 
     await fireEvent.click(within(item as HTMLElement).getByRole('button', { name: 'Disconnect' }));
     await fireEvent.click(within(item as HTMLElement).getByRole('button', { name: 'Remove guide' }));

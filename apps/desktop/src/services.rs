@@ -30,7 +30,7 @@ use airwiki_core::{
     InitialApplicationAccess, KnowledgeBundleState, KnowledgeBundleView, KnowledgeLinkDisposition,
     KnowledgePageId, KnowledgePageView, LlamaServerProvider, OkfBundleInspector,
     OkfPublicationMaterializer, PinnedE5Snapshot, PinnedMmarcoRerankerSnapshot, RelevanceInput,
-    ReviewEdits, ReviewVersionToken, SourceIssueCode, Tokenizer, WikiOrigin, WikiRepairExecutor,
+    ReviewVersionToken, SourceIssueCode, Tokenizer, WikiOrigin, WikiRepairExecutor,
     WikiRepairPlanner,
 };
 use airwiki_inference::{
@@ -2437,6 +2437,8 @@ impl DesktopServices {
             core_paths.ensure()?;
             let retired_recovery = recover_retired_managed_wiki_files(&core_paths.vaults)?;
             let database = Database::open(&blocking_paths.database)?;
+            #[cfg(feature = "e2e")]
+            crate::e2e_fixtures::seed_review_if_requested(&database, &blocking_paths)?;
             let bundled_bootstrap_indexes =
                 parse_bundled_bootstrap_federation_indexes(BUNDLED_BOOTSTRAP_FEDERATION_INDEXES)?;
             let bootstrap_database = database.clone();
@@ -3650,8 +3652,13 @@ impl DesktopServices {
             .concept(concept_id)?
             .context("el concepto a publicar no existe")?
             .collection_id;
-        self.pipeline()?
-            .approve(concept_id, ReviewEdits { draft }, expected_review_version)?;
+        // Existing evidence can be reviewed while inference is unavailable.
+        // Use the same publication boundary as IngestPipeline::approve.
+        OkfPublicationMaterializer::new(self.database.clone()).approve(
+            concept_id,
+            draft,
+            expected_review_version,
+        )?;
         let _ = self.database.bump_public_manifest_sequence(collection_id)?;
         Ok(collection_id)
     }

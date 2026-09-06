@@ -60,6 +60,34 @@ Run `cargo deny --locked check` whenever dependencies or `Cargo.lock` change. UI
 
 Tests must not download models, contact real peers or external services, open external URLs, or require private credentials. Loopback, in-process peers, fake providers, and temporary directories are acceptable.
 
+`pnpm --dir apps/desktop/ui e2e` builds and runs the isolated desktop journey.
+Set `AIRWIKI_E2E_REVIEW_FIXTURE=1` for the review journey with synthetic drafts,
+stored evidence and real publication IPC, without installing inference models.
+The fixture is compiled only with the debug-only `e2e` feature and requires a
+temporary E2E data root. The runner creates and removes that root automatically.
+Rebuild with `e2e` after other Cargo commands rebuild the desktop binary so the
+runner uses the Tauri E2E configuration and embedded UI.
+Its quit-event checks complement, but do not replace, installed-platform checks
+of native menu, tray and window controls.
+
+Visual references are native and platform-specific. Both journeys cover English
+and Spanish, light and dark themes, and window sizes of 1024×720, 1180×760 and
+1440×900. Baseline filenames record the actual WebView dimensions; window chrome
+can reduce the available height. The normal journey captures the empty library,
+General settings, reading and sources; the review journey captures the proposal,
+evidence and comparison layouts using only synthetic fixtures.
+
+To inspect a proposed visual change, run each journey with
+`AIRWIKI_E2E_VISUAL=0 AIRWIKI_E2E_CAPTURE_MATRIX=1` and inspect the PNGs in
+`apps/desktop/ui/.artifacts/visual/matrix`. After confirming that they satisfy the
+design, run with `UPDATE_VISUAL_BASELINES=1` and visual checks enabled. This
+replaces only the current platform's references for that journey; it preserves
+the other journey and platform. Repeat both journeys without the update variable
+to prove comparison against the reviewed references. Captures freeze animation
+and transient pointer decoration; they do not prove keyboard focus, screen-reader
+behavior or installed-platform acceptance. Hosted CI runs the functional journeys
+with `AIRWIKI_E2E_VISUAL=0` because its window chrome is not a stable visual target.
+
 Manual evidence attached to a pull request must be sanitized according to [docs/maintainer-validation.md](docs/maintainer-validation.md). Record only the minimum commit, package, version, timing, and PASS/FAIL facts needed for review. Never attach document content, questions, snippets, identities, addresses, local paths, databases, or application logs.
 
 ## Rust and architecture expectations

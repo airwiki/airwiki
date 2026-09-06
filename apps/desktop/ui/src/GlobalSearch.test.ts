@@ -6,13 +6,13 @@ import { message } from './i18n';
 describe('GlobalSearch', () => {
   afterEach(cleanup);
 
-  it('offers an accessible route to local AI settings while search is unavailable', async () => {
-    const onopenmodelsettings = vi.fn();
+  it('keeps the search bar compact and opens its context while search is unavailable', async () => {
+    const onopen = vi.fn();
     render(GlobalSearch, {
       question: '',
       includePublic: false,
       busy: false,
-      ready: false,
+      state: 'unavailable' as const,
       platform: 'macOs' as const,
       privateScopeLabel: 'Este equipo',
       t: (id: string) => message('es', id),
@@ -21,12 +21,14 @@ describe('GlobalSearch', () => {
       oncompositionend: vi.fn(),
       onpublic: vi.fn(),
       onsearch: vi.fn(),
-      onopen: vi.fn(),
-      onopenmodelsettings
+      onopen
     });
 
-    expect(screen.getByRole('button', { name: 'Preparando la búsqueda local' })).toBeDisabled();
-    await fireEvent.click(screen.getByRole('button', { name: 'Ver estado de la IA local' }));
-    expect(onopenmodelsettings).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'La búsqueda local no está disponible' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Ver estado de la IA local' })).not.toBeInTheDocument();
+    const input = screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' });
+    expect(input).toHaveAccessibleDescription(/Revisa el estado de la IA local/);
+    await fireEvent.focus(input);
+    expect(onopen).toHaveBeenCalledTimes(1);
   });
 });

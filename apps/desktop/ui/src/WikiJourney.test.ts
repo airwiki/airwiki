@@ -66,23 +66,21 @@ function setup(
 describe('Wiki compact status bar', () => {
   afterEach(cleanup);
 
-  it('keeps knowledge, exposure and sharing in one compact control surface', () => {
+  it('keeps two explicit access controls and omits repeated healthy identity', () => {
     setup();
 
     const summary = screen.getByRole('region', { name: 'Estado de Atlas mientras exploras su contenido' });
-    expect(within(summary).getByText('Atlas')).toBeInTheDocument();
-    expect(within(summary).getByText('Buscable')).toBeInTheDocument();
-    expect(within(summary).getByText('2 de 2 revisados · 0 borradores · 0 excluidos')).toBeInTheDocument();
-    expect(within(summary).getByLabelText('Local: Activa')).toBeInTheDocument();
     expect(within(summary).getByLabelText('LAN: Desactivada')).toBeInTheDocument();
     expect(within(summary).getByLabelText('Internet: Desactivada')).toBeInTheDocument();
+    expect(within(summary).getByText('Privada')).toBeInTheDocument();
+    expect(within(summary).queryByText('Atlas')).not.toBeInTheDocument();
     expect(within(summary).getByText('Sin apps conectadas')).toBeInTheDocument();
     expect(within(summary).getByRole('button', { name: 'Compartir' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '¿Está lista esta wiki?' })).not.toBeInTheDocument();
   });
 
   it('shows every detected AI destination with its own identity and Wiki access state', () => {
-    const { container } = setup(
+    setup(
       { localOnly: false, allowExternalAi: true },
       [integration(), integration({ client: 'claudeCode' })],
       [
@@ -92,23 +90,22 @@ describe('Wiki compact status bar', () => {
     );
 
     expect(screen.getByText('Acceso en 2 apps')).toBeInTheDocument();
-    expect(container.querySelector('[title="ChatGPT/Codex: Acceso permitido"]')).not.toBeNull();
-    expect(container.querySelector('[title="Claude Code: Acceso permitido"]')).not.toBeNull();
-    expect(container.querySelectorAll('[title="ChatGPT/Codex: Acceso permitido"]')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /Gestionar apps de IA/ })).toHaveAccessibleDescription(expect.stringContaining('ChatGPT/Codex: Acceso permitido'));
+    expect(screen.getByRole('button', { name: /Gestionar apps de IA/ })).toHaveAccessibleDescription(expect.stringContaining('Claude Code: Acceso permitido'));
     expect(screen.getByRole('button', { name: /Gestionar apps de IA.*Acceso en 2 apps/ })).toBeInTheDocument();
   });
 
   it('includes explicitly granted applications such as Codex when AI access is active', () => {
-    const { container } = setup({ localOnly: false, allowExternalAi: true }, [], [application()]);
+    setup({ localOnly: false, allowExternalAi: true }, [], [application()]);
 
     expect(screen.getByText('Acceso en 1 app')).toBeInTheDocument();
-    expect(container.querySelector('[title="Codex: Acceso permitido"]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: /Gestionar apps de IA/ })).toHaveAccessibleDescription(expect.stringContaining('Codex: Acceso permitido'));
   });
 
   it.each(['invalid', 'missing', 'identityConflict'] as const)(
     'blocks persisted AI grants while project memory health is %s',
     (projectMemoryHealth) => {
-      const { container } = setup(
+      setup(
         {
           origin: 'aiMemory',
           memoryKind: 'project',
@@ -125,18 +122,18 @@ describe('Wiki compact status bar', () => {
 
       expect(screen.getByText('Acceso bloqueado')).toBeInTheDocument();
       expect(screen.queryByText('Acceso en 1 app')).not.toBeInTheDocument();
-      expect(container.querySelector('[title="Codex: Conectada · sin acceso"]')).not.toBeNull();
+      expect(screen.getByRole('button', { name: /Gestionar apps de IA/ })).toHaveAccessibleDescription(expect.stringContaining('Codex: Conectada · sin acceso'));
       expect(screen.getByLabelText('LAN: No disponible')).toBeInTheDocument();
       expect(screen.getByLabelText('Internet: No disponible')).toBeInTheDocument();
     }
   );
 
   it('does not confuse a configured client with access to this Wiki', () => {
-    const { container } = setup({}, [integration()]);
+    setup({}, [integration()]);
 
     expect(screen.getByText('Revisar conexiones')).toBeInTheDocument();
     expect(screen.queryByText('Acceso en 1 app')).not.toBeInTheDocument();
-    expect(container.querySelector('[title="ChatGPT: Conectada · sin acceso"]')).not.toBeNull();
+    expect(screen.getByRole('button', { name: /Gestionar apps de IA/ })).toHaveAccessibleDescription(expect.stringContaining('ChatGPT: Conectada · sin acceso'));
   });
 
   it('distinguishes enabled-but-offline Internet exposure from actual publication', () => {
@@ -171,6 +168,6 @@ describe('Wiki compact status bar', () => {
     setup({ needsReviewCount: 2 }, [], [], false, true);
 
     expect(screen.getByRole('button', { name: /Volviendo a analizar los borradores actuales/ })).toBeInTheDocument();
-    expect(screen.getByText('Trabajando')).toBeInTheDocument();
+    expect(screen.getByText('Volviendo a analizar los borradores actuales')).toBeInTheDocument();
   });
 });

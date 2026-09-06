@@ -1,16 +1,12 @@
 <script lang="ts">
   import AlertTriangle from '@lucide/svelte/icons/alert-triangle';
-  import BookOpen from '@lucide/svelte/icons/book-open';
   import Bot from '@lucide/svelte/icons/bot';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
-  import Globe2 from '@lucide/svelte/icons/globe-2';
-  import Laptop from '@lucide/svelte/icons/laptop';
-  import RadioTower from '@lucide/svelte/icons/radio-tower';
   import Share2 from '@lucide/svelte/icons/share-2';
   import { applicationClientFor, type AiClientIdentity } from './aiClientIdentity';
   import type { ApplicationAccessSummary, IntegrationClient, IntegrationSummary, WikiScanStatus, WikiSummary } from './api';
-  import AiClientIcon from './components/identity/AiClientIcon.svelte';
   import Spinner from './components/Spinner.svelte';
+  import { focusChoiceWithoutScroll } from './focus';
   import type { MessageArgs } from './i18n';
   import { applicationCanAccessWiki, wikiExternalAccessBlocked, wikiProjectMemoryBlocked } from './wikiAccess';
 
@@ -65,21 +61,14 @@
     return t('desktop-journey-knowledge-empty');
   }
 
-  function knowledgeStatus(): string {
-    const tone = knowledgeTone();
-    if (tone === 'working') return t('status-working');
-    if (tone === 'attention') return t('status-needs-attention');
-    if (tone === 'ready') return t('desktop-journey-searchable');
-    return t('desktop-journey-not-ready');
-  }
-
   function knowledgeAction(): KnowledgeAction {
     if (wiki.maintenanceRequired && repairAvailable) return 'repair';
     if (wiki.needsReviewCount > 0 && wiki.restrictions.length === 0) return 'review';
     return 'details';
   }
 
-  function runKnowledgeAction() {
+  function runKnowledgeAction(event: MouseEvent) {
+    focusChoiceWithoutScroll(event);
     const action = knowledgeAction();
     if (action === 'review') onreview();
     else if (action === 'repair') onrepair();
@@ -201,61 +190,35 @@
   }
 </script>
 
-<section class="wiki-journey-compact" aria-label={t('desktop-journey-compact-label', { wiki: wiki.name })}>
-  <button
-    class="journey-compact-identity"
-    aria-label={`${knowledgeTitle()}. ${knowledgeActionLabel()}`}
-    title={knowledgeActionLabel()}
-    onclick={runKnowledgeAction}
-  >
-    <span class={`journey-compact-icon ${knowledgeTone()}`} aria-hidden="true">
-      {#if knowledgeTone() === 'working'}<Spinner size="small" />{:else if knowledgeTone() === 'attention'}<AlertTriangle size={15} />{:else}<BookOpen size={15} />{/if}
-    </span>
-    <span class="journey-compact-identity-copy">
-      <strong>{wiki.name}</strong>
-      <small><em class={knowledgeTone()}>{knowledgeStatus()}</em><span aria-hidden="true"> · </span>{t('desktop-wiki-review-progress', { reviewed: wiki.publishedCount, total: wiki.publishedCount + wiki.needsReviewCount + wiki.excludedCount, pending: wiki.needsReviewCount, excluded: wiki.excludedCount })}</small>
-    </span>
-    <ChevronRight size={14} aria-hidden="true" />
-  </button>
-
-  <div class="journey-compact-exposure" aria-label={t('desktop-compact-exposure-label')}>
-    <small>{t('desktop-compact-exposure-label')}</small>
-    <ol class="exposure-route">
-      <li class="ready" aria-label={`${t('desktop-compact-exposure-local')}: ${t('desktop-compact-exposure-active')}`}>
-        <span class="exposure-node" aria-hidden="true"><Laptop size={12} /></span>
-        <strong>{t('desktop-compact-exposure-local')}</strong>
-        <em>{t('desktop-compact-exposure-active')}</em>
-      </li>
-      <li class:ready={wiki.peerShareable && !wikiExternalAccessBlocked(wiki)} class:attention={wiki.peerShareable && wikiExternalAccessBlocked(wiki)} class:neutral={!wiki.peerShareable} aria-label={`${t('desktop-compact-exposure-lan')}: ${lanStatus()}`}>
-        <span class="exposure-node" aria-hidden="true"><RadioTower size={12} /></span>
-        <strong>{t('desktop-compact-exposure-lan')}</strong>
-        <em>{lanStatus()}</em>
-      </li>
-      <li class={internetTone()} aria-label={`${t('desktop-compact-exposure-internet')}: ${internetStatus()}`}>
-        <span class="exposure-node" aria-hidden="true"><Globe2 size={12} /></span>
-        <strong>{t('desktop-compact-exposure-internet')}</strong>
-        <em>{internetStatus()}</em>
-      </li>
-    </ol>
-  </div>
-
-  <button class="journey-compact-ai" aria-label={`${t('desktop-compact-ai-manage')}. ${aiSummary()}`} title={t('desktop-compact-ai-manage')} onclick={onapps}>
-    <span class="journey-compact-ai-icons" aria-hidden="true">
-        {#each aiDestinations.slice(0, 3) as destination (destination.key)}
-        <span class={`compact-ai-client ${destination.tone}`} title={`${destination.name}: ${destination.status}`}>
-          <AiClientIcon client={destination.client} label={destination.name} size={25} decorative />
-          <span class="compact-ai-client-dot"></span>
-        </span>
-      {:else}
-        <span class="compact-ai-empty"><Bot size={16} /></span>
-      {/each}
-      {#if aiDestinations.length > 3}<span class="compact-ai-overflow">+{aiDestinations.length - 3}</span>{/if}
-    </span>
-    <span class="journey-compact-ai-copy"><small>{t('desktop-status-ai-apps')}</small><strong>{aiSummary()}</strong></span>
-    <span class="sr-only">{#each aiDestinations as destination (destination.key)}{destination.name}: {destination.status}. {/each}</span>
-  </button>
-
-  {#if wiki.restrictions.length === 0}
-    <button class="secondary journey-compact-share" onclick={onaccess}><Share2 size={15} aria-hidden="true" />{t('desktop-share-action')}</button>
+<section class="wiki-journey-compact wiki-context-actions" aria-label={t('desktop-journey-compact-label', { wiki: wiki.name })}>
+  {#if knowledgeTone() !== 'ready'}
+    <button class={`journey-notice ${knowledgeTone()}`} aria-label={`${knowledgeTitle()}. ${knowledgeActionLabel()}`} title={knowledgeActionLabel()} onclick={runKnowledgeAction}>
+      {#if knowledgeTone() === 'working'}<Spinner size="small" />{:else}<AlertTriangle size={15} aria-hidden="true" />{/if}
+      <span>{knowledgeTitle()}</span><ChevronRight size={14} aria-hidden="true" />
+    </button>
   {/if}
+  <div class="wiki-permission-actions">
+    <button class="journey-compact-share" aria-label={t('desktop-share-action')} aria-describedby={`share-state-${wiki.id}`} onclick={(event) => { focusChoiceWithoutScroll(event); onaccess(); }} disabled={wiki.restrictions.length > 0}>
+      <Share2 size={15} aria-hidden="true" /><span>{t('desktop-share-action')}</span>
+      <small class:attention={internetTone() === 'attention' || (wiki.peerShareable && wikiExternalAccessBlocked(wiki))}>{wiki.internetPublic ? internetStatus() : wiki.peerShareable ? `LAN · ${lanStatus()}` : t('reader-access-private')}</small>
+    </button>
+    <span class="sr-only" id={`share-state-${wiki.id}`}><span aria-label={`${t('desktop-compact-exposure-lan')}: ${lanStatus()}`}>LAN: {lanStatus()}.</span> <span aria-label={`${t('desktop-compact-exposure-internet')}: ${internetStatus()}`}>Internet: {internetStatus()}.</span></span>
+    <button class="journey-compact-ai" aria-label={`${t('desktop-compact-ai-manage')}. ${aiSummary()}`} aria-describedby={`ai-state-${wiki.id}`} onclick={(event) => { focusChoiceWithoutScroll(event); onapps(); }}>
+      <Bot size={15} aria-hidden="true" /><span>{t('desktop-status-ai-apps')}</span><small>{aiSummary()}</small>
+      <span class="sr-only" id={`ai-state-${wiki.id}`}>{#each aiDestinations as destination (destination.key)}{destination.name}: {destination.status}. {/each}</span>
+    </button>
+  </div>
 </section>
+
+<style>
+  .wiki-context-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; min-width: 0; width: auto; }
+  .wiki-context-actions button { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 6px 8px; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: var(--control-radius); font: 500 12px/1.35 var(--font-ui); cursor: pointer; }
+  .wiki-context-actions button:hover { color: var(--strong); background: var(--surface-raised); }
+  .wiki-context-actions button:disabled { cursor: default; opacity: .7; }
+  .wiki-context-actions small { font: 400 11px/1.35 var(--font-ui); }
+  .wiki-context-actions .journey-notice { margin-right: auto; text-align: left; }
+  .wiki-context-actions .attention { color: var(--amber); }
+  .wiki-context-actions .working { color: var(--violet); }
+  .wiki-permission-actions { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+  @media (max-width: 1180px) { .wiki-context-actions .journey-compact-ai small { display: none; } }
+</style>

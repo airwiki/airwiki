@@ -1,5 +1,5 @@
 <script lang="ts">
-  import BookOpen from '@lucide/svelte/icons/book-open';
+  import WikiIcon from './components/WikiIcon.svelte';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
   import ShimmerText from './components/ShimmerText.svelte';
   import Spinner from './components/Spinner.svelte';
@@ -54,23 +54,6 @@
 
   function rowRequiresAttention(wiki: WikiSummary): boolean {
     return wikiRequiresAttention(wiki) || (sourceIssueCounts[wiki.id] ?? 0) > 0;
-  }
-
-  function publicIsAdvertised(wiki: WikiSummary): boolean {
-    return wiki.internetPublic && wiki.publicAnnouncement.status === 'advertised';
-  }
-
-  function lanStatus(wiki: WikiSummary): string {
-    if (wikiExternalAccessBlocked(wiki) && wiki.peerShareable) return t('desktop-compact-exposure-unavailable');
-    return t(wiki.peerShareable ? 'desktop-compact-exposure-lan-enabled' : 'desktop-compact-exposure-off');
-  }
-
-  function internetStatus(wiki: WikiSummary): string {
-    if (wikiExternalAccessBlocked(wiki) && wiki.internetPublic) return t('desktop-compact-exposure-unavailable');
-    if (publicIsAdvertised(wiki)) return t('desktop-compact-exposure-public');
-    if (wiki.internetPublic && wiki.publicAnnouncement.status === 'expired') return t('desktop-compact-exposure-expired');
-    if (wiki.internetPublic) return t('desktop-compact-exposure-enabled-offline');
-    return t('desktop-compact-exposure-off');
   }
 
   function statusLabel(wiki: WikiSummary): string {
@@ -137,37 +120,33 @@
       <div class="wiki-row-item" role="listitem">
         <button class={`wiki-row status-${statusTone(wiki)}`} aria-busy={scanning} aria-label={rowLabel(wiki)} onclick={() => onopen(wiki.id)}>
           <span class="wiki-name">
-            <span class="wiki-icon"><BookOpen size={17} aria-hidden="true" /></span>
-            <span><strong>{wiki.name}</strong><small>{originLabel(wiki)}</small></span>
+            <span class="wiki-icon"><WikiIcon size={17} /></span>
+            <span><strong>{wiki.name}</strong><small class="wiki-description">{wiki.publicDescription.trim() || originLabel(wiki)}</small>
+              {#if scanning || rowRequiresAttention(wiki) || wiki.publishedCount === 0}
+                <span class={`wiki-row-status ${statusTone(wiki)}`}>
+                  <span>{#if scanning}<Spinner size="small" /><ShimmerText text={statusLabel(wiki)} />{:else}<strong>{statusLabel(wiki)}</strong>{/if}</span>
+                  <small>{statusDetail(wiki)}</small>
+                </span>
+              {/if}
+            </span>
           </span>
 
           <span class="wiki-row-knowledge" aria-hidden="true">
-            <small class="wiki-row-kicker">{t('desktop-wiki-column-content')}</small>
             <span class="wiki-row-summary">
-              <strong>{t('desktop-wiki-review-progress', { reviewed: wiki.publishedCount, total: wiki.publishedCount + wiki.needsReviewCount + wiki.excludedCount, pending: wiki.needsReviewCount, excluded: wiki.excludedCount })}</strong>
-              <small>{t('desktop-wiki-detected-count', { count: wiki.documentCount })}</small>
+              <strong>{t('desktop-wiki-reviewed-count', { count: wiki.publishedCount })}</strong>
+              {#if wiki.needsReviewCount > 0}<small>{t('desktop-wiki-pending-count', { count: wiki.needsReviewCount })}</small>{/if}
             </span>
           </span>
-
           <span class="wiki-row-exposure" aria-hidden="true">
-            <small class="wiki-row-kicker">{t('desktop-compact-exposure-label')}</small>
-            <span class="wiki-row-exposure-text">
-              <span class="active">{t('desktop-compact-exposure-local')}</span>
-              <span class:active={wiki.peerShareable && !wikiExternalAccessBlocked(wiki)} class:attention={wiki.peerShareable && wikiExternalAccessBlocked(wiki)}>{t('desktop-compact-exposure-lan')} {lanStatus(wiki)}</span>
-              <span class:active={publicIsAdvertised(wiki) && !wikiExternalAccessBlocked(wiki)} class:attention={wiki.internetPublic && (!publicIsAdvertised(wiki) || wikiExternalAccessBlocked(wiki))}>{t('desktop-compact-exposure-internet')} {internetStatus(wiki)}</span>
-            </span>
-          </span>
-
-          <span class={`wiki-row-status ${statusTone(wiki)}`}>
-            <span>{#if scanning}<Spinner size="small" /><ShimmerText text={statusLabel(wiki)} />{:else}<i class="wiki-status-signal" aria-hidden="true"></i><strong>{statusLabel(wiki)}</strong>{/if}</span>
-            <small title={statusDetail(wiki)}>{statusDetail(wiki)}</small>
+            <strong>{accessSummary(wiki)}</strong>
+            {#if !wikiIsPrivate(wiki, peers) || wiki.peerShareable || wiki.internetPublic}<small>{accessDetail(wiki)}</small>{/if}
           </span>
 
           <span class="wiki-row-open"><ChevronRight size={16} aria-hidden="true" /></span>
         </button>
       </div>
     {:else}
-      <div class="table-empty"><BookOpen size={28} aria-hidden="true" /><strong>{t('desktop-wiki-empty-title')}</strong><p>{t('desktop-wiki-empty-body')}</p><button class="primary" onclick={oncreate}>{t('desktop-wiki-empty-action')}</button></div>
+      <div class="table-empty"><WikiIcon size={28} /><strong>{t('desktop-wiki-empty-title')}</strong><p>{t('desktop-wiki-empty-body')}</p><button class="primary" onclick={oncreate}>{t('desktop-wiki-empty-action')}</button></div>
     {/each}
   </div>
 </div>

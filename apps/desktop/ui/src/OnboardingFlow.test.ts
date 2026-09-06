@@ -24,6 +24,22 @@ function onboardingProps() {
 describe('OnboardingFlow', () => {
   afterEach(cleanup);
 
+  it('updates the current step and persistent navigation when the language changes', async () => {
+    render(OnboardingFlow, { ...onboardingProps(), locale: 'en' });
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Language' }), { target: { value: 'es' } });
+
+    expect(screen.getByRole('heading', { name: 'Idioma' })).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Progreso de configuración' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Atrás' })).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar' }));
+    expect(screen.getByRole('heading', { name: 'Agregar tu primera wiki' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Atrás' }));
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Idioma' }), { target: { value: 'en' } });
+    expect(screen.getByRole('heading', { name: 'Language' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Setup progress' })).toBeInTheDocument();
+  });
+
   it('moves focus with each step and makes postponing the first Wiki explicit', async () => {
     const { container } = render(OnboardingFlow, onboardingProps());
 

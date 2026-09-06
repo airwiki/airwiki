@@ -1,0 +1,11 @@
+<script lang="ts">
+  export let size = 20;
+</script>
+
+<!-- The linked W identifies a wiki; its surrounding text conveys name and state. -->
+<svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+  <path d="M2.75 5.25 7.25 18.25 12 9 16.75 18.25 21.25 5.25" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="7.25" cy="18.25" r="2.35" fill="currentColor" />
+  <circle cx="12" cy="9" r="2.1" fill="currentColor" />
+  <circle cx="16.75" cy="18.25" r="2.35" fill="currentColor" />
+</svg>

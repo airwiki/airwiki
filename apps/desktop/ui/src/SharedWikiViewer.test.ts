@@ -94,6 +94,11 @@ const labels: Record<string, string> = {
   'desktop-concept-type': 'Type',
   'desktop-concept-trust': 'Trust',
   'desktop-shared-source': 'Source',
+  'reader-sources': 'Sources',
+  'reader-concept-sources': 'Concept sources',
+  'reader-page-details': 'Page details',
+  'desktop-details': 'Details',
+  'action-close': 'Close',
   'search-public-block-publisher': 'Block publisher'
 };
 
@@ -121,6 +126,43 @@ describe('SharedWikiViewer', () => {
     expect(screen.getByRole('status')).toHaveTextContent('desktop-shared-loading-title');
     expect(container.querySelector('.shimmer-text.active.neutral')).toHaveTextContent('desktop-shared-loading-title');
     expect(container.querySelector('.loading-skeleton.workspace')).toBeInTheDocument();
+  });
+
+  it('restores the selected page after Settings while honoring current remote availability', async () => {
+    const browse = completePublicWiki();
+    const descriptor = browse.reservedPages.find((page) => page.page.kind === 'index');
+    if (!descriptor) throw new Error('Synthetic index descriptor is missing');
+    browse.page = {
+      descriptor, blocks: [{ kind: 'paragraph', text: 'The selected index page.' }],
+      metadata: [], backlinks: [], truncated: false
+    };
+    const onopenpage = vi.fn();
+    const { rerender } = render(SharedWikiViewer, {
+      source: 'public', sourceName: 'Public network', browse,
+      loading: false, structureLoading: false, pageLoading: false,
+      initialConceptId: 'concept-a', selectedPage: { kind: 'index' },
+      t: translate, metadata: () => 'Human reviewed', onback: vi.fn(), onopenpage
+    });
+    expect(await screen.findByText('The selected index page.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /index\.md/ })).toHaveAttribute('aria-current', 'page');
+    expect(onopenpage).not.toHaveBeenCalled();
+    await rerender({ browse: { ...browse, status: 'offline' } });
+    expect(screen.queryByText('The selected index page.')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('desktop-shared-unavailable-body');
+    expect(onopenpage).not.toHaveBeenCalled();
+  });
+
+  it('restores graph mode for the same remote wiki and resets it for another wiki', async () => {
+    const browse = completePublicWiki();
+    const { rerender } = render(SharedWikiViewer, {
+      source: 'public', sourceName: 'Public network', browse,
+      loading: false, structureLoading: false, pageLoading: false,
+      selectedPage: { kind: 'concept', conceptId: 'concept-a' }, viewMode: 'graph',
+      t: translate, metadata: () => 'Human reviewed', onback: vi.fn(), onopenpage: vi.fn()
+    });
+    expect(screen.getByRole('button', { name: 'Graph' })).toHaveAttribute('aria-pressed', 'true');
+    await rerender({ browse: { ...browse, wikiId: 'another-wiki' } });
+    expect(screen.getByRole('button', { name: 'List' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('renders the complete published workspace without visible pagination', async () => {
@@ -278,5 +320,56 @@ describe('SharedWikiViewer', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Block publisher' }));
     expect(onblock).toHaveBeenCalledWith('publisher-a');
+  });
+
+  it('keeps truncation visible and distinguishes unavailable source references from declared sources', async () => {
+    const wiki = completePublicWiki();
+    wiki.page!.truncated = true;
+    const onopenpage = vi.fn();
+    render(SharedWikiViewer, {
+      source: 'public', sourceName: 'Public network', browse: wiki,
+      loading: false, structureLoading: false, pageLoading: false,
+      t: translate, metadata: () => 'Unverified', onback: vi.fn(), onopenpage
+    });
+    expect(screen.getByText('knowledge-page-truncated')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Sources' }));
+    expect(await screen.findByRole('dialog', { name: 'Concept sources' })).toHaveTextContent('reader-sources-unavailable');
+    expect(onopenpage).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    expect(await screen.findByRole('dialog', { name: 'Page details' })).toHaveTextContent('human:owner');
+  });
+
+  it('hides a cached page when its current descriptor changes revision', async () => {
+    const wiki = completePublicWiki();
+    const onopenpage = vi.fn();
+    const { rerender } = render(SharedWikiViewer, {
+      source: 'public', sourceName: 'Public network', browse: wiki,
+      loading: false, structureLoading: false, pageLoading: false,
+      t: translate, metadata: () => 'Unverified', onback: vi.fn(), onopenpage
+    });
+    expect(screen.getByText('The complete published OKF page is visible.')).toBeInTheDocument();
+    await rerender({ browse: { ...wiki, documents: wiki.documents.map((page) => ({ ...page, fingerprint: '4'.repeat(64) })) } });
+    expect(screen.queryByText('The complete published OKF page is visible.')).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: /guides\/first.md/ }));
+    expect(onopenpage).toHaveBeenCalledWith({ kind: 'concept', conceptId: 'concept-a' }, '4'.repeat(64));
+  });
+
+  it('opens a backlink without carrying concept assurance onto the index', async () => {
+    const wiki = completePublicWiki();
+    const onopenpage = vi.fn();
+    const { rerender } = render(SharedWikiViewer, {
+      source: 'public', sourceName: 'Public network', browse: wiki, initialConceptId: 'concept-a',
+      loading: false, structureLoading: false, pageLoading: false,
+      t: translate, metadata: () => 'Concept assurance', onback: vi.fn(), onopenpage
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Index' }));
+    expect(onopenpage).toHaveBeenCalledWith({ kind: 'index' }, '1'.repeat(64));
+    await rerender({ browse: { ...wiki, page: {
+      descriptor: wiki.reservedPages[0], blocks: [{ kind: 'paragraph', text: 'Index body.' }],
+      metadata: [], backlinks: [], truncated: false
+    } } });
+    expect(screen.getByText('Index body.')).toBeInTheDocument();
+    expect(screen.queryByText('Concept assurance')).not.toBeInTheDocument();
   });
 });

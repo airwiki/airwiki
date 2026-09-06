@@ -41,9 +41,10 @@
   $: totalSteps = reviewStep + 1;
   $: stepIndexes = Array.from({ length: totalSteps }, (_, index) => index);
 
-  function t(id: string, args?: Record<string, string>): string {
-    return message(locale, id, args);
+  function translatorFor(currentLocale: LocalePreference) {
+    return (id: string, args?: Record<string, string>) => message(currentLocale, id, args);
   }
+  $: t = translatorFor(locale);
 
   async function moveTo(nextStep: number) {
     step = nextStep;
@@ -153,7 +154,7 @@
             <div class="onboarding-folder-choice">
               <button class="primary" onclick={chooseFolder} disabled={folderBusy}><FolderOpen size={17} aria-hidden="true" />{t('collections-choose-folder')}</button>
               <button class="text-action" onclick={skipFolder}>{t('onboarding-skip-folder')}</button>
-              <small>{t('onboarding-skip-folder-help')}</small>
+              {#if !folderSkipped}<small>{t('onboarding-skip-folder-help')}</small>{/if}
             </div>
           {/if}
           {#if folderSkipped}<p class="privacy-note" role="status">{t('onboarding-skip-folder-help')}</p>{/if}

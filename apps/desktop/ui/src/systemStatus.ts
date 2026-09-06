@@ -3,6 +3,7 @@ import type { MessageArgs } from './i18n';
 
 export type SystemStatusTarget = 'general' | 'connections' | 'apps';
 export type SystemStatusTone = 'ready' | 'working' | 'off' | 'warning' | 'failed';
+export type LocalSearchState = 'ready' | 'preparing' | 'unavailable';
 export type SystemStatusItem = {
   id: SystemStatusTarget;
   label: string;
@@ -11,6 +12,11 @@ export type SystemStatusItem = {
 };
 
 type Translate = (id: string, args?: MessageArgs) => string;
+
+export function localSearchState(snapshot: AppSnapshot): LocalSearchState {
+  if (snapshot.model?.active) return 'ready';
+  return snapshot.modelInstall ? 'preparing' : 'unavailable';
+}
 
 export function systemStatuses(snapshot: AppSnapshot, t: Translate): SystemStatusItem[] {
   const selectedModelReady = localAiModelReady(snapshot);

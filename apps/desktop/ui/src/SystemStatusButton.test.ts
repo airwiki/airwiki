@@ -32,15 +32,14 @@ function translate(id: string): string {
 describe('SystemStatusButton', () => {
   afterEach(cleanup);
 
-  it('exposes all three donut segments in text and opens Settings', async () => {
+  it('exposes all three system states in its accessible name and opens Settings', async () => {
     const onclick = vi.fn();
-    const { container } = render(SystemStatusButton, {
+    render(SystemStatusButton, {
       snapshot: readySnapshot(), t: translate, onclick
     });
 
     const button = screen.getByRole('button', { name: /Local knowledge: Needs setup.*Connections: Private.*AI apps: Available/ });
-    expect(container.querySelector('.status-donut')).toBeInTheDocument();
-    expect(container.querySelectorAll('.status-segment')).toHaveLength(3);
+    expect(button).toHaveTextContent('Settings');
     await fireEvent.click(button);
     expect(onclick).toHaveBeenCalledOnce();
   });

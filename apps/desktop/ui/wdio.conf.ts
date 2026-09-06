@@ -1,4 +1,4 @@
-import { rmSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -14,8 +14,13 @@ const webDriverPort = Number(configuredWebDriverPort);
 if (!Number.isInteger(webDriverPort) || webDriverPort < 1 || webDriverPort > 65_535) {
   throw new Error(`invalid TAURI_WEBDRIVER_PORT: ${configuredWebDriverPort}`);
 }
-if (process.env.UPDATE_VISUAL_BASELINES === '1') {
-  rmSync(baselineFolder, { recursive: true, force: true });
+const reviewJourney = process.env.AIRWIKI_E2E_REVIEW_FIXTURE === '1';
+if (process.env.UPDATE_VISUAL_BASELINES === '1' && existsSync(baselineFolder)) {
+  // Each fixture updates its own images without deleting the other journey's
+  // reviewed references.
+  for (const name of readdirSync(baselineFolder)) {
+    if (name.endsWith('.png') && /-review-/.test(name) === reviewJourney) rmSync(join(baselineFolder, name));
+  }
 }
 
 export const config: WebdriverIO.Config = {
@@ -38,7 +43,7 @@ export const config: WebdriverIO.Config = {
       formatImageName: '{tag}-{width}x{height}',
       autoSaveBaseline: process.env.UPDATE_VISUAL_BASELINES === '1',
       alwaysSaveActualImage: true,
-      clearRuntimeFolder: true,
+      clearRuntimeFolder: !reviewJourney,
       disableBlinkingCursor: true,
       disableCSSAnimation: true,
       enableLegacyScreenshotMethod: true,

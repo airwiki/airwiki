@@ -195,6 +195,7 @@ jobs:
         shell: bash
         env:
           AIRWIKI_E2E_REVIEW_FIXTURE: "1"
+          AIRWIKI_E2E_VISUAL: "0"
         run: pnpm --dir apps/desktop/ui exec node scripts/run-e2e.mjs
 
   supply-chain:

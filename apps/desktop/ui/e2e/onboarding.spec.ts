@@ -3,8 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
-
-const runVisualMatrix = process.env.AIRWIKI_E2E_VISUAL !== '0';
+import { captureVisual, configureVisualPreferences, runVisualMatrix, setCssViewport, visualViewports } from './visual.js';
 
 function required<T>(value: T | undefined, label: string): T {
   if (value === undefined) throw new Error(`missing ${label}`);
@@ -236,19 +235,6 @@ async function measureNavigationPaintP95(): Promise<number> {
   return required(ordered[Math.ceil(ordered.length * 0.95) - 1], 'navigation p95');
 }
 
-async function setCssViewport(width: number, height: number): Promise<void> {
-  const ratio = await browser.execute(() => window.devicePixelRatio || 1);
-  let physicalWidth = Math.ceil(width * ratio);
-  const physicalHeight = Math.ceil(height * ratio);
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    await browser.setWindowSize(physicalWidth, physicalHeight);
-    const clientWidth = await browser.execute(() => document.documentElement.clientWidth);
-    if (clientWidth >= width) return;
-    physicalWidth += Math.ceil((width - clientWidth) * ratio);
-  }
-  throw new Error(`could not reach the ${width}x${height} CSS viewport`);
-}
-
 async function assertSettingsLayout(): Promise<void> {
   for (const [width, height] of [[1024, 720], [1180, 760], [1440, 900]] as const) {
     await setCssViewport(width, height);
@@ -361,19 +347,6 @@ async function waitForVisualPaint(route: 'library' | 'settings'): Promise<void> 
   expect(painted).toBe(true);
 }
 
-async function configureVisualPreferences(locale: 'en' | 'es', theme: 'light' | 'dark'): Promise<void> {
-  await navigateToDestination(1);
-  await $('a[href="#settings/general"]').click();
-  await $('.settings-page').waitForDisplayed();
-  await selectValue('.device-preferences-form select', 0, locale);
-  await selectValue('.device-preferences-form select', 1, theme);
-  await $('.settings-form-actions button.primary').click();
-  await browser.waitUntil(async () => (
-    await $('html').getAttribute('lang') === (locale === 'es' ? 'es' : 'en-US')
-    && await $('html').getAttribute('data-theme') === theme
-  ), { timeout: 10_000, timeoutMsg: `visual preferences ${locale}/${theme} were not applied` });
-}
-
 async function openAiAppsSettings(): Promise<void> {
   const route = await browser.execute(() => document.querySelector<HTMLElement>('.route-page')?.dataset.route ?? null);
   if (route !== 'settings') await $('.system-status-button').click();
@@ -396,46 +369,44 @@ async function returnToLibrary(): Promise<void> {
 }
 
 async function assertVisualMatrix(): Promise<void> {
-  const viewports = [
-    { width: 1180, height: 760 },
-    { width: 1440, height: 900 }
-  ];
   const routes = ['library', 'settings'] as const;
   for (const locale of ['en', 'es'] as const) {
     for (const theme of ['light', 'dark'] as const) {
       await configureVisualPreferences(locale, theme);
-      for (const viewport of viewports) {
+      for (const viewport of visualViewports) {
         await setCssViewport(viewport.width, viewport.height);
         for (let index = 0; index < routes.length; index += 1) {
           await navigateToDestination(index);
-          await browser.execute(() => {
-            if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-            document.querySelector('.action-message')?.remove();
-            const style = document.createElement('style');
-            style.id = 'visual-capture-styles';
-            style.textContent = `
-              .secondary:hover:not(:disabled) {
-                background: transparent !important;
-                border-color: var(--line) !important;
-              }
-              .system-status-button:hover { color: var(--muted) !important; background: transparent !important; }
-              .select-control select:hover:not(:disabled),
-              .select-control select:focus-visible {
-                border-color: var(--control-border, var(--line)) !important;
-                box-shadow: inset 0 1px 1px #0000000d !important;
-              }
-            `;
-            document.head.append(style);
-          });
           await waitForVisualPaint(routes[index]);
-          const result = await browser.checkScreen(`${locale}-${theme}-${routes[index]}`);
-          await browser.execute(() => document.querySelector('#visual-capture-styles')?.remove());
-          const mismatch = typeof result === 'number' ? result : result.misMatchPercentage;
-          expect(mismatch).toBeLessThanOrEqual(0.1);
+          await captureVisual(`${locale}-${theme}-${routes[index]}`);
         }
       }
     }
   }
+}
+
+async function assertReadingVisualMatrix(): Promise<void> {
+  for (const locale of ['en', 'es'] as const) {
+    for (const theme of ['light', 'dark'] as const) {
+      await configureVisualPreferences(locale, theme);
+      await $('.settings-back').click();
+      await expect($('.file-preview h1')).toHaveText('Verified architecture reference');
+      for (const viewport of visualViewports) {
+        await setCssViewport(viewport.width, viewport.height);
+        await browser.execute(() => document.querySelector('.drive-page')?.scrollTo({ top: 0, behavior: 'instant' }));
+        await captureVisual(`${locale}-${theme}-reader`);
+        await $('.reader-tools').$(`button*=${locale === 'es' ? 'Fuentes' : 'Sources'}`).click();
+        const inspector = viewport.width < 1360 ? '.reader-dialog[open]' : '.reader-inspector';
+        await expect($(inspector)).toHaveText(expect.stringContaining('Synthetic design record'));
+        await captureVisual(`${locale}-${theme}-reader-sources`);
+        await $(`${inspector} .inspector-close`).click();
+      }
+    }
+  }
+  await configureVisualPreferences('en', 'light');
+  await $('.settings-back').click();
+  await setCssViewport(1180, 760);
+  await expect($('.file-preview h1')).toHaveText('Verified architecture reference');
 }
 
 async function createFolderWiki(): Promise<void> {
@@ -791,6 +762,7 @@ async function importOkfWiki(): Promise<void> {
   if (process.env.AIRWIKI_E2E_CAPTURE_JOURNEY === '1') await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-sources-aside-${captureTheme}.png`));
   await $('.reader-inspector .inspector-close').click();
   await setCssViewport(1180, 760);
+  if (runVisualMatrix) await assertReadingVisualMatrix();
 }
 
 async function genericMcpArticle() {

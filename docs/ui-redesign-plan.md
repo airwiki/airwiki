@@ -584,6 +584,17 @@ controles literales de 125/150/200%; esta evidencia no certifica toda la matriz.
 VoiceOver sigue sin verificarse: la herramienta permite activar su ajuste,
 pero no observar los anuncios, incluso con el panel de subtítulos habilitado.
 
+La cabecera de revisión se compactó para dar más espacio inicial al editor:
+el avance comparte la fila de retorno, sin retirar identidad, revisión ni
+explicaciones. La regresión de ventana mínima falla antes y pasa después;
+comprueba al menos 120 px visibles del resumen con el contenido al inicio.
+Pasan las 30 pruebas enfocadas, tipos, lint y el recorrido nativo de revisión.
+Las 16 capturas ES/EN y claro/oscuro se inspeccionaron antes de actualizarlas,
+y la comparación posterior pasa sin regenerar referencias. El candidato
+instalado de macOS confirma comparación y edición en 1180×760 y 1024×720,
+conservación del título al alternar paneles y al cancelar la salida, y descarte
+explícito sin aprobar ni excluir. La revisión independiente no encontró hallazgos.
+
 Siguen pendientes la persistencia local en una entrega separada, las referencias
 visuales de Windows y su aceptación instalada de los recorridos cotidianos.
 La validación especializada de accesibilidad queda como seguimiento no bloqueante

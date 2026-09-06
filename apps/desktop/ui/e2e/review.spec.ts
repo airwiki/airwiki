@@ -121,6 +121,16 @@ describe('AirWiki review with real storage and IPC', () => {
     await expect($('.file-preview h1')).toHaveText('Maintenance approved by a person');
     await expect($('.file-preview .knowledge-blocks')).toHaveText(expect.stringContaining('Create a local backup'));
 
+    for (const trigger of ['.wiki-context-details', '.journey-compact-share', '.journey-compact-ai']) {
+      await $(trigger).click();
+      await $('.side-drawer[role="dialog"]').waitForDisplayed();
+      await browser.keys('Escape');
+      await browser.waitUntil(
+        () => browser.execute((selector) => document.activeElement === document.querySelector(selector), trigger),
+        { timeout: 5_000, timeoutMsg: `Closing the Wiki panel did not return focus to ${trigger}` }
+      );
+    }
+
     await $('.system-status-button').click();
     await $('a[href="#settings/general"]').click();
     await selectValue('.device-preferences-form .control-field:nth-of-type(3) select', 'quit');

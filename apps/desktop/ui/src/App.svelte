@@ -3600,7 +3600,7 @@
             {@const wiki = selectedWiki}
             {@const selectedWikiIssues = snapshot.sourceIssues.filter((issue) => issue.wikiId === wiki.id)}
             <header class="page-heading wiki-heading">
-              <nav class="breadcrumb" aria-label={t('desktop-library-title')}><button onclick={() => select('library')}>{t(canReturnToSearch ? 'desktop-shared-back-results' : 'desktop-library-title')}</button><span aria-hidden="true">/</span><svelte:element this={localReaderVisible ? 'span' : 'h1'} class="wiki-context-name" tabindex={localReaderVisible ? undefined : -1}>{wiki.name}</svelte:element><button class="wiki-context-details" onclick={() => showWikiDetails(wiki.id)} aria-label={`${t('reader-wiki-details')}: ${wiki.name}`}><Info size={15} aria-hidden="true" /></button></nav>
+              <nav class="breadcrumb" aria-label={t('desktop-library-title')}><button onclick={() => select('library')}>{t(canReturnToSearch ? 'desktop-shared-back-results' : 'desktop-library-title')}</button><span aria-hidden="true">/</span><svelte:element this={localReaderVisible ? 'span' : 'h1'} class="wiki-context-name" tabindex={localReaderVisible ? undefined : -1}>{wiki.name}</svelte:element><button class="wiki-context-details" onclick={(event) => { focusChoiceWithoutScroll(event); showWikiDetails(wiki.id); }} aria-label={`${t('reader-wiki-details')}: ${wiki.name}`}><Info size={15} aria-hidden="true" /></button></nav>
             </header>
 
             <div class="wiki-detail-body">
@@ -3611,14 +3611,14 @@
                   <strong id="project-memory-alert-title">{t('desktop-journey-knowledge-project-blocked')}</strong>
                   <small>{t(`desktop-project-memory-health-${wiki.projectMemoryHealth ?? 'invalid'}`)}</small>
                 </div>
-                <button class="text-action" onclick={() => showWikiDetails(wiki.id)}>{t('desktop-details')}</button>
+                <button class="text-action" onclick={(event) => { focusChoiceWithoutScroll(event); showWikiDetails(wiki.id); }}>{t('desktop-details')}</button>
               </section>
             {/if}
 
             {#if wiki.okfCompatibility.kind === 'futureRestricted' || wiki.okfCompatibility.kind === 'legacyV01' || wiki.staleConceptCount > 0 || wiki.outdatedVerificationCount > 0 || wiki.metadataWarningCount > 0}
               <section class="wiki-assurance-strip" aria-label={t('desktop-okf-status-title')}>
                 <div><strong>{compatibilityLabel(wiki)}</strong><small>{wiki.okfCompatibility.kind === 'futureRestricted' ? t('desktop-okf-future-restriction-body') : wiki.okfCompatibility.kind === 'legacyV01' ? t('desktop-okf-legacy-restriction-body') : t('desktop-okf-status-summary', { stale: wiki.staleConceptCount, outdated: wiki.outdatedVerificationCount, warnings: wiki.metadataWarningCount })}</small></div>
-                <button class="text-action" onclick={() => showWikiDetails(wiki.id)}>{t('desktop-details')}</button>
+                <button class="text-action" onclick={(event) => { focusChoiceWithoutScroll(event); showWikiDetails(wiki.id); }}>{t('desktop-details')}</button>
               </section>
             {/if}
 

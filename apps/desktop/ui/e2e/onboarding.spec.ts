@@ -643,6 +643,28 @@ async function importOkfWiki(): Promise<void> {
   expect(workspaceLayout.stickyTop).toBeGreaterThanOrEqual(workspaceLayout.topBarBottom);
   expect(workspaceLayout.stickyTop).toBeLessThanOrEqual(workspaceLayout.topBarBottom + 2);
   expect(workspaceLayout.browserHeight).toBeGreaterThan(0);
+  await browser.execute(() => {
+    const page = document.querySelector<HTMLElement>('.drive-page');
+    if (!page) throw new Error('reading scroll region is missing');
+    const trace: Array<{ event: string; target?: number; position: number }> = [];
+    const record = (event: string, target?: number) => {
+      if (trace.length < 24) trace.push({ event, target, position: page.scrollTop });
+      document.documentElement.dataset.readingScrollTrace = JSON.stringify(trace);
+    };
+    const originalScroll = page.scrollTo;
+    page.scrollTo = (...args: unknown[]) => {
+      const target = typeof args[0] === 'object' && args[0] !== null
+        ? (args[0] as ScrollToOptions).top : Number(args[1]);
+      Reflect.apply(originalScroll, page, args);
+      record('scrollTo', target);
+    };
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('.system-status-button')) record('settings-click');
+      if (target.closest('.settings-back')) record('return-click');
+    }, { capture: true });
+  });
   const beforeSettings = await browser.execute(() => ({
     page: document.querySelector('.drive-page')?.scrollTop ?? 0,
     index: document.querySelector('.file-list')?.scrollTop ?? 0,
@@ -669,8 +691,10 @@ async function importOkfWiki(): Promise<void> {
       height: document.querySelector('.drive-page')?.clientHeight ?? 0,
       contentHeight: document.querySelector('.drive-page')?.scrollHeight ?? 0,
     }));
-    throw new Error(`Settings scroll restoration: ${JSON.stringify({ beforeSettings, afterSettings })}`, { cause: error });
+    const trace = await browser.execute(() => document.documentElement.dataset.readingScrollTrace);
+    throw new Error(`Settings scroll restoration: ${JSON.stringify({ beforeSettings, afterSettings, trace })}`, { cause: error });
   }
+  if (process.env.AIRWIKI_E2E_SCROLL_TRACE === '1') console.info(await browser.execute(() => document.documentElement.dataset.readingScrollTrace));
   await $('.wiki-picker').click();
   await expect($('.sidebar-wikis')).toBeDisplayed();
   await $('.wiki-picker').click();

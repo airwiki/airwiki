@@ -1,5 +1,37 @@
 # Desktop redesign: Windows validation
 
+## Follow-up: folder-step copy
+
+Product commit: `1f4a5f39e352a8c5cc6e8bf3328c7099f180bf43`, based on the
+previously recorded Windows candidate. This follow-up changes exactly three
+product lines: the Spanish and English folder-skip helper and the condition
+that hides its inline copy once the existing status paragraph is shown.
+
+Installed executable SHA-256:
+
+```text
+ae660a989d7c2d4bc21d8cca06f86014ed09a4c33b3fc3e072b39c0793cbba76
+```
+
+**PASS: focused installed Windows interaction in Spanish and English.** A new
+isolated development copy and empty temporary profile were used. The folder
+step showed the helper once before skipping. After skipping, it appeared once
+in the existing status paragraph and the inline helper was absent. Both
+languages were inspected visually and through the native accessibility tree;
+neither promised that local AI was ready. The Spanish post-skip state was
+checked by returning to language selection after the English skip, choosing
+Spanish, and revisiting the folder step with the skipped state preserved.
+Continue became available after skipping.
+
+No knowledge folder was selected or linked, no model or license was activated,
+and no permission was granted. The copy was closed through its normal quit
+dialog. Compilation (including Svelte checking) and diff checks passed.
+Previously accepted journeys and visual comparisons were not repeated or
+updated for this narrow follow-up. The earlier comparison and aria-invalid
+limitation below still apply to their explicitly named candidate.
+
+## Original acceptance record
+
 Validation date: 2026-09-06. This report records completed observations; writing
 the report did not rerun tests. It contains no machine paths, raw logs, document
 content, or search queries.

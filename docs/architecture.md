@@ -113,6 +113,14 @@ version binds the visible draft, source revision and complete chunk set; storage
 revalidates it in the publication transaction. Stale responses are discarded
 and publication remains unavailable until current evidence loads.
 
+The desktop `approve_review` and `reject_review` IPC calls resolve only after
+their worker operation finishes, using a completion channel separate from queue
+acceptance. A stopped worker or a failed operation returns an error rather than
+a success acknowledgement; worker diagnostics are not copied into the UI
+error. The review workspace retains the edited draft on failure and advances
+only after this completion. Publication still revalidates the existing opaque
+review version and does not expand collection permissions.
+
 Manual source updates are Wiki-scoped and exist only for ordinary folder
 Wikis. One request first reconciles the complete folder, then reruns local
 enrichment for the drafts that were pending when the request began. Newly

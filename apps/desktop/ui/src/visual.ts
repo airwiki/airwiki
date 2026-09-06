@@ -199,7 +199,7 @@ if (destination === 'system') {
   };
 }
 window.location.hash = destination === 'review'
-  ? 'library/wiki/pending'
+  ? 'review'
   : destination === 'graph' ? 'library/wiki'
   : destination === 'shared' || destination === 'search' ? 'library'
   : destination === 'connections' ? 'settings/connections'

@@ -223,6 +223,7 @@ states that it did not finish. A newer completion cannot replace the historical
 view. Evicted searches return to Library without replay. Blocking a publisher
 removes its results from every cached search; unblocking does not revive them.
 Queries and snippets never enter browser history, durable state or logs.
+Deferred search focus must respect a newer navigation and a destroyed view.
 
 A local
 result waits for its own bundle request to complete before resolving the concept
@@ -231,6 +232,28 @@ unrelated or abandoned completions cannot open a cached page. Choosing another
 page cancels that pending intent; a completed bundle waits while Settings is
 visible and continues on return. Session history does not change worker ranking,
 publication or authorization; opening any result checks its current availability.
+
+Review uses a dedicated workspace with a global queue grouped by Wiki. Keep
+excluded proposals recoverable and identify drafts blocked by a Wiki restriction
+or an ongoing update. Show evidence and editable title/summary side by side
+when they fit; otherwise switch between them without recreating the edited
+draft. Keep the decision actions reachable during comparison and wrap long
+source names and excerpts.
+
+Approval and exclusion advance only after the worker confirms the actual
+operation. An enqueue acknowledgement is not success. Count confirmed decisions
+and current pending proposals separately, keep the existing queue order when
+new drafts arrive, and retain edits after failure. Current concept, source
+revision, request ID, draft version, restrictions and reanalysis state still
+gate each decision. A changed or withdrawn proposal keeps the editor visible
+with actions blocked; opening its current version requires resolving any edits.
+
+Leaving an edited proposal through application navigation or the close-choice
+dialog offers continuing the review or discarding those edits. Discarding
+continues the requested navigation; it neither approves nor excludes. Returning
+from Settings resolves the proposal again and requests current evidence.
+Approval can make content accessible under existing Wiki permissions; its copy
+must explain that consequence without implying new grants or verification.
 
 ## Controls and targets
 

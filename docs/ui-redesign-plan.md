@@ -393,8 +393,38 @@ filtro conservado, aviso de historial y consentimiento desactivado a 1024×720
 en ES/claro y 1180×760 en EN/oscuro, sin desbordamiento horizontal. Estas
 comprobaciones usan datos sintéticos y no sustituyen la aceptación instalada.
 
-Siguen pendientes el editor dedicado y la persistencia local. La base visual y sus pruebas no
-completan por sí solas la aceptación instalada ni la matriz de accesibilidad.
+La base de la fase 5 sustituye el diálogo por un espacio dedicado. La cola
+global distingue propuestas pendientes, bloqueadas por actualización o
+restricciones, y excluidos recuperables. Evidencia y propuesta se comparan en
+paralelo o se alternan sin perder la edición. La navegación por Biblioteca,
+Ajustes, búsqueda, otra wiki o historial pide resolver los cambios editados;
+al volver desde Ajustes se solicita la propuesta y evidencia vigentes.
+
+Las decisiones esperan el resultado real del worker mediante un canal de
+finalización, separado de la aceptación de la orden. Un fallo conserva la
+edición; una confirmación avanza respetando el orden previo de la cola. Los
+contadores muestran decisiones confirmadas y propuestas actualmente pendientes.
+Una revisión cambiada o retirada bloquea las acciones sin cerrar el editor.
+La evidencia también debe coincidir con la solicitud aceptada de esa revisión.
+
+Se comprobó visualmente la comparación en ES/claro a 1024×720 y EN/oscuro a
+1440×900: nombres largos sin desbordamiento, acciones visibles, edición
+conservada al alternar paneles y foco seguro en la decisión de salida. Se
+retiraron los estilos del diálogo anterior que interferían con esta distribución.
+
+Pasan 287 pruebas de UI, `check`, `lint`, `check:e2e`, compilación y el recorrido
+de regresión con IPC real en macOS. La validación del paquete Rust pasa formato,
+Clippy y 296 pruebas (una prueba existente permanece ignorada). Las pruebas de
+la revisión cubren espera de confirmación, doble activación, fallo y reintento,
+evidencia de otra solicitud, fuente cambiada, navegación con edición, retorno
+desde Ajustes y recuperación de excluidos. El foco diferido de búsqueda respeta
+una navegación posterior y no actúa sobre una vista destruida.
+
+La fase 5 aún necesita cubrir el cierre directo desde menú/bandeja y la
+preferencia de salir sin preguntar, además de ampliar el recorrido instalado
+para aprobar y excluir con IPC real. El diálogo de elección de cierre ya
+respeta la edición. Siguen pendientes la persistencia local y la aceptación
+instalada completa, incluida la matriz de accesibilidad.
 
 - [ ] Fase 1: ventana mínima, W enlazada y base visual.
 - [ ] Fase 2: navegación y biblioteca.

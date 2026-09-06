@@ -3308,15 +3308,29 @@ async fn approve_review(
 ) -> Result<(), UiError> {
     let concept_id = parse_uuid(&concept_id)?;
     let expected_review_version = approval_version(&runtime, concept_id, source_revision)?;
+    let (completed, completion) = oneshot::channel();
     send_command(
         &runtime,
         WorkerCommand::Approve {
             concept_id,
             expected_review_version,
             draft: draft.into(),
+            completed,
         },
     )
-    .await
+    .await?;
+    await_review_decision(completion).await
+}
+
+async fn await_review_decision(
+    completion: oneshot::Receiver<Result<(), String>>,
+) -> Result<(), UiError> {
+    // Enqueueing a publication is not its outcome. Keep the caller pending
+    // until the worker confirms it, without exposing service diagnostics.
+    completion
+        .await
+        .map_err(|_| UiError::internal())?
+        .map_err(|_| UiError::invalid("reviewDecisionFailed"))
 }
 
 fn approval_version(
@@ -3340,14 +3354,17 @@ async fn reject_review(
     concept_id: String,
     source_revision: u32,
 ) -> Result<(), UiError> {
+    let (completed, completion) = oneshot::channel();
     send_command(
         &runtime,
         WorkerCommand::Reject {
             concept_id: parse_uuid(&concept_id)?,
             source_revision,
+            completed,
         },
     )
-    .await
+    .await?;
+    await_review_decision(completion).await
 }
 
 #[tauri::command]
@@ -7453,6 +7470,40 @@ mod tests {
             commands,
             HashMap::from([(token, PendingFolderSelection { path, expires_at })]),
         )
+    }
+
+    #[tokio::test]
+    async fn review_decision_waits_for_the_actual_worker_result() {
+        let (completed, completion) = oneshot::channel();
+        let decision = await_review_decision(completion);
+        tokio::pin!(decision);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), &mut decision)
+                .await
+                .is_err()
+        );
+        let _ = completed.send(Ok(()));
+        assert!(decision.await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn review_decision_hides_worker_diagnostics_on_failure() {
+        let (completed, completion) = oneshot::channel();
+        let _ = completed.send(Err("synthetic private diagnostic".to_owned()));
+        let error = await_review_decision(completion).await.unwrap_err();
+        assert_eq!(error.message_key, "reviewDecisionFailed");
+        assert!(
+            !serde_json::to_string(&error)
+                .unwrap()
+                .contains("private diagnostic")
+        );
+    }
+
+    #[tokio::test]
+    async fn review_decision_does_not_report_success_when_the_worker_stops() {
+        let (completed, completion) = oneshot::channel();
+        drop(completed);
+        assert!(await_review_decision(completion).await.is_err());
     }
 
     #[tokio::test]

@@ -132,6 +132,30 @@ function historySearch(requestId: string, title: string, source: 'local' | 'publ
   }], status);
 }
 
+function reviewSessionFixture() {
+  const wiki = snapshot.wikis[0];
+  const first: AppSnapshot['reviews'][number] = {
+    conceptId: 'first-review', wikiId: wiki.id, wikiName: wiki.name, sourceName: 'first-source.md', sourceRevision: 3, excluded: false,
+    draft: { type: 'Reference', title: 'First proposal', summary: 'First proposed summary', description: '', language: 'en',
+      tags: [], entities: [], links: [], classificationConfidence: 1, classificationExplanation: 'Synthetic fixture' }
+  };
+  const second = { ...first, conceptId: 'second-review', sourceName: 'second-source.md', draft: { ...first.draft, title: 'Second proposal', summary: 'Second proposed summary' } };
+  snapshot.reviews = [first, second];
+  wiki.needsReviewCount = 2;
+  const evidence = (review = first, requestId = `evidence-${review.conceptId}`): NonNullable<AppSnapshot['reviewEvidence']> => ({
+    requestId, conceptId: review.conceptId, sourceRevision: review.sourceRevision, status: 'ready',
+    excerpts: [{ ordinal: 0, headingOrPage: 'Source section', text: `${review.draft.title} source evidence`, truncated: false }],
+    totalChunks: 1, nextOrdinal: null
+  });
+  vi.mocked(loadReviewEvidence).mockImplementation(async (review) => {
+    const current = evidence(review, crypto.randomUUID());
+    await deliverSnapshot(current.requestId, { reviewEvidence: current });
+    return current.requestId;
+  });
+  window.history.replaceState(null, '', '#review');
+  return { first, second, evidence };
+}
+
 async function openSettingsSection(section: 'general' | 'connections' | 'apps') {
   await waitFor(() => {
     expect(
@@ -244,7 +268,7 @@ vi.mock('./api', async (importOriginal) => {
     detachProjectMemory: vi.fn(async () => undefined),
     loadWikiBundle: vi.fn(async () => undefined),
     loadWikiPage: vi.fn(async () => undefined),
-    loadReviewEvidence: vi.fn(async () => 'review-evidence-request'),
+    loadReviewEvidence: vi.fn(async () => snapshot.reviewEvidence?.requestId ?? 'review-evidence-request'),
     verifyWikiConcept: vi.fn(async () => undefined),
     approveReview: vi.fn(async () => undefined),
     rejectReview: vi.fn(async () => undefined),
@@ -286,6 +310,9 @@ describe('AirWiki wiki workspace', () => {
     snapshot = readySnapshot();
     snapshotListener = null;
     tauriListeners.clear();
+    vi.mocked(loadReviewEvidence).mockReset().mockImplementation(async () => snapshot.reviewEvidence?.requestId ?? 'review-evidence-request');
+    vi.mocked(approveReview).mockReset().mockResolvedValue(undefined);
+    vi.mocked(rejectReview).mockReset().mockResolvedValue(undefined);
   });
 
   it('renders global search and one contextual navigation column', async () => {
@@ -1556,6 +1583,213 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('button', { name: /^Borradores/ })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('compares source and proposal in a dedicated workspace and keeps edits when switching panels', async () => {
+    reviewSessionFixture();
+    const { container } = render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    const workspace = await screen.findByRole('region', { name: 'Revisión de propuesta' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'First proposal', level: 1 })).toHaveFocus());
+    expect(await screen.findByText('First proposal source evidence')).toBeInTheDocument();
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Resumen propuesto' }), { target: { value: 'Human revised summary' } });
+    const switcher = within(workspace.querySelector('.review-view-switch') as HTMLElement);
+    await fireEvent.click(switcher.getByRole('button', { name: 'Evidencia' }));
+    expect(switcher.getByRole('button', { name: 'Evidencia' })).toHaveAttribute('aria-pressed', 'true');
+    await fireEvent.click(switcher.getByRole('button', { name: /Propuesta/ }));
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('Human revised summary');
+    expect(screen.getByText(/Al aprobar, el contenido pasa a ser buscable/)).toBeVisible();
+    const accessibility = await axe.run(container, { rules: { region: { enabled: false } } });
+    expect(accessibility.violations.filter((violation) => ['critical', 'serious'].includes(violation.impact ?? ''))).toEqual([]);
+  });
+
+  it('waits for confirmed publication and preserves the next position when the review queue changes', async () => {
+    const { first, second } = reviewSessionFixture();
+    let confirm: () => void = vi.fn();
+    vi.mocked(approveReview).mockImplementationOnce(() => new Promise<void>((resolve) => { confirm = resolve; }));
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    const approve = await screen.findByRole('button', { name: 'Aprobar y continuar' });
+    await fireEvent.click(approve);
+    await fireEvent.click(approve);
+    expect(approveReview).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Guardando decisión…')).toBeVisible();
+    const inserted = { ...first, conceptId: 'new-before-current', draft: { ...first.draft, title: 'New earlier proposal' } };
+    await deliverSnapshot(null, { reviews: [inserted, second] });
+    expect(screen.getByRole('heading', { name: 'First proposal', level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText('Decisiones confirmadas: 1 · Pendientes: 2')).not.toBeInTheDocument();
+    await act(() => confirm());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Second proposal', level: 1 })).toHaveFocus());
+    expect(screen.getByText('Decisiones confirmadas: 1 · Pendientes: 2')).toBeVisible();
+    expect(loadReviewEvidence).toHaveBeenLastCalledWith(second);
+  });
+
+  it('keeps the edited draft after a failed decision and retries the same proposal', async () => {
+    const { first, second } = reviewSessionFixture();
+    vi.mocked(approveReview).mockRejectedValueOnce({ code: 'invalidInput', messageKey: 'reviewDecisionFailed', retryable: false });
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Título propuesto' }), { target: { value: 'Human edited title' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Aprobar y continuar' }));
+    expect(await screen.findByText(/No se pudo confirmar la decisión/)).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Título propuesto' })).toHaveValue('Human edited title');
+    vi.mocked(approveReview).mockImplementationOnce(async () => { await deliverSnapshot(null, { reviews: [second] }); });
+    await fireEvent.click(screen.getByRole('button', { name: 'Aprobar y continuar' }));
+    expect(approveReview).toHaveBeenLastCalledWith(first.conceptId, first.sourceRevision, { ...first.draft, title: 'Human edited title' });
+    expect(approveReview).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole('heading', { name: 'Second proposal', level: 1 })).toBeVisible();
+  });
+
+  it('preserves edits when the source changes and requires a choice before opening the current proposal', async () => {
+    const { first, second } = reviewSessionFixture();
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Resumen propuesto' }), { target: { value: 'My retained edit' } });
+    const changed = { ...first, sourceRevision: 4, draft: { ...first.draft, title: 'Current proposal', summary: 'Current summary' } };
+    await deliverSnapshot(null, { reviews: [changed, second] });
+    expect(screen.getByText('Esta propuesta cambió')).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('My retained edit');
+    expect(screen.getByRole('button', { name: 'Aprobar y continuar' })).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Abrir versión actual' }));
+    expect(await screen.findByRole('dialog', { name: '¿Descartar los cambios de esta propuesta?' })).toBeVisible();
+    await fireEvent.click(screen.getByRole('button', { name: 'Seguir revisando' }));
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('My retained edit');
+    await fireEvent.click(screen.getByRole('button', { name: 'Abrir versión actual' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios y salir' }));
+    expect(await screen.findByRole('heading', { name: 'Current proposal', level: 1 })).toBeVisible();
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('Current summary');
+    expect(approveReview).not.toHaveBeenCalled();
+  });
+
+  it.each(['library', 'settings', 'queue', 'history', 'search', 'wiki', 'hash'] as const)('guards edited review navigation to %s and continues the requested action after discard', async (target) => {
+    reviewSessionFixture();
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Resumen propuesto' }), { target: { value: 'Keep this edit' } });
+    const leave = async () => {
+      if (target === 'history' || target === 'search') {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+        await fireEvent.keyDown(window, { key: target === 'history' ? '[' : 'k', metaKey: true });
+      }
+      else if (target === 'hash') { window.history.pushState(null, '', '#settings/connections'); await fireEvent(window, new PopStateEvent('popstate')); }
+      else if (target === 'wiki') await fireEvent.click(within(screen.getByRole('complementary', { name: 'Navegación' })).getByRole('button', { name: /^Atlas/ }));
+      else await fireEvent.click(screen.getByRole('button', { name: target === 'library' ? 'Biblioteca' : target === 'queue' ? 'Revisar más tarde' : /^Configuración\./ }));
+    };
+    await leave();
+    await screen.findByRole('dialog', { name: '¿Descartar los cambios de esta propuesta?' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Seguir revisando' }));
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('Keep this edit');
+    await leave();
+    await screen.findByRole('dialog', { name: '¿Descartar los cambios de esta propuesta?' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios y salir' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Revisión de propuesta' })).not.toBeInTheDocument());
+    if (target === 'library' || target === 'search') expect(screen.getByRole('heading', { name: 'Tus wikis' })).toBeVisible();
+    else if (target === 'wiki') expect(loadWikiBundle).toHaveBeenLastCalledWith(snapshot.wikis[0].id);
+    else if (target === 'hash') expect(screen.getByRole('heading', { name: 'Conexiones', level: 1 })).toBeVisible();
+    else if (target === 'settings') expect(screen.getByRole('navigation', { name: 'Configuración' })).toBeVisible();
+    else expect(screen.getByRole('heading', { name: 'Por revisar', level: 1 })).toBeVisible();
+    expect(approveReview).not.toHaveBeenCalled();
+    expect(rejectReview).not.toHaveBeenCalled();
+  });
+
+  it('keeps excluded proposals recoverable in the global queue', async () => {
+    const { first } = reviewSessionFixture();
+    snapshot.reviews = [{ ...first, excluded: true }];
+    render(App);
+    await fireEvent.click(await screen.findByText('Excluidos (1)'));
+    await fireEvent.click(screen.getByRole('button', { name: /First proposal.*first-source.md/ }));
+    expect(screen.getByText(/Excluiste este borrador/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Excluir de esta wiki' })).not.toBeInTheDocument();
+    vi.mocked(approveReview).mockImplementationOnce(async () => { await deliverSnapshot(null, { reviews: [] }); });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Aprobar y continuar' })).toBeEnabled());
+    await fireEvent.click(screen.getByRole('button', { name: 'Aprobar y continuar' }));
+    await waitFor(() => expect({
+      headings: Array.from(document.querySelectorAll('h1'), (heading) => heading.textContent),
+      error: screen.queryByRole('alert')?.textContent ?? null,
+      approvalCount: vi.mocked(approveReview).mock.calls.length
+    }).toEqual({ headings: ['Por revisar'], error: null, approvalCount: 1 }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Por revisar', level: 1 })).toHaveFocus());
+    expect(screen.getByText('Decisiones confirmadas: 1 · Pendientes: 0')).toBeVisible();
+  });
+
+  it('waits for exclusion to finish before advancing and leaves the excluded proposal recoverable', async () => {
+    const { first, second } = reviewSessionFixture();
+    let confirm: () => void = vi.fn();
+    vi.mocked(rejectReview).mockImplementationOnce(() => new Promise<void>((resolve) => { confirm = resolve; }));
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    const exclude = screen.getByRole('button', { name: 'Excluir de esta wiki' });
+    await waitFor(() => expect(exclude).toBeEnabled());
+    await fireEvent.click(exclude);
+    await fireEvent.click(exclude);
+    expect(rejectReview).toHaveBeenCalledExactlyOnceWith(first.conceptId, first.sourceRevision);
+    await deliverSnapshot(null, { reviews: [{ ...first, excluded: true }, second] });
+    expect(screen.getByRole('heading', { name: 'First proposal', level: 1 })).toBeVisible();
+    await act(() => confirm());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Second proposal', level: 1 })).toHaveFocus());
+    expect(screen.getByText('Decisiones confirmadas: 1 · Pendientes: 1')).toBeVisible();
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a Por revisar' }));
+    expect(screen.getByText('Excluidos (1)')).toBeVisible();
+    expect(approveReview).not.toHaveBeenCalled();
+  });
+
+  it('blocks evidence from another request and recovers without losing the edited proposal', async () => {
+    const { first, evidence } = reviewSessionFixture();
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await screen.findByText('First proposal source evidence');
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Resumen propuesto' }), { target: { value: 'Retained summary' } });
+    await deliverSnapshot('other-request', { reviewEvidence: { ...evidence(first, 'other-request'), excerpts: [{ ordinal: 0, headingOrPage: '', text: 'Unmatched evidence must stay hidden', truncated: false }] } });
+    expect(screen.queryByText('Unmatched evidence must stay hidden')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Aprobar y continuar' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Excluir de esta wiki' })).toBeDisabled();
+    vi.mocked(loadReviewEvidence).mockRejectedValueOnce(new Error('Synthetic evidence failure'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a intentar' }));
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('Retained summary');
+    expect(screen.getByRole('button', { name: 'Aprobar y continuar' })).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver a intentar' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Aprobar y continuar' })).toBeEnabled());
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('Retained summary');
+    expect(approveReview).not.toHaveBeenCalled();
+  });
+
+  it('returns from Settings to the current proposal and requests its evidence again', async () => {
+    const { first, second } = reviewSessionFixture();
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await screen.findByText('First proposal source evidence');
+    await fireEvent.click(screen.getByRole('button', { name: /^Configuración\./ }));
+    const current = { ...first, sourceRevision: 4, draft: { ...first.draft, title: 'Changed during Settings' } };
+    await deliverSnapshot(null, { reviews: [current, second] });
+    await fireEvent.click(screen.getByRole('button', { name: 'Volver' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Changed during Settings', level: 1 })).toHaveFocus());
+    expect(loadReviewEvidence).toHaveBeenLastCalledWith(current);
+    expect(screen.queryByText('First proposal source evidence')).not.toBeInTheDocument();
+    expect(await screen.findByText('Changed during Settings source evidence')).toBeVisible();
+  });
+
+  it('does not let delayed search focus replace a newer review navigation', async () => {
+    reviewSessionFixture();
+    const frames: FrameRequestCallback[] = [];
+    const animationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    try {
+      render(App);
+      await screen.findByRole('heading', { name: 'Por revisar', level: 1 });
+      await fireEvent.keyDown(window, { key: 'k', metaKey: true });
+      await fireEvent.click(screen.getByRole('button', { name: /^Por revisar/ }));
+      await fireEvent.click(screen.getByRole('button', { name: /First proposal.*first-source.md/ }));
+      await screen.findByText('First proposal source evidence');
+      await act(() => { for (const callback of frames.splice(0)) callback(0); });
+      expect(screen.getByRole('heading', { name: 'First proposal', level: 1 })).toBeVisible();
+      expect(screen.getByRole('textbox', { name: 'Pregunta a tu conocimiento' })).not.toHaveFocus();
+      expect(searchKnowledge).not.toHaveBeenCalled();
+    } finally {
+      animationFrame.mockRestore();
+    }
+  });
+
   it('keeps review decisions unavailable while the Wiki update replaces that draft', async () => {
     const wiki = snapshot.wikis[0];
     wiki.needsReviewCount = 1;
@@ -1581,7 +1815,7 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 3 revisados/ }));
     await fireEvent.click(screen.getByRole('button', { name: /^Borradores/ }));
     await fireEvent.click(screen.getByRole('button', { name: 'updating.md, Borrador' }));
-    const dialog = await screen.findByRole('dialog', { name: 'updating.md' });
+    const dialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
 
     expect(within(dialog).getByText('Volviendo a analizar los borradores actuales')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Excluir de esta wiki' })).toBeDisabled();
@@ -1607,7 +1841,7 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 3 revisados/ }));
     await fireEvent.click(screen.getByRole('button', { name: /^Borradores/ }));
     await fireEvent.click(screen.getByRole('button', { name: 'without-evidence.md, Borrador' }));
-    const dialog = await screen.findByRole('dialog', { name: 'without-evidence.md' });
+    const dialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
     const exclude = within(dialog).getByRole('button', { name: 'Excluir de esta wiki' });
 
     expect(exclude).toBeDisabled();
@@ -1638,15 +1872,15 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(screen.getByRole('button', { name: /^Borradores/ }));
     await fireEvent.click(screen.getByRole('button', { name: 'draft.md, Borrador' }));
 
-    let dialog = await screen.findByRole('dialog', { name: 'draft.md' });
+    let dialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
     expect(within(dialog).getByRole('status')).toHaveTextContent('Cargando el texto extraído…');
     expect(container.querySelector('.action-message')).not.toBeInTheDocument();
     expect(loadReviewEvidence).toHaveBeenCalledWith(review);
 
-    await fireEvent.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
-    expect(screen.queryByRole('dialog', { name: 'draft.md' })).not.toBeInTheDocument();
-    await fireEvent.click(screen.getByRole('button', { name: 'draft.md, Borrador' }));
-    dialog = await screen.findByRole('dialog', { name: 'draft.md' });
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Volver a Por revisar' }));
+    expect(screen.queryByRole('region', { name: 'Revisión de propuesta' })).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: /Draft proposal.*draft.md/ }));
+    dialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
 
     snapshot = {
       ...snapshot,
@@ -1704,7 +1938,7 @@ describe('AirWiki wiki workspace', () => {
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 3 revisados/ }));
     await fireEvent.click(screen.getByRole('button', { name: /^Borradores/ }));
     await fireEvent.click(screen.getByRole('button', { name: 'legacy.md, Borrador' }));
-    const legacyDialog = await screen.findByRole('dialog', { name: 'legacy.md' });
+    const legacyDialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
 
     expect(within(legacyDialog).getByText(/Vuelve a crearla desde la carpeta de origen/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Aprobar y continuar' })).toBeDisabled();

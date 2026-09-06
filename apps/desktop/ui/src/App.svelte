@@ -30,6 +30,7 @@
   import LoadingState from './components/LoadingState.svelte';
   import LoadingSkeleton from './components/LoadingSkeleton.svelte';
   import KnowledgeReader from './components/KnowledgeReader.svelte';
+  import ReviewWorkspace from './components/ReviewWorkspace.svelte';
   import WikiSearchGroup from './components/WikiSearchGroup.svelte';
   import ShimmerText from './components/ShimmerText.svelte';
   import Spinner from './components/Spinner.svelte';
@@ -69,6 +70,7 @@
     hash: string;
     reading: ReadingContext | null;
     shared: SharedReadingContext | null;
+    review: { wikiId: string; conceptId: string; sourceRevision: number } | null;
     search: { sessionId: string; filter: SearchFilter; scope: LibraryScope; target: SearchReturnTarget | null } | null;
     scrollTop: number;
     indexScrollTop: number;
@@ -119,7 +121,7 @@
   let sidebarWidth = 224;
   let settingsSection: SettingsSection = 'general';
   let lastSettingsSection: SettingsSection = 'general';
-  let settingsReturnContext: { hash: string; scrollTop: number; indexScrollTop: number } | null = null;
+  let settingsReturnContext: { hash: string; scrollTop: number; indexScrollTop: number; review?: NavigationEntry['review'] } | null = null;
   let settingsLeavePending = false;
   let settingsLeaveIntent: SettingsLeaveIntent | null = null;
   let searchFilter: SearchFilter = 'all';
@@ -151,14 +153,21 @@
   let selectedReview: ReviewSummary | null = null;
   let editDraft: EnrichmentDraft | null = null;
   let reviewEvidenceLoading = false;
+  let reviewEvidenceLoadingMore = false;
   let reviewEvidenceLoadFailed = false;
   let reviewEvidenceRequestId: string | null = null;
+  let reviewEvidenceAcceptedRequestId: string | null = null;
   let reviewEvidenceLoadGeneration = 0;
   let selectedWikiId: string | null = null;
   let knowledgeMode: 'document' | 'graph' = 'document';
   let wikiTab: 'content' | 'pending' = 'content';
   let contentFilter: ContentFilter = 'all';
-  let reviewAdvanceFrom: { wikiId: string; conceptId: string } | null = null;
+  let reviewDecisionPending = false;
+  let reviewDecisionFailed = false;
+  let reviewLeavePending = false;
+  let reviewLeaveIntent: (() => void) | null = null;
+  let reviewOrder: string[] = [];
+  let reviewCompleted = 0;
   let createWikiOpen = false;
   let createProjectMemoryOpen = false;
   let locale: LocalePreference = 'system';
@@ -257,7 +266,7 @@
   let pendingRequestKeys = new Set<string>();
   let pendingRequestsInitialized = false;
   type PublicCatalogFailureStatus = Exclude<NonNullable<AppSnapshot['publicCatalog']>['status'], 'complete' | 'partial'>;
-  type DialogId = 'new-wiki-source' | 'create-wiki' | 'create-project-memory' | 'import-okf' | 'wiki-details' | 'wiki-access' | 'wiki-ai-apps' | 'review' | 'settings-discard' | 'close-choice' | null;
+  type DialogId = 'new-wiki-source' | 'create-wiki' | 'create-project-memory' | 'import-okf' | 'wiki-details' | 'wiki-access' | 'wiki-ai-apps' | 'review-discard' | 'settings-discard' | 'close-choice' | null;
   let activeDialogId: DialogId;
   let dialogFocusGeneration = 0;
   const dialogFocusState: { activeId: DialogId; returnTarget: HTMLElement | null } = { activeId: null, returnTarget: null };
@@ -412,7 +421,7 @@
       'wiki-details': 'details-title',
       'wiki-access': 'share-title',
       'wiki-ai-apps': 'ai-apps-title',
-      review: 'review-title',
+      'review-discard': 'review-discard-title',
       'settings-discard': 'settings-discard-title',
       'close-choice': 'close-title'
     };
@@ -442,7 +451,7 @@
     void tick().then(() => {
       if (generation !== dialogFocusGeneration) return;
       const dialog = dialogElement(dialogId);
-      const preferredTarget = dialogId === 'close-choice' || dialogId === 'settings-discard'
+      const preferredTarget = dialogId === 'close-choice' || dialogId === 'settings-discard' || dialogId === 'review-discard'
         ? dialog?.querySelector<HTMLElement>('.primary')
         : dialogId === 'new-wiki-source'
           ? dialog?.querySelector<HTMLElement>('.source-choice-item')
@@ -459,8 +468,8 @@
       case 'close-choice':
         closeChoiceRequired = false;
         break;
-      case 'review':
-        closeReview();
+      case 'review-discard':
+        resolveReviewLeave(false);
         break;
       case 'wiki-access':
         editingWikiId = null;
@@ -519,6 +528,8 @@
       && previousReading?.wikiId === selectedWikiId ? previousReading : null;
     return {
       hash, scrollTop, indexScrollTop,
+      review: destination === 'review' && selectedReview
+        ? { wikiId: selectedReview.wikiId, conceptId: selectedReview.conceptId, sourceRevision: selectedReview.sourceRevision } : null,
       search: destination === 'library' && activeSearchSessionId
         ? { sessionId: activeSearchSessionId, filter: searchFilter, scope: libraryScope, target: searchReturnTarget } : null,
       shared: destination === 'library' && sharedBrowseOpen && sharedBrowseTarget
@@ -763,19 +774,23 @@
       return true;
     });
   }
-  $: if (reviewAdvanceFrom && snapshot) {
-    const current = snapshot.reviews.find(
-      (review) => review.conceptId === reviewAdvanceFrom?.conceptId
-        && review.wikiId === reviewAdvanceFrom?.wikiId
-    );
-    if (!current || current.excluded) {
-      const next = snapshot.reviews.find(
-        (review) => review.wikiId === reviewAdvanceFrom?.wikiId && !review.excluded
-      );
-      reviewAdvanceFrom = null;
-      if (next) void openReview(next);
-    }
-  }
+  $: currentReview = selectedReview ? snapshot?.reviews.find((review) => review.wikiId === selectedReview?.wikiId && review.conceptId === selectedReview.conceptId) ?? null : null;
+  $: reviewDirty = selectedReview !== null && editDraft !== null
+    && (editDraft.title !== selectedReview.draft.title || editDraft.summary !== selectedReview.draft.summary);
+  $: reviewStale = selectedReview !== null && (!currentReview || currentReview.sourceRevision !== selectedReview.sourceRevision
+    || currentReview.excluded !== selectedReview.excluded || JSON.stringify(currentReview.draft) !== JSON.stringify(selectedReview.draft));
+  $: reviewReadOnly = selectedReview !== null && snapshot?.wikis.find((wiki) => wiki.id === selectedReview?.wikiId)?.restrictions.length !== 0;
+  $: reviewUpdating = selectedReview !== null && (snapshot?.reanalyzingReviewIds.includes(selectedReview.conceptId) ?? false);
+  $: reviewEvidenceReady = !reviewEvidenceLoading && !reviewEvidenceLoadFailed && !reviewStale && selectedReview !== null
+    && snapshot?.reviewEvidence?.status === 'ready' && snapshot.reviewEvidence.conceptId === selectedReview.conceptId
+    && snapshot.reviewEvidence.sourceRevision === selectedReview.sourceRevision
+    && reviewEvidenceAcceptedRequestId !== null && snapshot.reviewEvidence.requestId === reviewEvidenceAcceptedRequestId;
+  $: reviewRemaining = snapshot?.reviews.filter((review) => !review.excluded).length ?? 0;
+  $: reviewEvidenceRetryAvailable = !reviewStale && (reviewEvidenceLoadFailed || (selectedReview !== null
+    && snapshot?.reviewEvidence?.conceptId === selectedReview.conceptId
+    && snapshot.reviewEvidence.sourceRevision === selectedReview.sourceRevision
+    && (snapshot.reviewEvidence.status === 'failed' || (!reviewEvidenceLoading && !reviewEvidenceLoadingMore
+      && snapshot.reviewEvidence.requestId !== reviewEvidenceAcceptedRequestId))));
 
   const sourceIssueCodes: Record<string, string> = {
     FileTooLarge: 'file-too-large',
@@ -860,8 +875,8 @@
   $: settingsStatuses = snapshot ? systemStatuses(snapshot, t) : [];
 
   $: activeDialogId = closeChoiceRequired ? 'close-choice'
+    : reviewLeavePending ? 'review-discard'
     : settingsLeavePending ? 'settings-discard'
-    : selectedReview !== null ? 'review'
       : editingWikiId !== null ? 'wiki-access'
         : aiAppsWikiId !== null ? 'wiki-ai-apps'
           : detailsWikiId !== null ? 'wiki-details'
@@ -877,6 +892,7 @@
       if (dialogId !== null) {
         if (dialogFocusState.activeId === null) {
           dialogFocusState.returnTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          if (dialogId === 'review-discard') dialogFocusState.returnTarget = document.querySelector<HTMLElement>('.review-workspace h1');
         }
         focusDialog(dialogId);
       } else {
@@ -892,10 +908,19 @@
     const syncRoute = (event?: Event) => {
       const entryId = historyEntryId();
       const entry = entryId ? navigationEntries.get(entryId) : undefined;
+      const requestedHash = window.location.hash;
       // A traversal across different hashes dispatches both popstate and
       // hashchange. Restore once, before any asynchronous worker completion.
       if (event && entryId === activeNavigationId && window.location.hash === activeNavigationHash) return;
+      if (event && !canLeaveReview(() => {
+        window.history.pushState(entryId ? { airwikiNavigation: entryId } : null, '', requestedHash);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      })) {
+        registerNavigation('#review');
+        return;
+      }
       if (event) rememberNavigation();
+      if (event) clearReview();
       const [rawRoute, section, detail] = window.location.hash.slice(1).split('/');
       const returningFromSharedBrowse = sharedBrowseOpen
         && ['library', 'home', 'wikis', 'search'].includes(rawRoute)
@@ -952,6 +977,14 @@
         if (entry && entryId) {
           activeNavigationId = entryId;
           activeNavigationHash = entry.hash;
+          if (entry.review) {
+            const review = snapshot?.reviews.find((candidate) => candidate.wikiId === entry.review?.wikiId && candidate.conceptId === entry.review.conceptId);
+            if (review) {
+              void openReview(review, false, true);
+              scrollMainTo(review.sourceRevision === entry.review.sourceRevision ? entry.scrollTop : 0);
+              return;
+            }
+          }
           if (entry.reading) {
             activateSearchContext(entry.search);
             void restoreReadingContext(entry.reading);
@@ -1031,7 +1064,7 @@
         const first = elements.at(0);
         const last = elements.at(-1);
         const dialogLabel = dialog.getAttribute('aria-labelledby');
-        const initial = dialogLabel === 'close-title' || dialogLabel === 'settings-discard-title'
+        const initial = dialogLabel === 'close-title' || dialogLabel === 'settings-discard-title' || dialogLabel === 'review-discard-title'
           ? dialog.querySelector<HTMLElement>('.primary') ?? first
           : dialog.querySelector<HTMLElement>('.icon-button') ?? first;
         if (!first || !last) {
@@ -1148,16 +1181,15 @@
       if (event.snapshot.model?.licenseAccepted) modelLicensesConfirmed = true;
       syncPreferences(event.snapshot.preferences);
       if (selectedReview) {
-        const currentReview = event.snapshot.reviews.find((review) => review.conceptId === selectedReview?.conceptId);
-        if (!currentReview || currentReview.sourceRevision !== selectedReview.sourceRevision) {
-          closeReview();
-        } else if (
-          reviewEvidenceLoading
+        if (
+          (reviewEvidenceLoading || reviewEvidenceLoadingMore)
           && reviewEvidenceRequestId !== null
           && event.snapshot.reviewEvidence?.requestId === reviewEvidenceRequestId
         ) {
           reviewEvidenceLoading = false;
+          reviewEvidenceLoadingMore = false;
           reviewEvidenceLoadFailed = false;
+          reviewEvidenceAcceptedRequestId = reviewEvidenceRequestId;
           reviewEvidenceRequestId = null;
         }
       }
@@ -1223,6 +1255,7 @@
   });
 
   function select(next: Destination) {
+    if (!canLeaveReview(() => select(next))) return;
     actionMessage = '';
     if (next === 'settings') openSettings(lastSettingsSection);
     else {
@@ -1230,6 +1263,7 @@
       const searchReturn = next === 'library' && (selectedWikiId || sharedBrowseOpen) ? currentSearchReturn() : null;
       const searchPosition = searchReturn ? navigationEntries.get(searchReturn.navigationId)?.scrollTop : undefined;
       rememberNavigation();
+      clearReview();
       readingRestore = null;
       pendingKnowledgePage = null;
       pendingSearchConcept = null;
@@ -1282,15 +1316,18 @@
   }
 
   function openSettings(section: SettingsSection = lastSettingsSection) {
+    if (!canLeaveReview(() => openSettings(section))) return;
     cancelScheduledSearch();
     rememberNavigation();
     if (destination !== 'settings') {
       settingsReturnContext = {
         hash: window.location.hash || '#library',
         scrollTop: mainScrollRegion?.scrollTop ?? 0,
-        indexScrollTop: currentPageIndex()?.scrollTop ?? 0
+        indexScrollTop: currentPageIndex()?.scrollTop ?? 0,
+        review: currentNavigation().review
       };
     }
+    clearReview();
     destination = 'settings';
     activateSettingsSection(section);
     void refreshAutostartState();
@@ -1304,11 +1341,14 @@
   }
 
   function requestNewWikiSource() {
+    if (!canLeaveReview(requestNewWikiSource)) return;
     if (newWikiMenuOpen) {
       newWikiMenuOpen = false;
       return;
     }
     if (!canLeaveSettings({ kind: 'newWiki' })) return;
+    rememberNavigation();
+    clearReview();
     newWikiMenuOpen = true;
     void tick().then(() => focusDialog('new-wiki-source'));
   }
@@ -1319,6 +1359,14 @@
     destination = context.hash === '#review' ? 'review' : 'library';
     settingsLeavePending = false;
     settingsReturnContext = null;
+    if (context.review) {
+      const review = snapshot?.reviews.find((candidate) => candidate.wikiId === context.review?.wikiId && candidate.conceptId === context.review.conceptId);
+      if (review) {
+        void openReview(review, true);
+        scrollMainTo(review.sourceRevision === context.review.sourceRevision ? context.scrollTop : 0);
+        return;
+      }
+    }
     pushHash(context.hash === '#review' || context.hash.startsWith('#library') ? context.hash : '#library');
     scrollMainTo(context.scrollTop);
     restoreIndexScroll(context.indexScrollTop);
@@ -1400,8 +1448,10 @@
   }
 
   function openGlobalSearch(focus = false): boolean {
+    if (!canLeaveReview(() => openGlobalSearch(focus))) return false;
     if (!canLeaveSettings({ kind: 'search', focus })) return false;
     rememberNavigation();
+    clearReview();
     readingRestore = null;
     pendingKnowledgePage = null;
     pendingSearchConcept = null;
@@ -1415,7 +1465,11 @@
     pushHash(libraryScope === 'public' ? '#library/public' : '#library');
     scrollMainTo(0);
     resumePendingSearch();
-    if (focus) requestAnimationFrame(() => document.querySelector<HTMLInputElement>('#global-search')?.focus());
+    if (focus) requestAnimationFrame(() => {
+      if (destination !== 'library' || selectedWikiId !== null || sharedBrowseOpen) return;
+      const input = mainScrollRegion?.closest('.drive-main')?.querySelector<HTMLInputElement>('#global-search');
+      if (input?.isConnected) input.focus();
+    });
     return true;
   }
 
@@ -2769,50 +2823,81 @@
     if (review) void openReview(review);
   }
 
-  function closeReview() {
+  function clearReview() {
     reviewEvidenceLoadGeneration += 1;
     reviewEvidenceLoading = false;
+    reviewEvidenceLoadingMore = false;
     reviewEvidenceLoadFailed = false;
     reviewEvidenceRequestId = null;
+    reviewEvidenceAcceptedRequestId = null;
     selectedReview = null;
     editDraft = null;
+    reviewDecisionFailed = false;
   }
 
-  function reviewEvidenceIssueMessage(): string {
-    if (reviewEvidenceLoadFailed) return t('review-evidence-unavailable');
-    const evidence = snapshot?.reviewEvidence;
+  function canLeaveReview(intent: () => void): boolean {
+    if (!selectedReview) return true;
+    if (reviewDecisionPending) return false;
+    if (!reviewDirty) return true;
+    reviewLeaveIntent = intent;
+    reviewLeavePending = true;
+    return false;
+  }
+
+  async function resolveReviewLeave(discard: boolean) {
+    const intent = reviewLeaveIntent;
+    reviewLeaveIntent = null;
+    reviewLeavePending = false;
+    if (!discard) return;
+    editDraft = selectedReview ? structuredClone(selectedReview.draft) : null;
+    await tick();
+    intent?.();
+  }
+
+  function requestReviewBack() {
+    if (!canLeaveReview(requestReviewBack)) return;
+    rememberNavigation();
+    clearReview();
+    destination = 'review';
+    registerNavigation('#review');
+    scrollMainTo(0);
+    focusRouteHeading();
+  }
+
+  function reviewKey(review: Pick<ReviewSummary, 'wikiId' | 'conceptId' | 'sourceRevision'>): string {
+    return `${review.wikiId}:${review.conceptId}:${review.sourceRevision}`;
+  }
+
+  function orderedReviews(): ReviewSummary[] {
+    return orderedWikis.flatMap((wiki) => snapshot?.reviews.filter((review) => review.wikiId === wiki.id && !review.excluded) ?? []);
+  }
+
+  function reviewEvidenceIssueMessage(review: ReviewSummary | null, evidence: AppSnapshot['reviewEvidence'] | undefined, failed: boolean, translate: typeof t): string {
+    if (failed) return translate('review-evidence-unavailable');
     if (
-      !selectedReview
-      || evidence?.conceptId !== selectedReview.conceptId
-      || evidence.sourceRevision !== selectedReview.sourceRevision
-    ) return t('review-evidence-approval-blocked');
-    if (evidence.status === 'stale') return t('review-evidence-no-longer-pending');
-    if (evidence.status === 'missing') return t('review-evidence-missing');
-    if (evidence.status === 'failed') return t('review-evidence-unavailable');
-    return t('review-evidence-approval-blocked');
-  }
-
-  function reviewEvidenceCanRetry(): boolean {
-    if (reviewEvidenceLoadFailed) return true;
-    const evidence = snapshot?.reviewEvidence;
-    const review = selectedReview;
-    return evidence !== null && evidence !== undefined && review !== null
-      && evidence.conceptId === review.conceptId
-      && evidence.sourceRevision === review.sourceRevision
-      && evidence.status === 'failed';
+      !review
+      || evidence?.conceptId !== review.conceptId
+      || evidence.sourceRevision !== review.sourceRevision
+    ) return translate('review-evidence-approval-blocked');
+    if (evidence.status === 'stale') return translate('review-evidence-no-longer-pending');
+    if (evidence.status === 'missing') return translate('review-evidence-missing');
+    if (evidence.status === 'failed') return translate('review-evidence-unavailable');
+    return translate('review-evidence-approval-blocked');
   }
 
   function retryReviewEvidence() {
     if (selectedReview) void requestReviewEvidence(selectedReview);
   }
 
-  async function requestReviewEvidence(review: ReviewSummary) {
+  async function requestReviewEvidence(review: ReviewSummary, afterOrdinal: number | null = null) {
     const generation = ++reviewEvidenceLoadGeneration;
-    reviewEvidenceLoading = true;
+    reviewEvidenceLoading = afterOrdinal === null;
+    reviewEvidenceLoadingMore = afterOrdinal !== null;
+    if (afterOrdinal === null) reviewEvidenceAcceptedRequestId = null;
     reviewEvidenceLoadFailed = false;
     reviewEvidenceRequestId = null;
     try {
-      const requestId = await loadReviewEvidence(review);
+      const requestId = afterOrdinal === null ? await loadReviewEvidence(review) : await loadReviewEvidence(review, afterOrdinal);
       if (
         generation !== reviewEvidenceLoadGeneration
         || selectedReview?.conceptId !== review.conceptId
@@ -2821,40 +2906,51 @@
       reviewEvidenceRequestId = requestId;
       if (snapshot?.reviewEvidence?.requestId === requestId) {
         reviewEvidenceLoading = false;
+        reviewEvidenceLoadingMore = false;
+        reviewEvidenceAcceptedRequestId = requestId;
         reviewEvidenceRequestId = null;
       }
     } catch {
       if (generation === reviewEvidenceLoadGeneration) {
         reviewEvidenceLoading = false;
+        reviewEvidenceLoadingMore = false;
         reviewEvidenceLoadFailed = true;
         reviewEvidenceRequestId = null;
       }
     }
   }
 
-  async function openReview(review: ReviewSummary) {
+  async function openReview(review: ReviewSummary, continuing = false, restoring = false) {
+    if (!canLeaveReview(() => void openReview(review, continuing, restoring))) return;
+    if (!restoring && !continuing) rememberNavigation();
     clearActionMessage();
+    cancelScheduledSearch();
+    destination = 'review';
+    selectedWikiId = null;
+    dismissSharedBrowse();
+    readingRestore = null;
+    pendingKnowledgePage = null;
+    pendingSearchConcept = null;
+    reviewDecisionFailed = false;
+    if (!continuing) {
+      reviewCompleted = 0;
+      reviewOrder = orderedReviews().map(reviewKey);
+    }
     selectedReview = review;
     editDraft = structuredClone(review.draft);
+    if (!restoring) registerNavigation('#review');
+    scrollMainTo(0);
+    focusRouteHeading();
     await requestReviewEvidence(review);
   }
 
   async function loadMoreEvidence() {
-    if (!selectedReview || snapshot?.reviewEvidence?.nextOrdinal == null) return;
-    actionBusy = true;
-    try {
-      await loadReviewEvidence(selectedReview, snapshot.reviewEvidence.nextOrdinal);
-    } catch {
-      actionMessage = t('review-evidence-unavailable');
-    } finally {
-      actionBusy = false;
-    }
+    if (!selectedReview || reviewEvidenceLoadingMore || reviewDecisionPending || snapshot?.reviewEvidence?.nextOrdinal == null) return;
+    await requestReviewEvidence(selectedReview, snapshot.reviewEvidence.nextOrdinal);
   }
 
   function evidenceIsCurrent(): boolean {
-    return snapshot?.reviewEvidence?.status === 'ready'
-      && snapshot.reviewEvidence.conceptId === selectedReview?.conceptId
-      && snapshot.reviewEvidence.sourceRevision === selectedReview.sourceRevision;
+    return reviewEvidenceReady && !reviewEvidenceLoadingMore;
   }
 
   function selectedReviewIsReadOnly(): boolean {
@@ -2870,30 +2966,49 @@
   }
 
   async function decideReview(decision: 'approve' | 'reject') {
+    if (reviewDecisionPending) return;
     if (!selectedReview || selectedReviewIsUpdating() || (decision === 'approve' && selectedReviewIsReadOnly())) return;
     if (!evidenceIsCurrent() || (decision === 'approve' && !editDraft)) return;
-    actionBusy = true;
+    const review = selectedReview;
+    const draft = editDraft ? structuredClone(editDraft) : null;
+    reviewDecisionPending = true;
+    reviewDecisionFailed = false;
     try {
-      if (decision === 'approve' && editDraft) await approveReview(selectedReview.conceptId, selectedReview.sourceRevision, editDraft);
-      if (decision === 'reject') await rejectReview(selectedReview.conceptId, selectedReview.sourceRevision);
-      if (decision === 'approve' || decision === 'reject') {
-        reviewAdvanceFrom = {
-          wikiId: selectedReview.wikiId,
-          conceptId: selectedReview.conceptId
-        };
+      if (decision === 'approve' && draft) await approveReview(review.conceptId, review.sourceRevision, draft);
+      if (decision === 'reject') await rejectReview(review.conceptId, review.sourceRevision);
+      reviewDecisionPending = false;
+      reviewCompleted += 1;
+      const currentKey = reviewKey(review);
+      const position = reviewOrder.indexOf(currentKey);
+      const candidates = orderedReviews().filter((candidate) => reviewKey(candidate) !== currentKey
+        && !snapshot?.reanalyzingReviewIds.includes(candidate.conceptId)
+        && snapshot?.wikis.find((wiki) => wiki.id === candidate.wikiId)?.restrictions.length === 0);
+      const remaining = new Map(candidates.map((candidate) => [reviewKey(candidate), candidate]));
+      const nextKey = [...reviewOrder.slice(position + 1), ...remaining.keys(), ...reviewOrder.slice(0, position)]
+        .find((key) => remaining.has(key));
+      const next = nextKey ? remaining.get(nextKey) : null;
+      reviewOrder = [...reviewOrder.filter((key) => remaining.has(key)), ...remaining.keys()].filter((key, index, keys) => keys.indexOf(key) === index);
+      rememberNavigation();
+      clearReview();
+      if (next) await openReview(next, true);
+      else {
+        registerNavigation('#review');
+        scrollMainTo(0);
+        focusRouteHeading();
       }
-      closeReview();
       showOperationComplete();
     } catch {
-      actionMessage = t('review-evidence-approval-blocked');
+      reviewDecisionFailed = true;
     } finally {
-      actionBusy = false;
+      reviewDecisionPending = false;
     }
   }
 
   async function openWiki(wikiId: string, tab: 'content' | 'pending' = 'content') {
+    if (!canLeaveReview(() => void openWiki(wikiId, tab))) return;
     if (!canLeaveSettings({ kind: 'wiki', wikiId, tab })) return;
     rememberNavigation();
+    clearReview();
     cancelScheduledSearch();
     dismissSharedBrowse();
     destination = 'library';
@@ -3105,6 +3220,7 @@
 
   async function applyCloseChoice(choice: 'hide' | 'quit' | 'cancel') {
     closeChoiceRequired = false;
+    if (choice === 'quit' && !canLeaveReview(() => void applyCloseChoice('quit'))) return;
     if (choice === 'hide') await hideToTray();
     if (choice === 'quit') await quitCompletely();
   }
@@ -3460,23 +3576,39 @@
             {/if}
             </div>
           {:else if destination === 'review'}
-            <header class="page-heading"><div><h1 tabindex="-1">{t('desktop-review-queue-title')}</h1><p>{t('desktop-review-queue-body')}</p></div></header>
-            <div class="review-queue">
-              {#each orderedWikis as wiki (wiki.id)}
-                {@const pending = snapshot.reviews.filter((review) => review.wikiId === wiki.id && !review.excluded)}
-                {#if pending.length > 0}
-                  <section aria-labelledby={`queue-${wiki.id}`}>
-                    <h2 id={`queue-${wiki.id}`}><WikiIcon size={20} />{wiki.name}<small>{pending.length}</small></h2>
-                    <div class="pending-list">
-                      {#each pending as review (`${review.conceptId}:${review.sourceRevision}`)}
-                        <button onclick={() => openReview(review)}><FileText size={17} aria-hidden="true" /><span><strong>{review.draft.title}</strong><small>{review.sourceName}</small></span><span>{t('review-revision', { revision: review.sourceRevision })}</span></button>
-                      {/each}
-                    </div>
-                  </section>
-                {/if}
-              {/each}
-              {#if !snapshot.reviews.some((review) => !review.excluded)}<div class="table-empty"><CheckCircle2 size={28} aria-hidden="true" /><strong>{t('review-empty-title')}</strong><p>{t('review-empty-body')}</p></div>{/if}
-            </div>
+            {#if selectedReview && editDraft}
+              {#key reviewKey(selectedReview)}
+                <ReviewWorkspace review={selectedReview} draft={editDraft} evidence={snapshot.reviewEvidence}
+                  evidenceReady={reviewEvidenceReady} evidenceLoading={reviewEvidenceLoading} evidenceLoadingMore={reviewEvidenceLoadingMore}
+                  evidenceIssue={reviewEvidenceIssueMessage(selectedReview, snapshot.reviewEvidence, reviewEvidenceLoadFailed, t)} evidenceCanRetry={reviewEvidenceRetryAvailable}
+                  readOnly={reviewReadOnly} updating={reviewUpdating} stale={reviewStale} canReload={currentReview !== null}
+                  busy={reviewDecisionPending} error={reviewDecisionFailed} dirty={reviewDirty}
+                  completed={reviewCompleted} remaining={reviewRemaining} {t}
+                  onedit={(draft) => { editDraft = draft; }} onback={requestReviewBack}
+                  onreload={() => { if (currentReview) void openReview(currentReview); }}
+                  onretry={retryReviewEvidence} onmore={loadMoreEvidence} ondecide={decideReview} />
+              {/key}
+            {:else}
+              <header class="page-heading"><div><h1 tabindex="-1">{t('desktop-review-queue-title')}</h1><p>{t('desktop-review-queue-body')}</p>{#if reviewCompleted > 0}<p role="status">{t('review-session-progress', { completed: reviewCompleted, remaining: reviewRemaining })}</p>{/if}</div></header>
+              <div class="review-queue">
+                {#each orderedWikis as wiki (wiki.id)}
+                  {@const pending = snapshot.reviews.filter((review) => review.wikiId === wiki.id && !review.excluded)}
+                  {@const excluded = snapshot.reviews.filter((review) => review.wikiId === wiki.id && review.excluded)}
+                  {#if pending.length > 0 || excluded.length > 0}
+                    <section aria-labelledby={`queue-${wiki.id}`}>
+                      <h2 id={`queue-${wiki.id}`}><WikiIcon size={20} />{wiki.name}<small>{pending.length}</small></h2>
+                      <div class="pending-list">
+                        {#each pending as review (reviewKey(review))}
+                          <button onclick={() => openReview(review)}><FileText size={17} aria-hidden="true" /><span><strong>{review.draft.title}</strong><small>{review.sourceName}</small></span><span>{snapshot.reanalyzingReviewIds.includes(review.conceptId) ? t('review-queue-updating') : wiki.restrictions.length > 0 ? t('review-queue-restricted') : t('review-revision', { revision: review.sourceRevision })}</span></button>
+                        {/each}
+                      </div>
+                      {#if excluded.length > 0}<details class="review-excluded-list"><summary>{t('review-queue-excluded', { count: excluded.length })}</summary><div class="pending-list">{#each excluded as review (reviewKey(review))}<button onclick={() => openReview(review)}><FileText size={17} aria-hidden="true" /><span><strong>{review.draft.title}</strong><small>{review.sourceName}</small></span><span>{t('desktop-review-state-excluded')}</span></button>{/each}</div></details>{/if}
+                    </section>
+                  {/if}
+                {/each}
+                {#if !snapshot.reviews.some((review) => !review.excluded)}<div class="table-empty"><CheckCircle2 size={28} aria-hidden="true" /><strong>{t('review-empty-title')}</strong><p>{t('review-empty-body')}</p></div>{/if}
+              </div>
+            {/if}
           {:else if destination === 'settings'}
             <div class="settings-layout">
 
@@ -3911,45 +4043,7 @@
   </div>
 {/if}
 
-{#if selectedReview && editDraft}
-  <div class="drawer-backdrop" role="presentation" onclick={(event) => { if (event.currentTarget === event.target) closeReview(); }}>
-    <div class="side-drawer review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-title">
-      <header>
-        <div class="review-title-copy"><p class="section-label">{t(selectedReview.excluded ? 'desktop-review-state-excluded' : 'desktop-review-state-draft')}</p><h2 id="review-title">{selectedReview.sourceName}</h2><small>{t('review-revision', { revision: selectedReview.sourceRevision })}</small></div>
-        <button class="icon-button" aria-label={t('action-close')} onclick={closeReview}>×</button>
-      </header>
-      <p class="review-introduction">{t(selectedReview.excluded ? 'review-excluded-body' : 'review-draft-body')}</p>
-      <div class="review-comparison">
-        <section aria-labelledby="review-evidence-title">
-          <h3 id="review-evidence-title">{t('desktop-evidence')}</h3>
-          {#if reviewEvidenceLoading}
-            <p class="loading review-evidence-loading" role="status" aria-live="polite"><Spinner size="small" /><span>{t('review-evidence-loading')}</span></p>
-          {:else if snapshot.reviewEvidence?.status === 'ready' && snapshot.reviewEvidence.conceptId === selectedReview.conceptId && snapshot.reviewEvidence.sourceRevision === selectedReview.sourceRevision}
-            <div class="evidence-list">{#each snapshot.reviewEvidence.excerpts as line (line.ordinal)}<blockquote>{line.text}</blockquote>{/each}</div>
-            {#if snapshot.reviewEvidence.nextOrdinal != null}<button class="text-action" onclick={loadMoreEvidence}>{t('desktop-load-more')}</button>{/if}
-          {:else}
-            <p class="evidence-warning">{reviewEvidenceIssueMessage()}</p>
-            {#if reviewEvidenceCanRetry()}<button class="text-action" onclick={retryReviewEvidence}>{t('review-evidence-retry')}</button>{/if}
-          {/if}
-        </section>
-        <section aria-labelledby="review-proposal-title">
-          <h3 id="review-proposal-title">{t('desktop-proposal')}</h3>
-          <TextField label={t('review-edit-title')} bind:value={editDraft.title} maxlength={200} disabled={selectedReviewIsReadOnly() || selectedReviewIsUpdating()} />
-          <TextField label={t('review-edit-summary')} bind:value={editDraft.summary} maxlength={2000} rows={8} multiline disabled={selectedReviewIsReadOnly() || selectedReviewIsUpdating()} />
-        </section>
-      </div>
-      {#if selectedReviewIsUpdating()}<p class="loading review-evidence-loading" role="status" aria-live="polite"><Spinner size="small" /><span>{t('desktop-journey-knowledge-reanalyzing')}</span></p>{/if}
-      {#if selectedReviewIsReadOnly()}<p class="evidence-warning" role="status">{t('review-okf-read-only')}</p>{/if}
-      <footer>
-        <div class="review-secondary-actions">
-          <button class="secondary" onclick={closeReview} disabled={actionBusy}>{t('review-later')}</button>
-          {#if !selectedReview.excluded}<button class="secondary exclude-review" onclick={() => decideReview('reject')} disabled={actionBusy || selectedReviewIsUpdating() || !evidenceIsCurrent()}>{t('review-exclude')}</button>{/if}
-        </div>
-        <button class="primary" onclick={() => decideReview('approve')} disabled={actionBusy || selectedReviewIsReadOnly() || selectedReviewIsUpdating() || !evidenceIsCurrent()}>{t('review-approve-next')}</button>
-      </footer>
-    </div>
-  </div>
-{/if}
+
 
 </div>
 
@@ -3969,6 +4063,15 @@
       <p class="section-label">{t('desktop-close-eyebrow')}</p><h2 id="close-title">{t('close-dialog-title')}</h2>
       <p>{t('desktop-hide-services')}</p>
       <div><button class="primary" onclick={() => applyCloseChoice('hide')}>{t('desktop-hide-tray')}</button><button class="danger" onclick={() => applyCloseChoice('quit')}>{t('desktop-quit')}</button><button class="secondary" onclick={() => applyCloseChoice('cancel')}>{t('action-cancel')}</button></div>
+    </div>
+  </div>
+{/if}
+
+{#if reviewLeavePending}
+  <div class="modal-backdrop close-confirmation-backdrop" role="presentation">
+    <div class="close-dialog" role="dialog" aria-modal="true" aria-labelledby="review-discard-title">
+      <h2 id="review-discard-title">{t('review-discard-title')}</h2><p>{t('review-discard-body')}</p>
+      <div><button class="primary" onclick={() => resolveReviewLeave(false)}>{t('review-continue-editing')}</button><button class="danger" onclick={() => resolveReviewLeave(true)}>{t('review-discard-action')}</button></div>
     </div>
   </div>
 {/if}

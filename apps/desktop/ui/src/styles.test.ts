@@ -91,20 +91,6 @@ describe('desktop style tokens', () => {
     expect(stickyOffsets).toEqual(['-28px', '-24px']);
   });
 
-  it('keeps long review content inside the review surface', () => {
-    const stylesheet = desktopStyles();
-    const drawerRule = stylesheet.match(/\.review-drawer\s*{([^}]*)}/)?.[1];
-    const titleRule = stylesheet.match(/\.review-title-copy h2\s*{([^}]*)}/)?.[1];
-    const evidenceRule = stylesheet.match(/\.evidence-list blockquote\s*{([^}]*)}/)?.[1];
-    const comparisonRule = stylesheet.match(/\.review-comparison\s*{([^}]*)}/)?.[1];
-
-    expect(drawerRule).toContain('overflow-x: hidden');
-    expect(drawerRule).toContain('min-width: 0');
-    expect(titleRule).toContain('overflow-wrap: anywhere');
-    expect(evidenceRule).toContain('overflow-wrap: anywhere');
-    expect(comparisonRule).toContain('minmax(260px, .88fr)');
-  });
-
   it('keeps recovery guidance readable in every appearance', () => {
     const stylesheet = desktopStyles();
     const themeBlocks = Array.from(

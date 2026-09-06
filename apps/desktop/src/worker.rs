@@ -523,10 +523,12 @@ pub enum WorkerCommand {
         concept_id: Uuid,
         expected_review_version: ReviewVersionToken,
         draft: EnrichmentDraft,
+        completed: oneshot::Sender<Result<(), String>>,
     },
     Reject {
         concept_id: Uuid,
         source_revision: u32,
+        completed: oneshot::Sender<Result<(), String>>,
     },
     LoadReviewEvidence {
         request_id: Uuid,
@@ -865,6 +867,7 @@ enum BackgroundCompletion {
     Approve {
         concept_id: Uuid,
         result: Result<(), String>,
+        completed: oneshot::Sender<Result<(), String>>,
     },
     VerifyManagedConcept {
         collection_id: Uuid,
@@ -2627,6 +2630,7 @@ pub(crate) async fn run_worker(
                         concept_id,
                         expected_review_version,
                         draft,
+                        completed,
                     } => {
                         if !approving_reviews.insert(concept_id) {
                             send(
@@ -2635,6 +2639,7 @@ pub(crate) async fn run_worker(
                                     "Ese documento ya se está publicando".into(),
                                 ),
                             ).await;
+                            let _ = completed.send(Err("review_already_running".into()));
                         } else {
                             spawn_review_approval(
                                 &services,
@@ -2642,21 +2647,25 @@ pub(crate) async fn run_worker(
                                 concept_id,
                                 expected_review_version,
                                 draft,
+                                completed,
                             );
                         }
                     }
                     WorkerCommand::Reject {
                         concept_id,
                         source_revision,
+                        completed,
                     } => {
-                        if let Err(error) = run_service_io(&services, move |services| {
+                        let result = run_service_io(&services, move |services| {
                             services.reject_review(concept_id, source_revision)
-                        }).await {
+                        }).await;
+                        if let Err(error) = &result {
                             send(&events, WorkerEvent::Error(format!("No se pudo excluir el borrador: {error:#}"))).await;
                         } else {
                             send(&events, WorkerEvent::Notice("Borrador excluido; permanece local y puede revisarse más adelante".into())).await;
                         }
                         refresh_content_views(&services, &events).await;
+                        let _ = completed.send(result);
                     }
                     WorkerCommand::LoadReviewEvidence {
                         request_id,
@@ -3568,9 +3577,9 @@ pub(crate) async fn run_worker(
                         }
                         refresh_computations(&services, &events).await;
                     }
-                    Some(Ok(BackgroundCompletion::Approve { concept_id, result })) => {
+                    Some(Ok(BackgroundCompletion::Approve { concept_id, result, completed })) => {
                         approving_reviews.remove(&concept_id);
-                        match result {
+                        match &result {
                             Ok(()) => send(
                                 &events,
                                 WorkerEvent::Notice("Documento revisado y publicado".into()),
@@ -3583,6 +3592,7 @@ pub(crate) async fn run_worker(
                             ).await,
                         }
                         refresh_content_views(&services, &events).await;
+                        let _ = completed.send(result);
                         spawn_next_wiki_health(
                             &services,
                             &mut background,
@@ -6154,6 +6164,7 @@ fn spawn_review_approval(
     concept_id: Uuid,
     expected_review_version: ReviewVersionToken,
     draft: EnrichmentDraft,
+    completed: oneshot::Sender<Result<(), String>>,
 ) {
     let services = Arc::clone(services);
     background.spawn(async move {
@@ -6180,7 +6191,11 @@ fn spawn_review_approval(
             }
             Err(error) => Err(error),
         };
-        BackgroundCompletion::Approve { concept_id, result }
+        BackgroundCompletion::Approve {
+            concept_id,
+            result,
+            completed,
+        }
     });
 }
 

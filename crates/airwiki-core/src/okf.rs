@@ -260,10 +260,13 @@ impl OkfPublisher {
         source: &SourceDocumentRecord,
         reviewed_at: DateTime<Utc>,
     ) -> Result<String> {
-        if concept.status != DocumentStatus::NeedsReview
-            && concept.status != DocumentStatus::Publishing
-            && concept.status != DocumentStatus::Published
-        {
+        if !matches!(
+            concept.status,
+            DocumentStatus::NeedsReview
+                | DocumentStatus::Excluded
+                | DocumentStatus::Publishing
+                | DocumentStatus::Published
+        ) {
             bail!("only reviewed candidates can be rendered as OKF");
         }
         let profile = OkfConcept::from_records(concept, source, reviewed_at);

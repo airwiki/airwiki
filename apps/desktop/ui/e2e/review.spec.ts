@@ -3,6 +3,32 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { captureVisual, configureVisualPreferences, runVisualMatrix, setCssViewport, visualViewports } from './visual.js';
 
+async function assertReviewLayout(): Promise<void> {
+  const layout = await browser.execute(() => {
+    const action = document.querySelector('.review-actions .primary')?.getBoundingClientRect();
+    const footer = document.querySelector('.review-actions')?.getBoundingClientRect();
+    const workspace = document.querySelector('.drive-page')?.getBoundingClientRect();
+    const content = document.querySelector('.review-content')?.getBoundingClientRect();
+    return {
+      overflow: document.documentElement.scrollWidth > innerWidth,
+      approvalVisible: !!action && action.top >= 0 && action.bottom <= innerHeight,
+      footerFillsWidth: !!footer && !!workspace && Math.abs(footer.left - workspace.left) < 1 && Math.abs(footer.right - workspace.right) < 1,
+      footerAtBottom: !!footer && !!workspace && Math.abs(footer.bottom - workspace.bottom) < 1,
+      contentReserved: !!content && !!footer && content.bottom <= footer.top,
+    };
+  });
+  expect(layout).toEqual({ overflow: false, approvalVisible: true, footerFillsWidth: true, footerAtBottom: true, contentReserved: true });
+  await browser.execute(() => {
+    const content = document.querySelector('.review-content');
+    content?.scrollTo({ top: content.scrollHeight, behavior: 'instant' });
+  });
+  expect(await browser.execute(() => {
+    const editor = document.querySelector('#review-proposal textarea')?.getBoundingClientRect();
+    const content = document.querySelector('.review-content')?.getBoundingClientRect();
+    return !!editor && !!content && editor.bottom <= content.bottom && editor.bottom > content.top;
+  })).toBe(true);
+}
+
 async function assertReviewVisualMatrix(): Promise<void> {
   for (const locale of ['en', 'es'] as const) {
     for (const theme of ['light', 'dark'] as const) {
@@ -12,7 +38,7 @@ async function assertReviewVisualMatrix(): Promise<void> {
       await $('.review-actions .primary').waitForEnabled();
       for (const viewport of visualViewports) {
         await setCssViewport(viewport.width, viewport.height);
-        await browser.execute(() => document.querySelector('.drive-page')?.scrollTo({ top: 0, behavior: 'instant' }));
+        await browser.execute(() => document.querySelector('.review-content')?.scrollTo({ top: 0, behavior: 'instant' }));
         const compact = await $('.review-view-switch').isDisplayed();
         await captureVisual(`${locale}-${theme}-review-${compact ? 'proposal' : 'comparison'}`);
         if (compact) {
@@ -21,14 +47,7 @@ async function assertReviewVisualMatrix(): Promise<void> {
           await captureVisual(`${locale}-${theme}-review-evidence`);
           await $('.review-view-switch [aria-controls="review-proposal"]').click();
         }
-        const layout = await browser.execute(() => {
-          const action = document.querySelector('.review-actions .primary')?.getBoundingClientRect();
-          return {
-            overflow: document.documentElement.scrollWidth > innerWidth,
-            approvalVisible: !!action && action.top >= 0 && action.bottom <= innerHeight,
-          };
-        });
-        expect(layout).toEqual({ overflow: false, approvalVisible: true });
+        await assertReviewLayout();
       }
     }
   }
@@ -75,6 +94,13 @@ describe('AirWiki review with real storage and IPC', () => {
     await $('.review-actions .primary').waitForEnabled();
     await expect($('#review-evidence')).toHaveText(expect.stringContaining('Create a local backup and verify its checksum before beginning.'));
     if (runVisualMatrix) await assertReviewVisualMatrix();
+    else {
+      for (const viewport of visualViewports) {
+        await setCssViewport(viewport.width, viewport.height);
+        await assertReviewLayout();
+      }
+      await setCssViewport(1440, 900);
+    }
     await $('#review-proposal input').setValue('Maintenance approved by a person');
     await requestQuitIntent();
     await $('#review-discard-title').waitForDisplayed();
@@ -113,7 +139,9 @@ describe('AirWiki review with real storage and IPC', () => {
     await expect($('.review-workspace h1')).toHaveText('Review recovery');
     await $('.review-actions .primary').waitForEnabled();
     expect(await $('.review-actions').$('button=Exclude from this Wiki').isExisting()).toBe(false);
-    await $('.review-workspace-heading').$('button=Back to review queue').click();
+    await $('.review-actions .primary').click();
+    await $('h1=To review').waitForDisplayed();
+    await expect($('.page-heading')).toHaveText(expect.stringContaining('Confirmed decisions: 1 · Pending: 0'));
 
     await $('.workspace-destinations').$('button=Library').click();
     await $('.wiki-row').click();

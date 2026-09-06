@@ -243,6 +243,7 @@
   let guidedRepairConfirmed = false;
   let computationSaveTargets: Record<string, string> = {};
   let mainScrollRegion: HTMLElement | null = null;
+  let reviewScrollRegion: HTMLElement | null = null;
   let orderedWikis: WikiSummary[];
   let attentionWikis: WikiSummary[];
   let filteredLibraryWikis: WikiSummary[];
@@ -389,12 +390,16 @@
 
   let mainScrollGeneration = 0;
 
+  function currentMainScrollRegion(): HTMLElement | null {
+    return destination === 'review' && selectedReview ? reviewScrollRegion : mainScrollRegion;
+  }
+
   function scrollMainTo(top: number) {
     const generation = ++mainScrollGeneration;
     const target = Math.max(0, top);
     void tick().then(() => {
       if (generation !== mainScrollGeneration) return;
-      mainScrollRegion?.scrollTo({ top: target, left: 0, behavior: 'auto' });
+      currentMainScrollRegion()?.scrollTo({ top: target, left: 0, behavior: 'auto' });
     });
   }
 
@@ -524,7 +529,7 @@
   }
 
   function currentNavigation(hash = activeNavigationHash, page?: KnowledgePageInput | null): NavigationEntry {
-    const scrollTop = mainScrollRegion?.scrollTop ?? 0;
+    const scrollTop = currentMainScrollRegion()?.scrollTop ?? 0;
     const previousEntry = activeNavigationId ? navigationEntries.get(activeNavigationId) : null;
     const index = currentPageIndex();
     const indexScrollTop = index && !index.closest('[hidden]') ? index.scrollTop : previousEntry?.indexScrollTop ?? 0;
@@ -3423,7 +3428,7 @@
               {/if}
               {#if !snapshot.model?.active && !activeSearchSession}
                 {@const readinessKey = localSearchState(snapshot) === 'preparing' ? 'desktop-search-preparing' : 'desktop-search-unavailable'}
-                <div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t(`${readinessKey}-title`)}</h2><p>{t(`${readinessKey}-body`)}</p></div>
+                <div class="search-welcome" role="status"><Sparkles size={32} aria-hidden="true" /><h2>{t(`${readinessKey}-title`)}</h2><p>{t(`${readinessKey}-body`)}</p><button class="secondary" onclick={() => openSettings('general')}>{t('desktop-search-preparing-action')}</button></div>
               {:else if searchBusy && !activeSearchSummary}
                 <div class="search-results" aria-busy="true"><LoadingState label={t('search-running')} detail={t('desktop-search-loading-detail')} tone="ai" /><LoadingSkeleton variant="results" rows={3} /></div>
               {:else if activeSearchSummary}
@@ -3609,7 +3614,7 @@
           {:else if destination === 'review'}
             {#if selectedReview && editDraft}
               {#key reviewKey(selectedReview)}
-                <ReviewWorkspace review={selectedReview} draft={editDraft} evidence={snapshot.reviewEvidence}
+                <ReviewWorkspace review={selectedReview} draft={editDraft} evidence={snapshot.reviewEvidence} bind:scrollRegion={reviewScrollRegion}
                   evidenceReady={reviewEvidenceReady} evidenceLoading={reviewEvidenceLoading} evidenceLoadingMore={reviewEvidenceLoadingMore}
                   evidenceIssue={reviewEvidenceIssueMessage(selectedReview, snapshot.reviewEvidence, reviewEvidenceLoadFailed, t)} evidenceCanRetry={reviewEvidenceRetryAvailable}
                   readOnly={reviewReadOnly} updating={reviewUpdating} stale={reviewStale} canReload={currentReview !== null}
@@ -3772,7 +3777,6 @@
           onpublic={updatePublicSearch}
           onsearch={submitGlobalSearch}
           onopen={openGlobalSearch}
-          onopenmodelsettings={() => openSettings('general')}
         />
 
       </header>

@@ -18,7 +18,6 @@
   export let onpublic: (value: boolean) => void;
   export let onsearch: () => void;
   export let onopen: () => void;
-  export let onopenmodelsettings: () => void;
   $: ready = state === 'ready';
   $: unavailableKey = state === 'preparing' ? 'desktop-search-preparing' : 'desktop-search-unavailable';
 </script>
@@ -33,5 +32,4 @@
   </div>
   <kbd aria-hidden="true">{platform === 'macOs' ? '⌘K' : 'Ctrl+K'}</kbd>
   <button type="submit" aria-label={busy ? t('search-running') : ready ? t('desktop-search-evidence') : t(`${unavailableKey}-title`)} title={!ready ? t(`${unavailableKey}-title`) : undefined} disabled={busy || !ready || !question.trim()}>{#if busy}<Spinner size="small" />{:else}<Search size={17} aria-hidden="true" />{/if}</button>
-  {#if !ready}<button class="search-status-action" type="button" onclick={onopenmodelsettings}>{t('desktop-search-preparing-action')}</button>{/if}
 </form>

@@ -30,10 +30,13 @@
   export let onretry: () => void;
   export let onmore: () => void;
   export let ondecide: (decision: 'approve' | 'reject') => void;
+  export let scrollRegion: HTMLElement | null = null;
   let panel: 'evidence' | 'proposal' = 'proposal';
 </script>
 
 <section class="review-workspace" aria-label={t('review-workspace-label')}>
+  <div class="review-content" bind:this={scrollRegion}>
+  <div class="review-content-inner">
   <header class="review-workspace-heading">
     <button class="text-action" onclick={onback} disabled={busy}><ArrowLeft size={16} aria-hidden="true" />{t('review-back-queue')}</button>
     <p class="section-label">{review.wikiName} · {t(review.excluded ? 'desktop-review-state-excluded' : 'desktop-review-state-draft')}</p>
@@ -68,15 +71,21 @@
       {#if dirty}<p class="review-edit-state">{t('review-edits-unsaved')}</p>{/if}
     </section>
   </div>
+  </div>
+  </div>
   <footer class="review-actions">
+    <div class="review-actions-inner">
     <p class="review-publish-scope">{t('review-publish-scope')}</p>
     <div class="review-secondary-actions"><button class="secondary" onclick={onback} disabled={busy}>{t('review-later')}</button>{#if !review.excluded}<button class="secondary" onclick={() => ondecide('reject')} disabled={busy || updating || stale || !evidenceReady || evidenceLoadingMore}>{t('review-exclude')}</button>{/if}</div>
     <button class="primary" onclick={() => ondecide('approve')} disabled={busy || readOnly || updating || stale || !evidenceReady || evidenceLoadingMore}>{#if busy}<Spinner size="small" /><span role="status">{t('review-decision-saving')}</span>{:else}{t('review-approve-next')}{/if}</button>
+    </div>
   </footer>
 </section>
 
 <style>
-  .review-workspace { container-type: inline-size; display: block; max-width: 1240px; margin: 0 auto; min-width: 0; }
+  .review-workspace { display: grid; grid-template-rows: minmax(0, 1fr) auto; flex: 1; min-height: 0; min-width: 0; }
+  .review-content { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 28px 38px 24px; }
+  .review-content-inner { container-type: inline-size; max-width: 1240px; margin: 0 auto; }
   .review-workspace-heading { display: block; padding: 0; border: 0; }
   .review-workspace-heading > button { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 16px; padding-inline: 0; }
   h1 { margin: 8px 0; font: 650 clamp(26px, 3vw, 34px)/1.18 var(--font-display); overflow-wrap: anywhere; }
@@ -98,11 +107,15 @@
   .review-columns :global(.control-field + .control-field) { margin-top: 18px; }
   .review-publish-scope { flex-basis: 100%; margin: 0; color: var(--muted); font: 400 12px/1.5 var(--font-ui); }
   .review-edit-state { margin-top: 12px; }
-  .review-actions { position: sticky; bottom: -24px; z-index: 2; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 0 24px; border-top: 1px solid var(--line); background: var(--slate); }
+  .review-actions { padding: 16px 38px 20px; border-top: 1px solid var(--line); background: var(--slate); }
+  .review-actions-inner { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; max-width: 1240px; margin: 0 auto; }
+  @media (max-width: 1100px) {
+    .review-content { padding: 24px 16px; }
+    .review-actions { padding: 14px 16px 16px; }
+  }
   @container (max-width: 780px) {
     .review-view-switch { display: flex; flex-wrap: wrap; }
     .review-columns { grid-template-columns: minmax(0, 1fr); }
     .review-columns[data-panel='proposal'] #review-evidence, .review-columns[data-panel='evidence'] #review-proposal { display: none; }
-    .review-actions { bottom: -16px; padding-bottom: 16px; }
   }
 </style>

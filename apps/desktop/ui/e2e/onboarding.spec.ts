@@ -1109,7 +1109,13 @@ describe('AirWiki real IPC journey', () => {
     const onboarding = await $('main.onboarding:not(.startup)');
     await expect(onboarding).toBeDisplayed();
 
+    await selectValue('main.onboarding:not(.startup) select', 0, 'es');
+    await expect($('.onboarding-page h1')).toHaveText('Idioma');
+    await expect($('.onboarding-next')).toHaveText('Continuar');
+    await expect($('.onboarding-back')).toHaveText('Atrás');
     await selectValue('main.onboarding:not(.startup) select', 0, 'en');
+    await expect($('.onboarding-page h1')).toHaveText('Language');
+    await expect($('.onboarding-next')).toHaveText('Continue');
     const language = required((await $$('main.onboarding:not(.startup) select'))[0], 'language preference');
     await expect(language).toHaveValue('en');
     await $('button.onboarding-next').click();
@@ -1157,14 +1163,15 @@ describe('AirWiki real IPC journey', () => {
     expect(await measureNavigationPaintP95()).toBeLessThanOrEqual(100);
 
     const globalSearch = await $('#global-search');
-    const searchUnavailable = await browser.execute(() => document.querySelector<HTMLButtonElement>('.global-search button[type="submit"]')?.disabled === true);
-    if (searchUnavailable) {
-      await expect($('.search-status-action')).toHaveText(expect.stringContaining('View local AI status'));
-    }
+    const searchUnavailable = await browser.execute(() => document.querySelector('.global-search')?.classList.contains('unavailable') === true);
+    expect(await $('.global-search .search-status-action').isExisting()).toBe(false);
     await globalSearch.click();
     expect(await browser.execute(() => document.activeElement?.id)).toBe('global-search');
     await globalSearch.setValue('focus regression');
     await expect(globalSearch).toHaveValue('focus regression');
+    if (searchUnavailable) {
+      await expect($('.search-welcome button')).toHaveText('View local AI status');
+    }
     await globalSearch.clearValue();
 
     const devicePixelRatio = await browser.execute(() => window.devicePixelRatio || 1);

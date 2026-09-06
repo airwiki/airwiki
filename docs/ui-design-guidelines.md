@@ -222,6 +222,9 @@ an explicit per-app control, separate from the Wiki's AI access permissions.
 Preparation language in global search requires an actual preparation in progress;
 an unavailable local runtime instead points to its state in General Settings.
 An already active runtime remains usable while another model awaits restart.
+Keep the global search bar to one row. When a person enters a query while local
+search is unavailable or preparing, show the explanation and Settings recovery
+action in the search page rather than a permanent second row in the input.
 
 Search groups prioritize concept titles, excerpts and provenance. Keep the Wiki
 name, source owner and total match count in a compact header; extended Wiki
@@ -256,6 +259,10 @@ or an ongoing update. Show evidence and editable title/summary side by side
 when they fit; otherwise switch between them without recreating the edited
 draft. Keep the decision actions reachable during comparison and wrap long
 source names and excerpts.
+The decision footer fills the review region's width and occupies its own bottom
+row. Evidence and proposal share one scrolling content region above it; the
+footer must never cover the end of the editor. Returning from Settings restores
+that content region's position.
 
 Approval and exclusion advance only after the worker confirms the actual
 operation. An enqueue acknowledgement is not success. Count confirmed decisions

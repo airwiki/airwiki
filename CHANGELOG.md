@@ -22,6 +22,14 @@ All notable user-visible changes to AirWiki will be documented here. The project
   Trust, freshness and warnings stay near the title; expanded metadata follows
   the content. Appearance and typography roles now share one token file.
 
+- Made the review footer fill its workspace width and reserve its own space,
+  keeping the end of the editor reachable. Global search stays on one row;
+  local-AI recovery guidance appears in the search page when needed.
+- Switching the onboarding language now immediately translates the current
+  page, progress label and navigation buttons.
+- Fixed approval of a previously excluded proposal with current source evidence.
+  Stale source evidence still blocks approval and preserves the proposal for retry.
+
 - Added a protected platform-split release-candidate channel. It can publish a
   Developer ID signed and notarized Apple-silicon macOS RC beside two clearly
   labeled unsigned Windows technical-beta MSIs, while remaining a non-Latest,

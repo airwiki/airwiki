@@ -5,6 +5,8 @@ compile_error!("the desktop e2e secret store must never be compiled into a relea
 mod autostart;
 mod computations;
 mod connectivity_platform;
+#[cfg(feature = "e2e")]
+mod e2e_fixtures;
 mod external_navigation;
 mod i18n;
 mod integrations;
@@ -44,7 +46,7 @@ use anyhow::{Context, Result};
 use pulldown_cmark::{CodeBlockKind, Event as MarkdownEvent, HeadingLevel, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
 use tauri::{
-    AppHandle, Emitter, Manager, WindowEvent,
+    AppHandle, Emitter, Manager, RunEvent, WindowEvent,
     image::Image,
     ipc::Channel,
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -80,6 +82,7 @@ const TRAY_ICON_HEIGHT: u32 = 24;
 const TRAY_ICON_RGBA: &[u8; 2_304] =
     include_bytes!("../../../resources/branding/airwiki-tray.rgba");
 const NATIVE_MENU_COMMAND_EVENT: &str = "native-menu-command";
+const QUIT_REQUESTED_EVENT: &str = "quit-requested";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NativeMenuCommand {
@@ -112,7 +115,7 @@ impl NativeMenuCommand {
 
 fn handle_native_menu_event(app: &AppHandle, id: &str) {
     if id == "native-menu-quit" {
-        begin_shutdown(app.clone());
+        request_shutdown(app);
     } else if let Some(command) = NativeMenuCommand::from_menu_id(id) {
         let _ = app.emit(NATIVE_MENU_COMMAND_EVENT, command.event_payload());
     }
@@ -285,6 +288,7 @@ struct AppRuntime {
     requests: Arc<Mutex<RequestTracker>>,
     confirmation_gate: Arc<Semaphore>,
     tray_operational: AtomicBool,
+    ui_connected: AtomicBool,
     exiting: AtomicBool,
     worker_finished: Mutex<Option<oneshot::Receiver<()>>>,
 }
@@ -2192,6 +2196,9 @@ fn connect(runtime: tauri::State<'_, AppRuntime>, events: Channel<UiEventEnvelop
     let mut snapshot = receiver.borrow().snapshot.clone();
     drop(snapshot_receiver);
     sync_integration_request_state(&mut snapshot, &runtime.requests);
+    // The WebView installs its quit listener before connecting. After that,
+    // native exit intents must give it a chance to resolve unsaved edits.
+    runtime.ui_connected.store(true, Ordering::Release);
     tauri::async_runtime::spawn(async move {
         while receiver.changed().await.is_ok() {
             let published = receiver.borrow_and_update().clone();
@@ -3823,6 +3830,20 @@ fn quit_completely(app: AppHandle) {
     begin_shutdown(app);
 }
 
+fn request_shutdown(app: &AppHandle) {
+    let runtime = app.state::<AppRuntime>();
+    if runtime.exiting.load(Ordering::Acquire) {
+        return;
+    }
+    if runtime.ui_connected.load(Ordering::Acquire) {
+        show_main_window(app);
+        let _ = app.emit(QUIT_REQUESTED_EVENT, ());
+    } else {
+        // Startup can fail before a WebView connects; exiting must still work.
+        begin_shutdown(app.clone());
+    }
+}
+
 fn begin_shutdown(app: AppHandle) {
     let runtime = app.state::<AppRuntime>();
     if runtime.exiting.swap(true, Ordering::AcqRel) {
@@ -3892,7 +3913,7 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
-            "quit" => begin_shutdown(app.clone()),
+            "quit" => request_shutdown(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -6901,6 +6922,7 @@ fn main() -> Result<()> {
             requests,
             confirmation_gate: Arc::new(Semaphore::new(1)),
             tray_operational: AtomicBool::new(false),
+            ui_connected: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
             worker_finished: Mutex::new(Some(worker_finished)),
         })
@@ -7045,7 +7067,7 @@ fn main() -> Result<()> {
                         let _ = window.emit("close-choice-required", ());
                     }
                     CloseAction::Quit => {
-                        begin_shutdown(app.clone());
+                        request_shutdown(app);
                     }
                 }
             }
@@ -7113,7 +7135,17 @@ fn main() -> Result<()> {
             hide_to_tray,
             quit_completely
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
+        .map(|application| {
+            application.run(|app, event| {
+                if let RunEvent::ExitRequested { api, .. } = event
+                    && !app.state::<AppRuntime>().exiting.load(Ordering::Acquire)
+                {
+                    api.prevent_exit();
+                    request_shutdown(app);
+                }
+            });
+        })
         .map_err(|error| anyhow::anyhow!(error.to_string()));
     drop(logging_guard);
     result
@@ -7459,6 +7491,7 @@ mod tests {
             requests: Arc::new(Mutex::new(RequestTracker::default())),
             confirmation_gate: Arc::new(Semaphore::new(1)),
             tray_operational: AtomicBool::new(false),
+            ui_connected: AtomicBool::new(false),
             exiting: AtomicBool::new(false),
             worker_finished: Mutex::new(Some(worker_finished)),
         }

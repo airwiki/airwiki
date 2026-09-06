@@ -1790,6 +1790,87 @@ describe('AirWiki wiki workspace', () => {
     }
   });
 
+  it.each(['native', 'close-choice'] as const)('resolves edited proposals before quitting through %s', async (origin) => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    reviewSessionFixture();
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await screen.findByText('First proposal source evidence');
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Resumen propuesto' }), { target: { value: 'Retain before quitting' } });
+    const requestExit = async () => {
+      await act(() => { tauriListeners.get(origin === 'native' ? 'quit-requested' : 'close-choice-required')?.({ payload: null }); });
+      if (origin === 'close-choice') await fireEvent.click(await screen.findByRole('button', { name: 'Salir completamente' }));
+    };
+    await requestExit();
+    const dialog = await screen.findByRole('dialog', { name: '¿Descartar los cambios de esta propuesta?' });
+    expect(quitCompletely).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Seguir revisando' })).toHaveFocus());
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Seguir revisando' }));
+    expect(screen.getByRole('textbox', { name: 'Resumen propuesto' })).toHaveValue('Retain before quitting');
+    await requestExit();
+    await fireEvent.click(await screen.findByRole('button', { name: 'Descartar cambios y salir' }));
+    await waitFor(() => expect(quitCompletely).toHaveBeenCalledOnce());
+    expect(approveReview).not.toHaveBeenCalled();
+    expect(rejectReview).not.toHaveBeenCalled();
+  });
+
+  it.each(['confirmed', 'failed'] as const)('waits for a pending review decision before processing native quit: %s', async (outcome) => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    const { second } = reviewSessionFixture();
+    let settle: () => void = vi.fn();
+    vi.mocked(approveReview).mockImplementationOnce(() => new Promise<void>((resolve, reject) => {
+      settle = outcome === 'confirmed' ? resolve : () => reject(new Error('Synthetic publication failure'));
+    }));
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /First proposal.*first-source.md/ }));
+    await screen.findByText('First proposal source evidence');
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Título propuesto' }), { target: { value: 'Edited before decision' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Aprobar y continuar' }));
+    await act(() => {
+      tauriListeners.get('quit-requested')?.({ payload: null });
+      tauriListeners.get('quit-requested')?.({ payload: null });
+    });
+    expect(quitCompletely).not.toHaveBeenCalled();
+    expect(screen.getByText('Guardando decisión…')).toBeVisible();
+    if (outcome === 'confirmed') await deliverSnapshot(null, { reviews: [second] });
+    await act(() => settle());
+    if (outcome === 'confirmed') {
+      await waitFor(() => expect(quitCompletely).toHaveBeenCalledOnce());
+      expect(loadReviewEvidence).toHaveBeenCalledOnce();
+    } else {
+      await screen.findByRole('dialog', { name: '¿Descartar los cambios de esta propuesta?' });
+      expect(quitCompletely).not.toHaveBeenCalled();
+      await fireEvent.click(screen.getByRole('button', { name: 'Seguir revisando' }));
+      expect(screen.getByRole('textbox', { name: 'Título propuesto' })).toHaveValue('Edited before decision');
+      expect(screen.getByText(/No se pudo confirmar la decisión/)).toBeVisible();
+    }
+  });
+
+  it('preserves edited settings on native quit until the person decides to discard them', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    render(App);
+    await openSettingsSection('general');
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Al cerrar' }), { target: { value: 'hide_to_tray' } });
+    await act(() => { tauriListeners.get('quit-requested')?.({ payload: null }); });
+    await screen.findByRole('dialog', { name: '¿Descartar los cambios de General?' });
+    expect(quitCompletely).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Continuar editando' }));
+    expect(screen.getByRole('combobox', { name: 'Al cerrar' })).toHaveValue('hide_to_tray');
+    await act(() => { tauriListeners.get('quit-requested')?.({ payload: null }); });
+    await fireEvent.click(await screen.findByRole('button', { name: 'Descartar cambios' }));
+    await waitFor(() => expect(quitCompletely).toHaveBeenCalledOnce());
+    expect(updatePreferences).not.toHaveBeenCalled();
+  });
+
+  it('quits a clean view directly after the native request', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    render(App);
+    await screen.findByRole('heading', { name: 'Tus wikis' });
+    await act(() => { tauriListeners.get('quit-requested')?.({ payload: null }); });
+    expect(quitCompletely).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('keeps review decisions unavailable while the Wiki update replaces that draft', async () => {
     const wiki = snapshot.wikis[0];
     wiki.needsReviewCount = 1;

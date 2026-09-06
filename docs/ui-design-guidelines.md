@@ -248,10 +248,13 @@ revision, request ID, draft version, restrictions and reanalysis state still
 gate each decision. A changed or withdrawn proposal keeps the editor visible
 with actions blocked; opening its current version requires resolving any edits.
 
-Leaving an edited proposal through application navigation or the close-choice
-dialog offers continuing the review or discarding those edits. Discarding
+Leaving an edited proposal through application navigation or a native quit
+request offers continuing the review or discarding those edits. This includes
+the menu, tray and window preference to quit directly. Discarding
 continues the requested navigation; it neither approves nor excludes. Returning
 from Settings resolves the proposal again and requests current evidence.
+Unsaved preferences receive the same protection on quit. A decision already
+in progress finishes before the application exits; failure preserves edits.
 Approval can make content accessible under existing Wiki permissions; its copy
 must explain that consequence without implying new grants or verification.
 

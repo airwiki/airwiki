@@ -20,7 +20,9 @@ if (process.env.UPDATE_VISUAL_BASELINES === '1') {
 
 export const config: WebdriverIO.Config = {
   runner: 'local',
-  specs: ['./e2e/**/*.spec.ts'],
+  specs: process.env.AIRWIKI_E2E_REVIEW_FIXTURE === '1'
+    ? ['./e2e/review.spec.ts']
+    : ['./e2e/onboarding.spec.ts'],
   maxInstances: 1,
   hostname: '127.0.0.1',
   port: webDriverPort,

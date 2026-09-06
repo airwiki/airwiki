@@ -120,6 +120,16 @@ a success acknowledgement; worker diagnostics are not copied into the UI
 error. The review workspace retains the edited draft on failure and advances
 only after this completion. Publication still revalidates the existing opaque
 review version and does not expand collection permissions.
+Approval calls the core OKF publication materializer directly; it does not
+require inference to be installed or running when the draft and its evidence
+already exist. The same source-on-disk and transaction checks still apply.
+
+After the WebView connects, native menu, tray, window-exit and operating-system
+quit requests ask the UI to resolve unsaved review or preference edits before
+coordinated shutdown. Listeners are installed before that connection. A quit
+requested during a review decision waits for its completion; a failed decision
+retains edits and offers the same discard/cancel choice. Hiding keeps the
+workspace alive. Startup can still quit before the UI has connected.
 
 Manual source updates are Wiki-scoped and exist only for ordinary folder
 Wikis. One request first reconciles the complete folder, then reruns local

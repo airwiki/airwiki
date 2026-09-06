@@ -420,11 +420,29 @@ evidencia de otra solicitud, fuente cambiada, navegación con edición, retorno
 desde Ajustes y recuperación de excluidos. El foco diferido de búsqueda respeta
 una navegación posterior y no actúa sobre una vista destruida.
 
-La fase 5 aún necesita cubrir el cierre directo desde menú/bandeja y la
-preferencia de salir sin preguntar, además de ampliar el recorrido instalado
-para aprobar y excluir con IPC real. El diálogo de elección de cierre ya
-respeta la edición. Siguen pendientes la persistencia local y la aceptación
-instalada completa, incluida la matriz de accesibilidad.
+Los intentos nativos de salir ahora pasan por la resolución de ediciones en
+revisión y Ajustes. La UI instala el receptor antes de conectar; un intento
+durante una decisión espera su resultado real. Si falla, conserva las ediciones
+y permite cancelar la salida. El cierre previo a la conexión sigue disponible.
+
+La nueva prueba E2E usa dos borradores y evidencia sintéticos en almacenamiento
+real. Comprueba cancelación de salida, rechazo de aprobación cuando cambia el
+archivo fuente, conservación de la edición, publicación confirmada, exclusión
+recuperable y preferencias sin guardar. Pasó en macOS y se incorpora al CI
+nativo. Detectó y corrigió una dependencia innecesaria: aprobar evidencia ya
+preparada usa directamente el materializador existente, sin exigir modelos
+activos ni cambiar las comprobaciones de publicación.
+
+Pasan 293 pruebas de UI, `check`, `lint`, `check:e2e`, formato y Clippy del paquete
+desktop, y 296 pruebas Rust (una prueba existente permanece ignorada).
+En un candidato de desarrollo instalado de macOS se comprobó Cmd+Q, Salir desde
+el menú y el botón de cierre con la preferencia de salir directamente. Los tres
+preservan la propuesta editada al cancelar; el foco inicial del diálogo permite
+continuar con Enter y también cancelar con Escape. Descartar cierra el proceso.
+Esta comprobación usa la configuración aislada E2E y no certifica distribución
+pública, bandeja, Windows ni la matriz completa de accesibilidad.
+
+Siguen pendientes la persistencia local y la aceptación instalada completa.
 
 - [ ] Fase 1: ventana mínima, W enlazada y base visual.
 - [ ] Fase 2: navegación y biblioteca.

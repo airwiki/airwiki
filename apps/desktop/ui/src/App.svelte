@@ -106,6 +106,7 @@
     | { kind: 'destination'; destination: 'library' | 'review' }
     | { kind: 'wiki'; wikiId: string; tab: 'content' | 'pending' }
     | { kind: 'newWiki' }
+    | { kind: 'quit' }
     | { kind: 'search'; focus: boolean }
     | { kind: 'route'; hash: string; entryId: string | null };
 
@@ -163,6 +164,7 @@
   let wikiTab: 'content' | 'pending' = 'content';
   let contentFilter: ContentFilter = 'all';
   let reviewDecisionPending = false;
+  let quitAfterReviewDecision = false;
   let reviewDecisionFailed = false;
   let reviewLeavePending = false;
   let reviewLeaveIntent: (() => void) | null = null;
@@ -905,6 +907,7 @@
   }
 
   onMount(() => {
+    let disposed = false;
     const syncRoute = (event?: Event) => {
       const entryId = historyEntryId();
       const entry = entryId ? navigationEntries.get(entryId) : undefined;
@@ -1136,6 +1139,9 @@
         focusDialog('close-choice');
       })
       : Promise.resolve(() => {});
+    const unlistenQuit = '__TAURI_INTERNALS__' in window
+      ? listen('quit-requested', () => { void requestQuit(); })
+      : Promise.resolve(() => {});
     const unlistenNativeMenu = '__TAURI_INTERNALS__' in window
       ? listen<string>('native-menu-command', (event) => {
         if (topDialogElement() !== null) return;
@@ -1157,7 +1163,8 @@
         }
       })
       : Promise.resolve(() => {});
-    connect((event) => {
+    Promise.all([unlistenClose, unlistenQuit, unlistenNativeMenu]).then(() => disposed ? null : connect((event) => {
+      if (disposed) return;
       snapshot = event.snapshot;
       if (
         searchPending
@@ -1224,7 +1231,8 @@
       if (event.requestId && event.requestId === guidedRepairRequestId) guidedRepairRequestId = null;
       runtimeMessageId = event.snapshot.phase === 'ready' ? 'status-ready' : 'status-working';
       startAutomaticSystemStatusRefresh(event.snapshot);
-    }).then(async (initial) => {
+    })).then(async (initial) => {
+      if (disposed || initial === null) return;
       const connected = snapshot && snapshot.sequence > initial.sequence ? snapshot : initial;
       snapshot = connected;
       observePendingRequests(connected);
@@ -1242,6 +1250,7 @@
       if (destination === 'settings') void refreshAutostartState();
     }).catch(() => { runtimeMessageId = 'error-generic'; });
     return () => {
+      disposed = true;
       cancelScheduledSearch();
       window.removeEventListener('hashchange', syncRoute);
       window.removeEventListener('popstate', syncRoute);
@@ -1250,6 +1259,7 @@
       window.removeEventListener('focus', refreshStatusAfterReturn);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       void unlistenClose.then((unlisten) => unlisten());
+      void unlistenQuit.then((unlisten) => unlisten());
       void unlistenNativeMenu.then((unlisten) => unlisten());
     };
   });
@@ -1393,6 +1403,7 @@
     else if (intent.kind === 'destination') select(intent.destination);
     else if (intent.kind === 'wiki') await openWiki(intent.wikiId, intent.tab);
     else if (intent.kind === 'newWiki') requestNewWikiSource();
+    else if (intent.kind === 'quit') await requestQuit();
     else if (intent.kind === 'search') openGlobalSearch(intent.focus);
     else {
       if (intent.entryId && navigationEntries.has(intent.entryId)) {
@@ -2990,6 +3001,7 @@
       reviewOrder = [...reviewOrder.filter((key) => remaining.has(key)), ...remaining.keys()].filter((key, index, keys) => keys.indexOf(key) === index);
       rememberNavigation();
       clearReview();
+      if (quitAfterReviewDecision) return;
       if (next) await openReview(next, true);
       else {
         registerNavigation('#review');
@@ -3001,6 +3013,10 @@
       reviewDecisionFailed = true;
     } finally {
       reviewDecisionPending = false;
+      if (quitAfterReviewDecision) {
+        quitAfterReviewDecision = false;
+        await requestQuit();
+      }
     }
   }
 
@@ -3220,9 +3236,19 @@
 
   async function applyCloseChoice(choice: 'hide' | 'quit' | 'cancel') {
     closeChoiceRequired = false;
-    if (choice === 'quit' && !canLeaveReview(() => void applyCloseChoice('quit'))) return;
     if (choice === 'hide') await hideToTray();
-    if (choice === 'quit') await quitCompletely();
+    if (choice === 'quit') await requestQuit();
+  }
+
+  async function requestQuit() {
+    closeChoiceRequired = false;
+    if (reviewDecisionPending) {
+      quitAfterReviewDecision = true;
+      return;
+    }
+    if (!canLeaveReview(() => void requestQuit())) return;
+    if (!canLeaveSettings({ kind: 'quit' })) return;
+    await quitCompletely();
   }
 
   async function prepareLocalModel() {

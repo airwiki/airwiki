@@ -646,16 +646,31 @@ async function importOkfWiki(): Promise<void> {
   const beforeSettings = await browser.execute(() => ({
     page: document.querySelector('.drive-page')?.scrollTop ?? 0,
     index: document.querySelector('.file-list')?.scrollTop ?? 0,
+    height: document.querySelector('.drive-page')?.clientHeight ?? 0,
+    contentHeight: document.querySelector('.drive-page')?.scrollHeight ?? 0,
   }));
   await $('.system-status-button').click();
   await $('.settings-layout').waitForDisplayed();
   await $('.settings-back').click();
   await expect($('.file-preview h1')).toHaveText('Verified architecture reference');
-  const afterSettings = await browser.execute(() => ({
-    page: document.querySelector('.drive-page')?.scrollTop ?? 0,
-    index: document.querySelector('.file-list')?.scrollTop ?? 0,
-  }));
-  expect(afterSettings).toEqual(beforeSettings);
+  // Restoration is scheduled after the route DOM updates. Wait for the actual
+  // coordinates, as the history checks below do; the heading alone is not a
+  // completion signal for scroll restoration on every supported WebView.
+  try {
+    await browser.waitUntil(
+      () => browser.execute((expected) => document.querySelector('.drive-page')?.scrollTop === expected.page
+        && document.querySelector('.file-list')?.scrollTop === expected.index, beforeSettings),
+      { timeout: 5_000, timeoutMsg: 'Settings did not restore the article and index positions' }
+    );
+  } catch (error) {
+    const afterSettings = await browser.execute(() => ({
+      page: document.querySelector('.drive-page')?.scrollTop ?? 0,
+      index: document.querySelector('.file-list')?.scrollTop ?? 0,
+      height: document.querySelector('.drive-page')?.clientHeight ?? 0,
+      contentHeight: document.querySelector('.drive-page')?.scrollHeight ?? 0,
+    }));
+    throw new Error(`Settings scroll restoration: ${JSON.stringify({ beforeSettings, afterSettings })}`, { cause: error });
+  }
   await $('.wiki-picker').click();
   await expect($('.sidebar-wikis')).toBeDisplayed();
   await $('.wiki-picker').click();

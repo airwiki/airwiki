@@ -613,8 +613,14 @@ desplazar el contenido largo de cada paso. La regresión de macOS falló antes y
 pasa después en ES/EN a 1024×720 y 1180×740 de contenido, incluido el clic en
 Finalizar y la reapertura. Las 322 pruebas de UI del conjunto integrado pasan. La aceptación instalada
 del último ajuste y las referencias compactas actualizadas de macOS esperan
-que el escritorio vuelva a estar disponible. Falta consolidar el reporte final
-de aceptación instalada y comparación visual de Windows.
+que el escritorio vuelva a estar disponible. La aceptación cotidiana de Windows
+está completa en el [informe de validación](desktop-redesign-windows-validation.md):
+el candidato final pasa la comparación sin UPDATE, geometría, revisión instalada,
+inicio ES/EN con contenido central visible y cambio real de tema del sistema.
+El código de producto coincide con el candidato integrado; el informe identifica
+el binario por SHA-256 y distingue las observaciones manuales de los E2E.
+La exclusión posterior de campos inválidos solo afecta el helper de capturas y
+no se atribuye a la comparación Windows anterior.
 La persistencia local se entrega en la PR dependiente.
 La validación especializada de accesibilidad queda como seguimiento no bloqueante
 según la prioridad de cierre indicada arriba.

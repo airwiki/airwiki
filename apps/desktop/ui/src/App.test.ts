@@ -1884,6 +1884,35 @@ describe('AirWiki wiki workspace', () => {
     expect(updatePreferences).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])('keeps the local article when quitting from Settings, including discarded edits (%s)', async (editSettings) => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    const { wiki, first } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await openSettingsSection('general');
+    if (editSettings) await fireEvent.change(screen.getByRole('combobox', { name: 'Al cerrar' }), { target: { value: 'hide_to_tray' } });
+    await act(() => { tauriListeners.get('quit-requested')?.({ payload: null }); });
+    if (editSettings) await fireEvent.click(await screen.findByRole('button', { name: 'Descartar cambios' }));
+    await waitFor(() => expect(quitCompletely).toHaveBeenCalledOnce());
+    expect(saveDesktopWorkspace).toHaveBeenLastCalledWith({
+      selection: { wikiId: wiki.id, page: { kind: 'concept', conceptId: first.conceptId } },
+      sidebarWidth: 224, sidebarCollapsed: false
+    });
+    expect(updatePreferences).not.toHaveBeenCalled();
+  });
+
+  it.each(['Biblioteca', 'Por revisar'])('does not restore an older article after opening Settings from %s', async (route) => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+    const { first } = readingHistoryFixture();
+    render(App);
+    await screen.findByRole('heading', { name: first.title });
+    await fireEvent.click(within(screen.getByRole('navigation', { name: 'Navegación' })).getByRole('button', { name: route }));
+    await openSettingsSection('general');
+    await act(() => { tauriListeners.get('quit-requested')?.({ payload: null }); });
+    await waitFor(() => expect(quitCompletely).toHaveBeenCalledOnce());
+    expect(saveDesktopWorkspace).toHaveBeenLastCalledWith({ selection: null, sidebarWidth: 224, sidebarCollapsed: false });
+  });
+
   it('flushes the latest workspace preference before quitting a clean view', async () => {
     Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
     let finish: (() => void) | undefined;

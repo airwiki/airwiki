@@ -148,7 +148,10 @@ and intervening navigation take precedence. A saved local concept resolves by
 UUID in a freshly requested bundle, then loads its current path and fingerprint.
 Missing Wiki/page, invalid state and load failure return safely to Library;
 no persisted value authorizes network browsing or restores public-query consent.
-Non-reading destinations save no selection. The layout clamps again to the
+Settings retains its local return article so quitting there resumes that article,
+not the Settings route. Entering Settings from Library, search, review or remote
+browsing does not revive an older local selection. Other non-reading destinations
+save no selection. The layout clamps again to the
 current window. Schema 19 is additive and preserves existing content and grants;
 an older application rejects the newer database schema. A future workspace
 record version is neither read nor overwritten by this build. Invalid current

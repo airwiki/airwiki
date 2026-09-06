@@ -8,7 +8,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
   state. Startup checks the current Wiki and page; missing selections return to
   Library, and explicit routes or onboarding take precedence. Only bounded local
   identifiers and layout preferences persist. Search, remote browsing, consent
-  and pending operations are not restored; a failed save offers a retry.
+  and pending operations are not restored; a failed save offers a retry. Closing
+  from Settings preserves its local return article, including after discarding
+  preference edits, without reopening Settings or reviving an older article.
 
 - Added a shared contextual sidebar for Library, local and remote Wiki indexes,
   and Settings, with a visible reading-mode toggle and keyboard resizing. The

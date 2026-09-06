@@ -479,6 +479,12 @@ lo abre de nuevo con la misma base temporal: restaura el concepto vigente y el
 panel, mantiene vacía la búsqueda y conserva el índice de 50 conceptos accesible.
 Esta evidencia automatizada todavía no cierra la aceptación instalada manual.
 
+La continuidad también conserva el artículo local al abrir Ajustes y salir desde
+allí, incluso después de descartar cambios de preferencias. Abrir Ajustes desde
+Biblioteca o Por revisar no recupera una selección anterior. Las pruebas cubren
+ambos caminos y el recorrido nativo cierra desde Ajustes antes de volver a abrir
+el mismo artículo y la geometría de paneles en un segundo proceso.
+
 La fase 7 incorpora 64 referencias visuales nativas de macOS: Biblioteca vacía,
 General, lector y Fuentes, más propuesta, evidencia y comparación en revisión.
 Cubren ES/EN, claro/oscuro y ventanas de 1024×720, 1180×760 y 1440×900; los nombres

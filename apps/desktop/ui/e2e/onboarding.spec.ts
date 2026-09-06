@@ -1350,8 +1350,8 @@ describe('AirWiki real IPC journey', () => {
       await setCssViewport(1020, 728);
       await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', `wiki-list-review-${theme}-narrow.png`));
     }
-    // Leave a real local reading for the runner's second process. The normal
-    // native quit request must flush even the final, debounced panel change.
+    // Settings is a temporary detour from this local article. Quitting there
+    // must flush the reading and even the final, debounced panel change.
     await $('.wiki-row*=E2E imported wiki').click();
     await $('.file-list').$('button*=Synthetic reference 48').waitForDisplayed();
     await $('.file-list').$('button*=Synthetic reference 48').click();
@@ -1360,6 +1360,8 @@ describe('AirWiki real IPC journey', () => {
     await expect($('.sidebar-resizer')).toHaveAttribute('aria-valuenow', '224');
     await browser.keys(['ArrowRight', 'ArrowRight']);
     await expect($('.sidebar-resizer')).toHaveAttribute('aria-valuenow', '256');
+    await $('.system-status-button').click();
+    await expect($('.settings-top-bar h1')).toHaveText('General');
     await $('.sidebar-toggle').click();
     await expect($('.workspace-frame')).toHaveElementClass('collapsed');
   });

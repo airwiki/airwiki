@@ -129,7 +129,7 @@
   let workspaceSaveFailed = false;
   let settingsSection: SettingsSection = 'general';
   let lastSettingsSection: SettingsSection = 'general';
-  let settingsReturnContext: { hash: string; scrollTop: number; indexScrollTop: number; review?: NavigationEntry['review'] } | null = null;
+  let settingsReturnContext: { hash: string; scrollTop: number; indexScrollTop: number; readingWikiId: string | null; review?: NavigationEntry['review'] } | null = null;
   let settingsLeavePending = false;
   let settingsLeaveIntent: SettingsLeaveIntent | null = null;
   let searchFilter: SearchFilter = 'all';
@@ -954,10 +954,10 @@
             ? 'connections'
             : null;
       if (requestedSettings) {
+        rememberSettingsReturn();
         destination = 'settings';
         settingsSection = requestedSettings;
         lastSettingsSection = requestedSettings;
-        settingsReturnContext ??= { hash: '#library', scrollTop: 0, indexScrollTop: 0 };
         const canonical = `#settings/${requestedSettings}`;
         if (event || activeNavigationId === null) {
           if (entry && entryId) {
@@ -1267,7 +1267,7 @@
         if (disposed) return;
         // A failed read must not immediately overwrite an unknown saved
         // selection with the startup defaults. A later user change may save.
-        const baseline = snapshot ? workspaceState(snapshot, destination === 'library' && !sharedBrowseOpen ? selectedWikiId : null, !localPageHidden, sidebarWidth, sidebarCollapsed) : null;
+        const baseline = snapshot ? workspaceState(snapshot, workspaceWikiId, !localPageHidden, sidebarWidth, sidebarCollapsed) : null;
         workspacePersistence = createWorkspacePersistence(saveDesktopWorkspace, (failed) => { workspaceSaveFailed = failed; }, baseline);
         workspaceStartup = { state: null, navigationId: startupNavigationId, restore: false };
         actionMessage = t('desktop-workspace-restore-failed');
@@ -1293,8 +1293,10 @@
   });
 
   $: if (workspaceStartup && snapshot?.phase === 'ready' && snapshot.preferences) initializeWorkspace(workspaceStartup, snapshot);
+  $: workspaceWikiId = destination === 'settings' ? settingsReturnContext?.readingWikiId ?? null
+    : destination === 'library' && !sharedBrowseOpen ? selectedWikiId : null;
   $: if (workspaceReady && snapshot?.preferences?.completedOnboardingVersion != null && !readingRestore && !pendingKnowledgePage) {
-    workspacePersistence?.update(workspaceState(snapshot, destination === 'library' && !sharedBrowseOpen ? selectedWikiId : null, !localPageHidden, sidebarWidth, sidebarCollapsed));
+    workspacePersistence?.update(workspaceState(snapshot, workspaceWikiId, !localPageHidden, sidebarWidth, sidebarCollapsed));
   }
 
   function workspaceState(current: AppSnapshot, wikiId: string | null, visible: boolean, width: number, collapsed: boolean): WorkspaceStateDto {
@@ -1399,18 +1401,24 @@
     openSettings(target);
   }
 
+  function rememberSettingsReturn() {
+    if (destination !== 'settings') {
+      const navigation = currentNavigation();
+      settingsReturnContext = {
+        hash: navigation.hash,
+        scrollTop: navigation.scrollTop,
+        indexScrollTop: navigation.indexScrollTop,
+        readingWikiId: navigation.reading?.wikiId ?? null,
+        review: navigation.review
+      };
+    }
+  }
+
   function openSettings(section: SettingsSection = lastSettingsSection) {
     if (!canLeaveReview(() => openSettings(section))) return;
     cancelScheduledSearch();
     rememberNavigation();
-    if (destination !== 'settings') {
-      settingsReturnContext = {
-        hash: window.location.hash || '#library',
-        scrollTop: mainScrollRegion?.scrollTop ?? 0,
-        indexScrollTop: currentPageIndex()?.scrollTop ?? 0,
-        review: currentNavigation().review
-      };
-    }
+    rememberSettingsReturn();
     clearReview();
     destination = 'settings';
     activateSettingsSection(section);
@@ -1439,7 +1447,7 @@
 
   function restoreLibraryContext() {
     rememberNavigation();
-    const context = settingsReturnContext ?? { hash: '#library', scrollTop: 0, indexScrollTop: 0 };
+    const context: NonNullable<typeof settingsReturnContext> = settingsReturnContext ?? { hash: '#library', scrollTop: 0, indexScrollTop: 0, readingWikiId: null };
     destination = context.hash === '#review' ? 'review' : 'library';
     settingsLeavePending = false;
     settingsReturnContext = null;

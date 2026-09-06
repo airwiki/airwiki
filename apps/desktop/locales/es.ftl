@@ -788,6 +788,7 @@ autostart-needs-approval = requiere aprobación del sistema
 autostart-conflict = hay otra configuración con el mismo nombre
 autostart-unsupported = no disponible
 autostart-checking = comprobando…
+autostart-state-unavailable = estado no disponible. Actualiza para volver a intentarlo.
 
 updates-title = Actualizaciones
 updates-automatic = Comprobar automáticamente (sin telemetría)

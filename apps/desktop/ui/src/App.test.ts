@@ -3,7 +3,7 @@ import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
 import { allowPeerPairingAgain, approveProjectMemoryRequest, approveReview, browseNearbyWiki, browsePublicWiki, cancelModelInstall, checkUpdates, configureFirewall, confirmLegacyLanAiGrants, connect, createProjectMemory, detachProjectMemory, explorePublicWikis, installModels, loadReviewEvidence, loadWikiBundle, loadWikiPage, manageIntegration, openSystemDestination, pickOkfImport, pickWikiFolder, prepareGuidedWikiRepair, quitCompletely, refreshApplicationAccess, refreshConnectivity, refreshWikiHealth, rejectProjectMemoryRequest, rejectReview, rescanWiki, searchKnowledge, setApplicationWikiRole, setWikiGrant, updatePreferences, updateWikiPolicy, validateOkfImport, verifyWikiConcept } from './api';
-import { setModelProfile } from './api';
+import { setModelProfile, refreshAutostart } from './api';
 import type { AppSnapshot, SearchCoverage, SearchHitSummary, SearchStatus, UiEventEnvelope } from './generated/ui-contract';
 import { readySnapshot } from './test/fixtures';
 
@@ -328,6 +328,24 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('list', { name: 'Tus wikis' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Atlas 2 de 2 revisados/ })).toBeInTheDocument();
     expect(screen.getByRole('complementary', { name: 'Navegación' })).toBeInTheDocument();
+  });
+
+  it('settles an unavailable startup check and refreshes its status without changing language', async () => {
+    snapshot.autostart = null;
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /^Configuración\./ }));
+    await screen.findByText('Inicio de sesión: comprobando…');
+    const firstRequest = vi.mocked(refreshAutostart).mock.calls.at(-1)?.[0];
+    expect(firstRequest).toEqual(expect.any(String));
+    await deliverSnapshot(firstRequest!, { autostart: null });
+    await screen.findByText('Inicio de sesión: estado no disponible. Actualiza para volver a intentarlo.');
+    const startup = screen.getByRole('heading', { name: 'Inicio automático' }).closest('section')!;
+    await fireEvent.click(within(startup).getByRole('button', { name: 'Actualizar' }));
+    await screen.findByText('Inicio de sesión: comprobando…');
+    const retryRequest = vi.mocked(refreshAutostart).mock.calls.at(-1)?.[0];
+    expect(retryRequest).not.toBe(firstRequest);
+    await deliverSnapshot(retryRequest!, { autostart: 'disabled' });
+    await screen.findByText('Inicio de sesión: desactivado');
   });
 
   it('opens the global review queue without exploring public wikis and restores it from Settings', async () => {

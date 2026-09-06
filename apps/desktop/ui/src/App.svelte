@@ -916,7 +916,11 @@
       } else {
         const returnTarget = dialogFocusState.returnTarget;
         dialogFocusState.returnTarget = null;
-        requestAnimationFrame(() => returnTarget?.focus());
+        const generation = ++dialogFocusGeneration;
+        void tick().then(() => {
+          if (generation !== dialogFocusGeneration || activeDialogId !== null || !returnTarget?.isConnected) return;
+          returnTarget.focus();
+        });
       }
       dialogFocusState.activeId = dialogId;
     }
@@ -1283,6 +1287,7 @@
     return () => {
       disposed = true;
       mainScrollGeneration += 1;
+      dialogFocusGeneration += 1;
       workspacePersistence?.dispose();
       cancelScheduledSearch();
       window.removeEventListener('hashchange', syncRoute);

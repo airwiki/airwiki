@@ -1568,6 +1568,29 @@ describe('AirWiki wiki workspace', () => {
     expect(results.violations.filter((violation) => violation.impact === 'critical' || violation.impact === 'serious')).toEqual([]);
   });
 
+  it('keeps focus inside a newer dialog when an earlier close waits for a paint', async () => {
+    render(App);
+    await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 2 revisados/ }));
+    await fireEvent.click(screen.getByRole('button', { name: /^Detalles de la wiki:/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cerrar' })).toHaveFocus());
+
+    const frames: FrameRequestCallback[] = [];
+    const animationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    try {
+      await fireEvent.keyDown(window, { key: 'Escape' });
+      await fireEvent.click(screen.getByRole('button', { name: 'Compartir' }));
+      const close = screen.getByRole('button', { name: 'Cerrar' });
+      await waitFor(() => expect(close).toHaveFocus());
+      await act(() => { for (const callback of frames.splice(0)) callback(0); });
+      expect(close).toHaveFocus();
+    } finally {
+      animationFrame.mockRestore();
+    }
+  });
+
   it('distinguishes maintenance from an empty source-issue state', async () => {
     snapshot.wikis[0].maintenanceRequired = true;
     render(App);

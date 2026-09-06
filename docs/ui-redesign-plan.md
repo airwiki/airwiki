@@ -553,6 +553,19 @@ las repeticiones sin cambios funcionales pasaron. Se conservan como fallos
 intermitentes de la automatización para la aceptación final, sin atribuirles una
 causa no demostrada ni darlos por corregidos.
 
+La investigación posterior reprodujo una carrera concreta de foco: cerrar
+Detalles y abrir Compartir antes de ejecutar un fotograma permitía que el cierre
+anterior sacara el foco del nuevo diálogo. La regresión falla antes de corregirla
+y pasa después. La restauración espera la actualización del DOM y se invalida
+si se abre otro diálogo o se destruye la vista. Este caso demostrado no basta
+para atribuir una causa a los dos fallos intermitentes anteriores.
+
+La comprobación instalada de macOS confirma el foco inicial y el retorno al
+botón de origen en Detalles, Compartir y Apps de IA, con clic real y cierre por
+Escape o botón. También pasan la regresión enfocada, las 322 pruebas de UI del
+conjunto integrado y los recorridos nativos de revisión y reinicio. Esto no
+sustituye la aceptación con lector de pantalla ni la de Windows.
+
 Siguen pendientes las referencias visuales de Windows, la revisión independiente
 y la aceptación instalada completa de ambas plataformas.
 

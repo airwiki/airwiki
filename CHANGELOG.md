@@ -4,6 +4,9 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+- Keep onboarding navigation visible in shorter desktop windows. Long setup
+  steps scroll independently so finishing without local AI remains reachable.
+
 - Added a shared contextual sidebar for Library, local and remote Wiki indexes,
   and Settings, with a visible reading-mode toggle and keyboard resizing. The
   To review destination groups current proposals by Wiki using the existing

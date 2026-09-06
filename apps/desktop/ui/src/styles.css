@@ -202,6 +202,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .public-browser { max-width: none; }
 
 .onboarding { grid-template-rows: auto minmax(0, 1fr) auto auto; align-content: stretch; width: min(920px, calc(100vw - 96px)); min-height: 100vh; padding: 38px 0 28px; }
+.onboarding:not(.startup) { grid-template-rows: auto minmax(0, 1fr) auto; height: 100vh; min-height: 0; }
 .onboarding.startup { align-content: center; }
 .startup-failed { justify-items: start; }
 .startup-failed > h1 { max-width: 660px; font-size: clamp(36px, 5vw, 54px); }
@@ -213,7 +214,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .step-meter i { flex: 1; height: 3px; background: var(--line); border-radius: 999px; }
 .step-meter i.complete { background: var(--verify); }
 .step-meter i.current { background: var(--cyan); }
-.onboarding-stage { display: grid; align-items: center; min-height: 0; }
+.onboarding-stage { display: grid; align-items: safe center; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
 .onboarding-page { max-width: 720px; padding: 48px 0 36px; }
 .onboarding-page h1 { max-width: 700px; font-size: clamp(38px, 5vw, 58px); }
 .onboarding-page .lede { margin-bottom: 30px; }

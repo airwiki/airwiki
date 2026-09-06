@@ -135,6 +135,11 @@ reading order. Keep reading widths comfortable, support continuous window
 resizing, and avoid nested scroll regions. Never put the only critical action at
 the bottom edge of a macOS window.
 
+Onboarding keeps its header and navigation actions within the window. A long
+step scrolls in the space between them, so Back, Next and Finish stay reachable
+at the minimum window size in either language. Startup status views retain
+their separate layout.
+
 The normal workspace has one contextual sidebar and one reading region. Library
 and To review are global destinations. The Wiki picker and concept index share
 the sidebar; Settings replaces that context with its section navigation. Local

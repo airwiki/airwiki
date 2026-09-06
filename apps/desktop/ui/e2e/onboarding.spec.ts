@@ -438,6 +438,67 @@ async function createFolderWiki(): Promise<void> {
   await expect(row).toHaveText(expect.stringContaining('automatic updates'));
 }
 
+async function assertSettingsReadingReturn(motion: 'no-preference' | 'reduce') {
+  // Exercise the shipped media rules in the native WebView without changing
+  // the person's OS preferences. Installed accessibility acceptance is separate.
+  const mediaOverrides = await browser.execute((motion) => {
+    const overrides: Array<{ sheet: number; rule: number; media: string }> = [];
+    Array.from(document.styleSheets).forEach((sheet, sheetIndex) => {
+      Array.from(sheet.cssRules).forEach((rule, ruleIndex) => {
+        if (!(rule instanceof CSSMediaRule)) return;
+        const preference = /^\(prefers-reduced-motion:\s*(reduce|no-preference)\)$/.exec(rule.conditionText)?.[1];
+        if (!preference) return;
+        overrides.push({ sheet: sheetIndex, rule: ruleIndex, media: rule.media.mediaText });
+        rule.media.mediaText = preference === motion ? 'all' : 'not all';
+      });
+    });
+    if (overrides.length === 0) throw new Error('motion preference styles are missing');
+    return overrides;
+  }, motion);
+  try {
+    const beforeSettings = await browser.execute(() => ({
+      page: document.querySelector('.drive-page')?.scrollTop ?? 0,
+      index: document.querySelector('.file-list')?.scrollTop ?? 0,
+      height: document.querySelector('.drive-page')?.clientHeight ?? 0,
+      contentHeight: document.querySelector('.drive-page')?.scrollHeight ?? 0,
+    }));
+    await $('.system-status-button').click();
+    await $('.settings-layout').waitForDisplayed();
+    // Let Settings reach its full-width layout before returning. Reversing an
+    // unfinished padding transition could otherwise conceal the regression.
+    await browser.waitUntil(() => browser.execute(() => {
+      const page = document.querySelector('.drive-page');
+      return page !== null && getComputedStyle(page).paddingBlock === '0px';
+    }), { timeout: 5_000, timeoutMsg: 'Settings retained the reading spacing' });
+    await $('.settings-back').click();
+    await expect($('.file-preview h1')).toHaveText('Verified architecture reference');
+    try {
+      await browser.waitUntil(
+        () => browser.execute((expected) => document.querySelector('.drive-page')?.scrollTop === expected.page
+          && document.querySelector('.file-list')?.scrollTop === expected.index, beforeSettings),
+        { timeout: 5_000, timeoutMsg: 'Settings did not restore the article and index positions' }
+      );
+    } catch (error) {
+      const afterSettings = await browser.execute(() => ({
+        page: document.querySelector('.drive-page')?.scrollTop ?? 0,
+        index: document.querySelector('.file-list')?.scrollTop ?? 0,
+        height: document.querySelector('.drive-page')?.clientHeight ?? 0,
+        contentHeight: document.querySelector('.drive-page')?.scrollHeight ?? 0,
+      }));
+      throw new Error(`Settings scroll restoration: ${JSON.stringify({ motion, beforeSettings, afterSettings })}`, { cause: error });
+    }
+    return beforeSettings;
+  } finally {
+    await browser.execute((overrides) => {
+      for (const { sheet, rule, media } of overrides) {
+        const original = document.styleSheets[sheet]?.cssRules[rule];
+        if (!(original instanceof CSSMediaRule)) throw new Error('motion preference stylesheet changed');
+        original.media.mediaText = media;
+      }
+    }, mediaOverrides);
+  }
+}
+
 async function importOkfWiki(): Promise<void> {
   const captureTheme = process.env.AIRWIKI_E2E_JOURNEY_THEME === 'dark' ? 'dark' : 'light';
   await $('button*=New wiki').click();
@@ -614,58 +675,8 @@ async function importOkfWiki(): Promise<void> {
   expect(workspaceLayout.stickyTop).toBeGreaterThanOrEqual(workspaceLayout.topBarBottom);
   expect(workspaceLayout.stickyTop).toBeLessThanOrEqual(workspaceLayout.topBarBottom + 2);
   expect(workspaceLayout.browserHeight).toBeGreaterThan(0);
-  await browser.execute(() => {
-    const page = document.querySelector<HTMLElement>('.drive-page');
-    if (!page) throw new Error('reading scroll region is missing');
-    const trace: Array<{ event: string; target?: number; position: number; height: number; contentHeight: number; padding: string }> = [];
-    const record = (event: string, target?: number) => {
-      if (trace.length < 24) trace.push({ event, target, position: page.scrollTop, height: page.clientHeight, contentHeight: page.scrollHeight, padding: getComputedStyle(page).paddingBlock });
-      document.documentElement.dataset.readingScrollTrace = JSON.stringify(trace);
-    };
-    const originalScroll = page.scrollTo;
-    page.scrollTo = (...args: unknown[]) => {
-      const target = typeof args[0] === 'object' && args[0] !== null
-        ? (args[0] as ScrollToOptions).top : Number(args[1]);
-      Reflect.apply(originalScroll, page, args);
-      record('scrollTo', target);
-    };
-    document.addEventListener('click', (event) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (target.closest('.system-status-button')) record('settings-click');
-      if (target.closest('.settings-back')) record('return-click');
-    }, { capture: true });
-  });
-  const beforeSettings = await browser.execute(() => ({
-    page: document.querySelector('.drive-page')?.scrollTop ?? 0,
-    index: document.querySelector('.file-list')?.scrollTop ?? 0,
-    height: document.querySelector('.drive-page')?.clientHeight ?? 0,
-    contentHeight: document.querySelector('.drive-page')?.scrollHeight ?? 0,
-  }));
-  await $('.system-status-button').click();
-  await $('.settings-layout').waitForDisplayed();
-  await $('.settings-back').click();
-  await expect($('.file-preview h1')).toHaveText('Verified architecture reference');
-  // Restoration is scheduled after the route DOM updates. Wait for the actual
-  // coordinates, as the history checks below do; the heading alone is not a
-  // completion signal for scroll restoration on every supported WebView.
-  try {
-    await browser.waitUntil(
-      () => browser.execute((expected) => document.querySelector('.drive-page')?.scrollTop === expected.page
-        && document.querySelector('.file-list')?.scrollTop === expected.index, beforeSettings),
-      { timeout: 5_000, timeoutMsg: 'Settings did not restore the article and index positions' }
-    );
-  } catch (error) {
-    const afterSettings = await browser.execute(() => ({
-      page: document.querySelector('.drive-page')?.scrollTop ?? 0,
-      index: document.querySelector('.file-list')?.scrollTop ?? 0,
-      height: document.querySelector('.drive-page')?.clientHeight ?? 0,
-      contentHeight: document.querySelector('.drive-page')?.scrollHeight ?? 0,
-    }));
-    const trace = await browser.execute(() => document.documentElement.dataset.readingScrollTrace);
-    throw new Error(`Settings scroll restoration: ${JSON.stringify({ beforeSettings, afterSettings, trace })}`, { cause: error });
-  }
-  if (process.env.AIRWIKI_E2E_SCROLL_TRACE === '1') console.info(await browser.execute(() => document.documentElement.dataset.readingScrollTrace));
+  const beforeSettings = await assertSettingsReadingReturn('no-preference');
+  await assertSettingsReadingReturn('reduce');
   await $('.wiki-picker').click();
   await expect($('.sidebar-wikis')).toBeDisplayed();
   await $('.wiki-picker').click();

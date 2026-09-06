@@ -12,6 +12,8 @@ All notable user-visible changes to AirWiki will be documented here. The project
   interrupts the review queue when the local model becomes available. Returning
   from Settings preserves reading and index positions, including remote page
   selection. Discarding edited preferences continues the requested navigation.
+  Reduced motion disables transitions entirely, preventing a temporary layout
+  animation from shortening the restored reading position.
 
 - Began the reading-focused desktop redesign: the linked-W symbol identifies
   local and remote Wikis, and a long concept index no longer pushes the reader

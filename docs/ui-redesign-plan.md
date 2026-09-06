@@ -336,9 +336,28 @@ artículos y sus posiciones de lectura. Esta entrega pasa 251 pruebas de UI;
 incluyen revisión cambiada, respuesta fuera de orden, fallo con reintento,
 selección eliminada y salida de Ajustes con edición pendiente.
 
-Siguen pendientes la reducción de la cabecera de lectura en fase 3, el contexto
-completo de resultados de búsqueda, el editor dedicado y la persistencia local.
-La base visual y sus pruebas no completan por sí solas la aceptación instalada.
+La base de la fase 3 usa un lector compartido local/remoto: título y estado
+antes del texto, cabecera de wiki compacta y controles separados de Compartir
+y Apps de IA. Fuentes y Detalles se abren en un inspector lateral desde
+1360 px o en un diálogo nativo sin estrechar el artículo. El cierre devuelve
+el foco; cambiar de página o revisión descarta el inspector anterior. Los
+avisos de vigencia, contenido truncado y restricciones siguen visibles.
+
+Las fuentes locales muestran los metadatos declarados disponibles. El marcado
+y el contrato actuales no transportan asociaciones entre fragmentos y fuentes;
+por eso no se generan citas numeradas. El visor remoto explica la ausencia de
+referencias estructuradas, conserva sus metadatos publicados y oculta un cuerpo
+en caché si ya no coincide con el fingerprint de la página vigente.
+
+Esta entrega pasa 257 pruebas de UI, `check`, `lint`, `check:e2e` y el recorrido
+con IPC real en macOS en claro y oscuro. Se inspeccionaron capturas del lector
+y las dos formas del inspector. Las pruebas incluyen metadatos incompletos,
+fuentes ausentes, enlaces relacionados rotos, contenido truncado, revisión
+cambiada, foco al cerrar y navegación bloqueada detrás del diálogo.
+
+Siguen pendientes el contexto completo de resultados de búsqueda, el editor
+dedicado y la persistencia local. La base visual y sus pruebas no completan
+por sí solas la aceptación instalada ni la matriz de accesibilidad.
 
 - [ ] Fase 1: ventana mínima, W enlazada y base visual.
 - [ ] Fase 2: navegación y biblioteca.

@@ -1682,3 +1682,16 @@ desktop-review-queue-body = Review proposals and their evidence before adding th
 desktop-wiki-reviewed-count = { $count } reviewed concepts
 desktop-wiki-pending-count = { $count } to review
 desktop-sidebar-shared = Shared wiki
+
+reader-sources = Sources
+reader-concept-sources = Concept sources
+reader-page-details = Page details
+reader-sources-scope = Declared for this concept; they are not associated with specific passages in the text.
+reader-sources-empty = This concept declares no sources.
+reader-sources-unavailable = This source does not provide structured references. You can inspect its published metadata in Details.
+reader-source-resource = Resource
+reader-source-author = Author
+reader-source-date = Last modified
+reader-wiki-details = Wiki details
+reader-wiki-description = Description
+reader-access-private = Private

@@ -310,7 +310,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .settings-layout { display: block; min-height: 100%; }
 .settings-sidebar { display: grid; align-content: start; gap: 4px; min-height: 0; padding: 0 2px; overflow: auto; }
 .settings-sidebar a.active { box-shadow: inset 2px 0 0 var(--cyan); }
-.file-browser { display: block; min-width: 0; min-height: 0; background: var(--slate); border: 1px solid var(--line); border-radius: var(--panel-radius); overflow: hidden; }
+.file-browser { display: block; min-width: 0; min-height: 0; overflow: visible; }
 .file-list { flex: 1; min-width: 0; min-height: 0; max-height: none; padding: 4px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; font-family: var(--font-ui); }
 .file-list .concept-review-state { grid-column: 2; justify-self: start; margin-top: -4px; font-size: 11px; }
 .workspace-sidebar .content-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); flex: none; gap: 2px; height: auto; min-width: 0; margin: 0 0 8px; padding: 0 4px 8px; }
@@ -548,54 +548,11 @@ button:active:not(:disabled) { transform: scale(.985); }
 .breadcrumb button { width: auto; padding: 0; color: var(--cyan); border-radius: 0; }
 .breadcrumb button:hover { color: var(--strong); background: transparent; }
 .heading-actions { display: flex; gap: 9px; }
-.wiki-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px 20px; padding-bottom: 10px; }
-.wiki-heading-copy { min-width: 0; }
-.wiki-title-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px 13px; min-width: 0; }
-.wiki-title-line h1 { overflow: hidden; font-size: clamp(27px, 2.7vw, 32px); text-overflow: ellipsis; white-space: nowrap; }
-.wiki-title-line > span { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.wiki-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; margin: 0; padding: 4px 0 12px; border: 0; }
+.wiki-heading .wiki-context-name { margin: 0; color: var(--strong); font: 600 13px/1.4 var(--font-ui); }
+.wiki-heading .wiki-context-details { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--muted); border-radius: var(--control-radius); }
 .wiki-heading .heading-actions { align-self: end; padding-bottom: 1px; }
 .wiki-heading .heading-actions button { min-height: 36px; padding: 8px 11px; }
-.wiki-journey-compact { display: grid; grid-template-columns: minmax(232px, .95fr) minmax(218px, 1.1fr) minmax(190px, .9fr) auto; align-items: center; gap: 10px; min-width: 0; }
-.journey-compact-identity { display: grid; grid-template-columns: 30px minmax(0, 1fr) 14px; align-items: center; gap: 8px; min-width: 0; min-height: 46px; padding: 3px 7px 3px 0; color: inherit; background: transparent; border: 0; border-radius: var(--control-radius); text-align: left; cursor: pointer; }
-.journey-compact-identity:hover { background: var(--surface-raised); }
-.journey-compact-identity-copy { display: grid; min-width: 0; }
-.journey-compact-identity-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.journey-compact-identity-copy strong { color: var(--strong); font: 650 13px/1.25 'Space Grotesk', sans-serif; letter-spacing: -.015em; }
-.journey-compact-identity-copy small { margin-top: 3px; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; line-height: 1.35; }
-.journey-compact-identity-copy em { color: var(--muted); font-style: normal; font-weight: 650; }
-.journey-compact-identity-copy em.ready { color: var(--verify); }
-.journey-compact-identity-copy em.working { color: var(--violet); }
-.journey-compact-identity-copy em.attention { color: var(--amber); }
-.journey-compact-icon { display: grid; place-items: center; width: 28px; height: 28px; color: var(--muted); background: var(--slate); border: 1px solid color-mix(in srgb, currentColor 45%, var(--line)); border-radius: 2px 5px 5px 2px; }
-.journey-compact-icon.ready { color: var(--verify); }
-.journey-compact-icon.working { color: var(--violet); }
-.journey-compact-icon.attention { color: var(--amber); }
-.journey-compact-exposure { min-width: 0; padding: 0 10px; border-right: 1px solid var(--line); border-left: 1px solid var(--line); }
-.journey-compact-exposure > small, .journey-compact-ai-copy small { display: block; overflow: hidden; color: var(--muted); font: 620 10px/1.3 'Space Grotesk', sans-serif; letter-spacing: .055em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
-.exposure-route { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin: 4px 0 0; padding: 0; list-style: none; }
-.exposure-route::before { content: ''; position: absolute; top: 8px; right: 16%; left: 16%; height: 1px; background: var(--line); }
-.exposure-route li { position: relative; z-index: 1; display: grid; justify-items: center; min-width: 0; color: var(--muted); }
-.exposure-route li.ready { color: var(--verify); }
-.exposure-route li.attention { color: var(--amber); }
-.exposure-route li.public { color: var(--public-accent); }
-.exposure-node { display: grid; place-items: center; width: 17px; height: 17px; color: currentColor; background: var(--ink); border: 1px solid color-mix(in srgb, currentColor 55%, var(--line)); border-radius: 50%; }
-.exposure-route strong, .exposure-route em { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.exposure-route strong { margin-top: 2px; color: var(--strong); font: 620 10px/1.3 'Space Grotesk', sans-serif; }
-.exposure-route em { margin-top: 1px; color: currentColor; font: normal 600 10px/1.3 system-ui, sans-serif; }
-.journey-compact-ai { display: flex; align-items: center; gap: 7px; min-width: 0; min-height: 46px; padding: 3px 6px; color: inherit; background: transparent; border: 0; border-radius: var(--control-radius); text-align: left; cursor: pointer; }
-.journey-compact-ai:hover { background: var(--surface-raised); }
-.journey-compact-ai-icons { display: flex; align-items: center; flex: 0 0 auto; min-width: 25px; }
-.compact-ai-client { position: relative; display: inline-grid; place-items: center; color: var(--muted); background: var(--ink); border-radius: 4px; box-shadow: 0 0 0 2px var(--ink); }
-.compact-ai-client + .compact-ai-client { margin-left: -5px; }
-.compact-ai-client.ready { color: var(--verify); }
-.compact-ai-client.working { color: var(--violet); }
-.compact-ai-client.attention { color: var(--amber); }
-.compact-ai-client-dot { position: absolute; right: -1px; bottom: -1px; width: 7px; height: 7px; background: currentColor; border: 2px solid var(--ink); border-radius: 50%; }
-.compact-ai-empty { display: grid; place-items: center; width: 25px; height: 25px; color: var(--muted); border: 1px dashed var(--line); border-radius: var(--control-radius); }
-.compact-ai-overflow { display: grid; place-items: center; min-width: 20px; height: 20px; margin-left: -3px; padding: 0 4px; color: var(--muted); background: var(--surface-raised); border: 1px solid var(--line); border-radius: 10px; font-size: 10px; }
-.journey-compact-ai-copy { display: grid; min-width: 0; }
-.journey-compact-ai-copy strong { margin-top: 3px; overflow: hidden; color: var(--strong); font-size: 11px; line-height: 1.3; text-overflow: ellipsis; white-space: normal; }
-.journey-compact-share { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 82px; min-height: 34px; padding-inline: 10px; }
 .journey-repair-preview { flex: none; margin: 0 0 14px; padding: 16px; background: color-mix(in srgb, var(--amber) 6%, var(--slate)); border: 1px solid color-mix(in srgb, var(--amber) 30%, var(--line)); border-radius: var(--control-radius); }
 .journey-repair-preview .repair-preview { padding-top: 0; border-top: 0; }
 .content-tabs { display: flex; align-items: center; gap: 24px; height: 48px; border-bottom: 1px solid var(--line); }
@@ -607,7 +564,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .content-tabs-bar .content-tabs { flex: 1; height: auto; border-bottom: 0; }
 .content-filters { gap: 16px; overflow-x: auto; scrollbar-width: none; }
 .content-filters::-webkit-scrollbar { display: none; }
-.wiki-content-sticky { position: sticky; z-index: 4; top: var(--wiki-sticky-offset); display: flex; flex-wrap: wrap; gap: 14px; min-height: 64px; padding: 6px 2px; background: color-mix(in srgb, var(--ink) 96%, var(--slate)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); box-shadow: 0 9px 18px color-mix(in srgb, var(--ink) 18%, transparent); }
+.wiki-content-sticky { position: sticky; z-index: 4; top: var(--wiki-sticky-offset); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; min-height: 48px; padding: 6px 0; background: var(--ink); border-bottom: 1px solid var(--line); }
 .wiki-content-sticky .content-tabs { min-width: max-content; }
 .content-tabs-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 176px; min-height: 38px; }
 .content-tabs-actions > .wiki-update-action { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 8px; color: var(--strong); background: transparent; border: 1px solid var(--line); border-radius: var(--control-radius); white-space: nowrap; cursor: pointer; }
@@ -1165,7 +1122,6 @@ button:active:not(:disabled) { transform: scale(.985); }
 
 @media (max-width: 1320px) {
   .wiki-content-sticky { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; padding-block: 7px; }
-  .wiki-content-sticky > .wiki-journey-compact { grid-column: 1 / -1; }
 }
 
 @media (max-width: 1120px) {
@@ -1181,11 +1137,6 @@ button:active:not(:disabled) { transform: scale(.985); }
 }
 
 @media (max-width: 760px) {
-  .wiki-journey-compact { grid-template-areas: 'identity share' 'exposure exposure' 'ai ai'; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
-  .journey-compact-identity { grid-area: identity; }
-  .journey-compact-exposure { grid-area: exposure; padding-block: 6px; border: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-  .journey-compact-ai { grid-area: ai; }
-  .journey-compact-share { grid-area: share; }
   .review-comparison { grid-template-columns: minmax(0, 1fr); }
   .review-comparison > section { padding: 18px 0; }
   .review-comparison > section + section { padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
@@ -1207,7 +1158,6 @@ button:active:not(:disabled) { transform: scale(.985); }
   .status-donut-track, .status-segment { stroke: CanvasText; }
   .peer-card, .device-grant-list { border-color: CanvasText; }
   .library-filter-group button.active { border-color: Highlight; color: HighlightText; background: Highlight; }
-  .journey-compact-icon, .exposure-node, .compact-ai-client, .compact-ai-client-dot, .wiki-row-exposure-route > span > i { border-color: CanvasText; background: Canvas; }
   .wiki-row::before, .wiki-status-signal { background: CanvasText; }
 }
 
@@ -1298,3 +1248,15 @@ button, a[href], input:not([type='hidden']), select { min-height: 28px; }
   .check-control > input:checked + .check-indicator, .switch-control > input:checked + .switch-track { color: HighlightText; background: Highlight; border-color: Highlight; }
   .status-dot, .health-signal, .pulse, .settings-status-dot { background: CanvasText; box-shadow: none; }
 }
+
+/* Context attached to the current article, rendered locally and remotely. */
+.reader-details { display: grid; gap: 16px; margin: 0 0 24px; font: 400 12px/1.5 var(--font-ui); }
+.reader-details dt { margin-bottom: 4px; color: var(--muted); }
+.reader-details dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.reader-metadata { margin: 20px 0; font: 400 12px/1.5 var(--font-ui); }
+.reader-metadata summary { margin-bottom: 16px; color: var(--muted); cursor: pointer; }
+.reader-related h2 { font: 600 14px/1.4 var(--font-ui); }
+.reader-links { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; font: 400 13px/1.5 var(--font-ui); }
+.reader-links .text-action { padding: 4px 0; text-align: left; }
+.shared-wiki-heading .shared-wiki-access { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; margin: 0; border: 0; background: transparent; }
+.shared-wiki-heading .shared-wiki-access small { color: var(--muted); font-size: 11px; }

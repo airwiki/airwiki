@@ -20,3 +20,17 @@ Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
   configurable: true,
   value: () => undefined
 });
+
+// JSDOM has no native dialog lifecycle. Keep its open/close events available to
+// component tests; native modality and focus containment are covered in E2E.
+Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+  configurable: true,
+  value: function (this: HTMLDialogElement) { this.setAttribute('open', ''); }
+});
+Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+  configurable: true,
+  value: function (this: HTMLDialogElement) {
+    this.removeAttribute('open');
+    this.dispatchEvent(new Event('close'));
+  }
+});

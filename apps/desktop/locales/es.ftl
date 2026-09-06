@@ -1682,3 +1682,16 @@ desktop-review-queue-body = Revisa las propuestas y su evidencia antes de incorp
 desktop-wiki-reviewed-count = { $count } conceptos revisados
 desktop-wiki-pending-count = { $count } por revisar
 desktop-sidebar-shared = Wiki compartida
+
+reader-sources = Fuentes
+reader-concept-sources = Fuentes del concepto
+reader-page-details = Detalles de la página
+reader-sources-scope = Declaradas para este concepto; no están asociadas a fragmentos concretos del texto.
+reader-sources-empty = Este concepto no declara fuentes.
+reader-sources-unavailable = Este origen no proporciona fuentes estructuradas. Puedes consultar los metadatos publicados en Detalles.
+reader-source-resource = Recurso
+reader-source-author = Autor
+reader-source-date = Fecha de modificación
+reader-wiki-details = Detalles de la wiki
+reader-wiki-description = Descripción
+reader-access-private = Privada

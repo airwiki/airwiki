@@ -171,6 +171,29 @@ supported 1024-pixel minimum width. A long index must never push the selected
 article below the entire list. The article retains one reading scroll surface.
 The index may be hidden for reading and recovered from the persistent header.
 
+The local and remote article share `KnowledgeReader`: the page title, essential
+state and text lead the reading surface. Show an identical leading Markdown
+heading only once. Keep invalid metadata, stale assurance and truncation visible
+before the body. Wiki controls retain separate Share and AI Apps actions; normal
+reading does not repeat the Wiki identity or show a permanent exposure diagram.
+
+Sources and page Details open a contextual inspector. At widths below 1360
+logical pixels it uses a native modal dialog without narrowing the article;
+larger windows use a side pane. Closing returns focus to the originating control.
+Page or revision changes remove the old inspector. Details contains extended
+metadata and the existing explicit human-verification action. Current backlinks
+remain navigable; unavailable targets are labeled without an active control.
+
+Source declarations are concept metadata, not paragraph citations. The current
+`KnowledgeBlock` contract has no source reference or evidence locator, and the
+Markdown-to-block adapter does not retain link-to-source associations. The UI
+therefore shows “Concept sources” with available title, resource, author and date,
+without inventing numbered citations or opening source documents. Remote pages
+currently provide published metadata but no typed source declarations; their
+inspector states that distinction and preserves the published metadata in
+Details. A changed remote page fingerprint hides its cached body until a current
+page is requested. These presentation changes add no source-document exposure.
+
 Library rows prioritize name, available description, reviewed and pending
 concept counts, and real network access. Show attention and work in progress
 when present. Do not repeat healthy technical states on every row. Settings

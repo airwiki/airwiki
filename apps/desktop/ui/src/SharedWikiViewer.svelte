@@ -18,6 +18,7 @@
   } from './api';
   import LoadingState from './components/LoadingState.svelte';
   import LoadingSkeleton from './components/LoadingSkeleton.svelte';
+  import KnowledgeReader from './components/KnowledgeReader.svelte';
   import DeviceIdentity from './components/identity/DeviceIdentity.svelte';
   import { focusChoiceWithoutScroll } from './focus';
   import type { MessageArgs } from './i18n';
@@ -43,7 +44,7 @@
 
   export let selectedPage: RemoteWikiPageInput | null = null;
   export let viewMode: 'list' | 'graph' = 'list';
-  let headingElement: HTMLHeadingElement | null = null;
+  let headingElement: HTMLElement | null = null;
   let renderedWikiIdentity: string | null = null;
 
   $: synchronizeWikiSelection(browse ? browseIdentity(browse) : null);
@@ -57,10 +58,11 @@
     : selectedDescriptor?.page.kind === 'concept'
       ? selectedDescriptor.page.conceptId
       : initialConceptId;
-  $: selectedConcept = browse?.concepts.find((concept) => concept.conceptId === selectedConceptId)
+  $: selectedConcept = browse?.workspaceSupported && selectedDescriptor?.page.kind !== 'concept' ? null : browse?.concepts.find((concept) => concept.conceptId === selectedConceptId)
     ?? (selectedConceptId === null ? browse?.concepts[0] : null)
     ?? null;
   $: selectedDocument = browse?.page && selectedDescriptor && samePage(browse.page.descriptor.page, selectedDescriptor.page)
+    && browse.page.descriptor.fingerprint === selectedDescriptor.fingerprint
     ? browse.page
     : null;
   $: requestedConceptUnavailable = Boolean(
@@ -68,6 +70,7 @@
     && browse.workspaceSupported
     && !structureLoading
     && initialConceptId
+    && (selectedPage === null || (selectedPage.kind === 'concept' && selectedPage.conceptId === initialConceptId))
     && !descriptors.some((descriptor) => descriptor.page.kind === 'concept' && descriptor.page.conceptId === initialConceptId)
   );
   $: if (!loading && browse && !unavailable()) {
@@ -234,10 +237,8 @@
         <nav class="breadcrumb" aria-label={t('desktop-page-search-title')}>
           <button onclick={onback}>{t('desktop-shared-back-results')}</button>
           <span aria-hidden="true">/</span>
-          <span>{browse.wikiName ?? t('desktop-public-origin-missing')}</span>
+          <svelte:element this={selectedDocument && viewMode === 'list' ? 'span' : 'h1'} class="wiki-context-name" bind:this={headingElement} tabindex="-1">{browse.wikiName ?? t('desktop-public-origin-missing')}</svelte:element>
         </nav>
-        <h1 bind:this={headingElement} tabindex="-1">{browse.wikiName ?? t('desktop-public-origin-missing')}</h1>
-        {#if source === 'public' && (browse as PublicBrowseSummary).description}<p>{(browse as PublicBrowseSummary).description}</p>{/if}
       </div>
       <section class="wiki-access-strip shared-wiki-access" aria-label={t('desktop-shared-access-title')}>
         <LockKeyhole size={17} aria-hidden="true" />
@@ -248,13 +249,9 @@
     </header>
 
     <div class="content-tabs-bar shared-content-tabs">
-      <div class="content-tabs" aria-label={t('desktop-wiki-sections')}>
-        <span class="content-tab-label active">{t('desktop-wiki-content-tab')}<span>{browse.documents.length}</span></span>
-      </div>
       <div class="content-tabs-actions">
         {#if structureLoading}<LoadingState label={t('desktop-shared-loading-structure')} compact />{/if}
         {#if browse.workspaceSupported}<div class="view-switch" aria-label={t('desktop-wiki-view')}><button class:active={viewMode === 'list'} aria-pressed={viewMode === 'list'} onclick={() => viewMode = 'list'}><List size={15} aria-hidden="true" />{t('desktop-view-list')}</button><button class:active={viewMode === 'graph'} aria-pressed={viewMode === 'graph'} onclick={() => viewMode = 'graph'}><Network size={15} aria-hidden="true" />{t('desktop-view-graph')}</button></div>{/if}
-        <span class="shared-format">{browse.okfCompatibility ? t(`desktop-okf-compatibility-${browse.okfCompatibility.kind}`) : t('desktop-public-format-unavailable')}</span>
       </div>
     </div>
 
@@ -278,29 +275,29 @@
       {:else}
         <div class="file-browser shared-file-browser">
 
-          <section class="file-preview shared-file-preview" aria-live="polite">
+          <section class="shared-reading-page" aria-live="polite">
             {#if pageLoading}
               <LoadingState label={t('desktop-shared-loading-page')} detail={selectedDescriptor?.logicalPath ?? null} compact />
               <LoadingSkeleton variant="page" />
             {:else if requestedConceptUnavailable}
               <div class="table-empty shared-target-unavailable" role="alert"><AlertTriangle size={20} aria-hidden="true" /><div><strong>{t('desktop-shared-target-unavailable-title')}</strong><p>{t('desktop-shared-target-unavailable-body')}</p></div></div>
             {:else if selectedDocument}
-              <header><p class="section-label">{selectedDocument.descriptor.logicalPath}</p><h2>{pageTitle(selectedDocument.descriptor)}</h2></header>
-              {#if selectedConcept}<div class="concept-reading-status" role="group" aria-label={t('desktop-concept-trust')}>{metadata(selectedConcept)}</div>{/if}
-              <div class="knowledge-blocks">
-                {#each selectedDocument.blocks as block, blockIndex (blockIndex)}
-                  {#if block.kind === 'heading'}<h3 class:minor={block.level > 2}>{block.text}</h3>{:else if block.kind === 'paragraph'}<p>{block.text}</p>{:else if block.kind === 'listItem'}<div class="safe-list-item"><span>{block.ordered ? '—' : '•'}</span><p>{block.text}</p></div>{:else if block.kind === 'code'}<pre><code>{block.text}</code></pre>{:else if block.kind === 'quote'}<blockquote>{block.text}</blockquote>{:else}<hr />{/if}
-                {/each}
-              </div>
-              {#if selectedConcept}
-                <aside class="concept-assurance shared-concept-assurance" aria-label={t('desktop-concept-assurance-title')}>
-                  <div><span>{t('desktop-concept-type')}</span><strong>{selectedConcept.conceptType}</strong></div>
-                  <div class="shared-source-assurance"><span>{t('desktop-shared-source')}</span><DeviceIdentity name={sourceName} platform={sourcePlatform} platformLabel={sourceLabel ?? sourceName} source={source === 'public' ? 'public' : 'device'} compact /></div>
-                </aside>
-              {/if}
-              {#if selectedDocument.metadata.length > 0}
-                <details class="advanced-disclosure shared-metadata"><summary>{t('desktop-shared-published-metadata')}</summary><dl>{#each selectedDocument.metadata as entry, metadataIndex (`${metadataIndex}:${entry[0]}`)}<div><dt>{entry[0]}</dt><dd>{entry[1]}</dd></div>{/each}</dl></details>
-              {/if}
+              {#key `${browseIdentity(browse)}:${pageKey(selectedDocument.descriptor.page)}:${selectedDocument.descriptor.fingerprint}`}
+                <KnowledgeReader title={pageTitle(selectedDocument.descriptor)} blocks={selectedDocument.blocks} truncated={selectedDocument.truncated} showSources={selectedDocument.descriptor.page.kind === 'concept'} hasRelated={selectedDocument.backlinks.length > 0} {t}>
+                  {#snippet status()}{#if selectedConcept}<span>{metadata(selectedConcept)}</span>{/if}{/snippet}
+                  {#snippet details()}
+                    <dl class="reader-details">
+                      {#if selectedConcept}<div><dt>{t('desktop-concept-type')}</dt><dd>{selectedConcept.conceptType}</dd></div>{/if}
+                      <div><dt>{t('desktop-shared-source')}</dt><dd><DeviceIdentity name={sourceName} platform={sourcePlatform} platformLabel={sourceLabel ?? sourceName} source={source === 'public' ? 'public' : 'device'} compact /></dd></div>
+                      <div><dt>{t('reader-source-resource')}</dt><dd>{selectedDocument.descriptor.logicalPath}</dd></div>
+                      <div><dt>{t('desktop-okf-status-title')}</dt><dd>{browse?.okfCompatibility ? t(`desktop-okf-compatibility-${browse.okfCompatibility.kind}`) : t('desktop-public-format-unavailable')}</dd></div>
+                      {#if source === 'public' && (browse as PublicBrowseSummary).description}<div><dt>{t('reader-wiki-description')}</dt><dd>{(browse as PublicBrowseSummary).description}</dd></div>{/if}
+                    </dl>
+                    {#if selectedDocument.metadata.length > 0}<details class="reader-metadata"><summary>{t('desktop-shared-published-metadata')}</summary><dl class="reader-details">{#each selectedDocument.metadata as entry, metadataIndex (metadataIndex)}<div><dt>{entry[0]}</dt><dd>{entry[1]}</dd></div>{/each}</dl></details>{/if}
+                  {/snippet}
+                  {#snippet related()}<h2>{t('knowledge-backlinks', { count: selectedDocument.backlinks.length })}</h2><ul class="reader-links">{#each selectedDocument.backlinks as link, linkIndex (linkIndex)}{@const descriptor = descriptors.find((candidate) => samePage(candidate.page, link))}<li>{#if descriptor}<button class="text-action" onclick={() => selectPage(descriptor)}>{pageTitle(descriptor)}</button>{:else}<span>{t('knowledge-page-unavailable')}</span>{/if}</li>{/each}</ul>{/snippet}
+                </KnowledgeReader>
+              {/key}
             {:else if selectedDescriptor}
               <div class="file-empty"><WikiIcon size={28} /><h2>{t('knowledge-select-page')}</h2><p>{t('desktop-shared-open-page-body')}</p></div>
             {:else}

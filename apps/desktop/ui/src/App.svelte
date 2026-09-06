@@ -6,6 +6,7 @@
   import CheckCircle2 from '@lucide/svelte/icons/circle-check-big';
   import FileText from '@lucide/svelte/icons/file-text';
   import History from '@lucide/svelte/icons/history';
+  import Info from '@lucide/svelte/icons/info';
   import PanelLeft from '@lucide/svelte/icons/panel-left';
   import WorkspaceFrame from './components/WorkspaceFrame.svelte';
   import WorkspaceSidebar from './components/WorkspaceSidebar.svelte';
@@ -28,6 +29,7 @@
   import SharedWikiViewer from './SharedWikiViewer.svelte';
   import LoadingState from './components/LoadingState.svelte';
   import LoadingSkeleton from './components/LoadingSkeleton.svelte';
+  import KnowledgeReader from './components/KnowledgeReader.svelte';
   import ShimmerText from './components/ShimmerText.svelte';
   import Spinner from './components/Spinner.svelte';
   import AiClientIcon from './components/identity/AiClientIcon.svelte';
@@ -379,7 +381,8 @@
   }
 
   function topDialogElement(): HTMLElement | null {
-    return Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]'))
+    return document.querySelector<HTMLDialogElement>('dialog[open]')
+      ?? Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]'))
       .filter((dialog) => !dialog.closest('[hidden], [inert], [aria-hidden="true"]'))
       .at(-1) ?? null;
   }
@@ -584,6 +587,9 @@
     (wiki) => !(snapshot?.blockedPublicPublishers ?? []).includes(wiki.publisherId)
   );
   $: selectedWiki = snapshot?.wikis.find((wiki) => wiki.id === selectedWikiId) ?? null;
+  $: localReaderVisible = !localPageHidden && !pendingKnowledgePage && readingRestore?.stage !== 'bundle'
+    && knowledgeMode === 'document' && snapshot?.knowledgePage?.wikiId === selectedWikiId
+    && snapshot?.knowledgePage?.status === 'ready';
   $: selectedWikiReviews = snapshot?.reviews.filter((review) => review.wikiId === selectedWikiId) ?? [];
   $: selectedWikiReviewByConcept = new Map(
     selectedWikiReviews.map((review) => [review.conceptId, review])
@@ -878,6 +884,11 @@
       }
       if (dialog !== null) {
         if (event.key !== 'Escape') return;
+        if (dialog instanceof HTMLDialogElement) {
+          event.preventDefault();
+          dialog.close();
+          return;
+        }
         dismissActiveDialog();
         return;
       }
@@ -1558,6 +1569,12 @@
     return !localPageHidden && !pendingKnowledgePage && snapshot?.knowledgePage?.wikiId === selectedWikiId
       && snapshot.knowledgePage.status === 'ready'
       && pageKey(snapshot.knowledgePage.page) === pageKey(page);
+  }
+
+  function knowledgePageTitle(page: KnowledgePageInput): string {
+    if (page.kind === 'index') return t('knowledge-index-title');
+    if (page.kind === 'log') return t('knowledge-recovery-history');
+    return snapshot?.knowledge?.concepts.find((concept) => pageKey(concept.page) === pageKey(page))?.title ?? page.path;
   }
 
   function compatibilityLabel(wiki: WikiSummary): string {
@@ -3067,7 +3084,7 @@
             {@const wiki = selectedWiki}
             {@const selectedWikiIssues = snapshot.sourceIssues.filter((issue) => issue.wikiId === wiki.id)}
             <header class="page-heading wiki-heading">
-              <div class="wiki-heading-copy"><nav class="breadcrumb" aria-label={t('desktop-library-title')}><button onclick={() => select('library')}>{t('desktop-library-title')}</button><span aria-hidden="true">/</span><span>{wiki.name}</span></nav><div class="wiki-title-line"><h1 tabindex="-1">{wiki.name}</h1><span>{t('desktop-wiki-detail-body', { published: wiki.publishedCount })}</span></div></div>
+              <nav class="breadcrumb" aria-label={t('desktop-library-title')}><button onclick={() => select('library')}>{t('desktop-library-title')}</button><span aria-hidden="true">/</span><svelte:element this={localReaderVisible ? 'span' : 'h1'} class="wiki-context-name" tabindex={localReaderVisible ? undefined : -1}>{wiki.name}</svelte:element><button class="wiki-context-details" onclick={() => showWikiDetails(wiki.id)} aria-label={`${t('reader-wiki-details')}: ${wiki.name}`}><Info size={15} aria-hidden="true" /></button></nav>
             </header>
 
             <div class="wiki-detail-body">
@@ -3120,7 +3137,6 @@
                     {#if wikiUpdateRunning(wiki.id)}<Spinner size="small" />{t('desktop-wiki-update-running')}{:else}<RefreshCw size={15} aria-hidden="true" />{t('desktop-wiki-update-folder')}{/if}
                   </button>
                 {/if}
-                <button class="details-tab" onclick={() => showWikiDetails(wiki.id)}>{t('desktop-details')}</button>
               </div>
             </div>
 
@@ -3135,34 +3151,32 @@
                   <LoadingSkeleton variant="workspace" rows={5} />
                 </section>
               {:else}
-                <div class="file-browser">
-
-                  <section class="file-preview" aria-live="polite">
+                <div class="file-browser" aria-live="polite">
                     {#if pendingKnowledgePage?.wikiId === wiki.id}
-                      <LoadingState label={t('knowledge-page-loading')} detail={t('desktop-knowledge-page-loading-body')} compact />
-                      <LoadingSkeleton variant="page" />
+                      <section class="file-preview"><LoadingState label={t('knowledge-page-loading')} detail={t('desktop-knowledge-page-loading-body')} compact /><LoadingSkeleton variant="page" /></section>
                     {:else if !localPageHidden && snapshot.knowledgePage?.wikiId === wiki.id && snapshot.knowledgePage.status === 'ready'}
-                      {@const concept = snapshot.knowledgePage.concept}
+                      {@const page = snapshot.knowledgePage}
+                      {@const concept = page.concept}
                       {@const reviewState = concept ? conceptReviewState(concept) : null}
-                      <header><p class="section-label">{reviewState ? t(`desktop-review-state-${reviewState}`) : t('desktop-verified-page')}</p><h2>{snapshot.knowledgePage.title}</h2>{#if concept && reviewState !== 'reviewed'}<button class="primary compact-review-action" onclick={() => openConceptReview(concept.conceptId)}>{t(reviewState === 'excluded' ? 'review-review-excluded' : 'review-open-draft')}</button>{/if}</header>
-                      {#if concept}
-                        <div class="concept-reading-status" role="group" aria-label={t('desktop-concept-assurance-title')}><span>{assuranceLabel(concept)}</span><span>{t(`desktop-freshness-${concept.assurance.freshness}`)}</span></div>
-                          {#if concept.warnings.length > 0}<p class="metadata-warning"><AlertTriangle size={15} aria-hidden="true" />{t('desktop-concept-metadata-warning', { count: concept.warnings.length })}</p>{/if}
-                      {/if}
-                      {#if snapshot.knowledgePage.truncated}<p class="evidence-warning">{t('knowledge-page-truncated')}</p>{/if}
-                      <div class="knowledge-blocks">{#each snapshot.knowledgePage.blocks as block, blockIndex (blockIndex)}{#if block.kind === 'heading'}<h3 class:minor={block.level > 2}>{block.text}</h3>{:else if block.kind === 'paragraph'}<p>{block.text}</p>{:else if block.kind === 'listItem'}<div class="safe-list-item"><span>{block.ordered ? '—' : '•'}</span><p>{block.text}</p></div>{:else if block.kind === 'code'}<pre><code>{block.text}</code></pre>{:else if block.kind === 'quote'}<blockquote>{block.text}</blockquote>{:else}<hr />{/if}{/each}</div>
-                      {#if concept}
-                        <aside class="concept-assurance" aria-label={t('desktop-concept-assurance-title')}>
-                          <div><span>{t('desktop-concept-type')}</span><strong>{concept.conceptType}</strong></div>
-                          {#if concept.generatedBy}<div><span>{t('desktop-concept-generated-by')}</span><strong>{concept.generatedBy}</strong></div>{/if}
-                          {#if concept.sources.length > 0}<details><summary>{t('desktop-concept-sources', { count: concept.sources.length })}</summary><ul>{#each concept.sources as source, sourceIndex (source.id ?? source.resource ?? sourceIndex)}<li><strong>{source.title ?? source.id ?? t('desktop-concept-source-unnamed')}</strong>{#if source.author}<small>{source.author}</small>{/if}{#if source.lastModified}<small>{source.lastModified}</small>{/if}</li>{/each}</ul></details>{/if}
-                          {#if canVerifyConcept(wiki, concept)}<button class="secondary concept-verify" onclick={() => verifyConcept(wiki, concept)} disabled={actionBusy}>{t('desktop-concept-verify')}</button>{/if}
-                        </aside>
-                      {/if}
+                      {#key `${page.wikiId}:${pageKey(page.page)}:${concept?.fingerprint ?? knowledgePageFingerprint(page.page)}`}
+                        <KnowledgeReader title={page.title} blocks={page.blocks} truncated={page.truncated} sources={concept?.sources ?? []} showSources={concept !== null} hasActions={concept !== null && reviewState !== 'reviewed'} hasRelated={page.backlinks.length > 0} {t}>
+                          {#snippet status()}<span>{reviewState ? t(`desktop-review-state-${reviewState}`) : t('desktop-verified-page')}</span>{#if concept}<span>{assuranceLabel(concept)}</span><span>{t(`desktop-freshness-${concept.assurance.freshness}`)}</span>{/if}{/snippet}
+                          {#snippet warnings()}{#if concept && concept.warnings.length > 0}<p class="metadata-warning"><AlertTriangle size={15} aria-hidden="true" />{t('desktop-concept-metadata-warning', { count: concept.warnings.length })}</p>{/if}{/snippet}
+                          {#snippet actions()}{#if concept && reviewState !== 'reviewed'}<button class="primary compact-review-action" onclick={() => openConceptReview(concept.conceptId)}>{t(reviewState === 'excluded' ? 'review-review-excluded' : 'review-open-draft')}</button>{/if}{/snippet}
+                          {#snippet details()}
+                            <dl class="reader-details">
+                              {#if concept}<div><dt>{t('desktop-concept-type')}</dt><dd>{concept.conceptType}</dd></div>{#if concept.generatedBy}<div><dt>{t('desktop-concept-generated-by')}</dt><dd>{concept.generatedBy}</dd></div>{/if}{/if}
+                              <div><dt>{t('reader-source-resource')}</dt><dd>{page.page.kind === 'concept' ? page.page.path : `${page.page.kind}.md`}</dd></div>
+                            </dl>
+                            {#if page.metadata.length > 0}<details class="reader-metadata"><summary>{t('knowledge-metadata')}</summary><dl class="reader-details">{#each page.metadata as entry, metadataIndex (metadataIndex)}<div><dt>{entry[0]}</dt><dd>{entry[1]}</dd></div>{/each}</dl></details>{/if}
+                            {#if concept && canVerifyConcept(wiki, concept)}<button class="secondary concept-verify" onclick={() => verifyConcept(wiki, concept)} disabled={actionBusy}>{t('desktop-concept-verify')}</button>{/if}
+                          {/snippet}
+                          {#snippet related()}{#if page.backlinks.length > 0}<h2>{t('knowledge-backlinks', { count: page.backlinks.length })}</h2><ul class="reader-links">{#each page.backlinks as linkedPage, linkIndex (linkIndex)}<li>{#if knowledgePageFingerprint(linkedPage)}<button class="text-action" onclick={() => openKnowledgePage(linkedPage)}>{knowledgePageTitle(linkedPage)}</button>{:else}<span>{knowledgePageTitle(linkedPage)} · {t('knowledge-page-unavailable')}</span>{/if}</li>{/each}</ul>{/if}{/snippet}
+                        </KnowledgeReader>
+                      {/key}
                     {:else if !localPageHidden && snapshot.knowledgePage?.wikiId === wiki.id && snapshot.knowledgePage.status === 'failed'}
                       <div class="file-empty" role="status"><AlertTriangle size={28} aria-hidden="true" /><h2>{t('knowledge-page-load-failed-title')}</h2><p>{t('knowledge-page-load-failed')}</p></div>
                     {:else}<div class="file-empty"><WikiIcon size={28} /><h2>{t('knowledge-select-page')}</h2><p>{t('desktop-verified-only')}</p></div>{/if}
-                  </section>
                 </div>
               {/if}
             {:else}

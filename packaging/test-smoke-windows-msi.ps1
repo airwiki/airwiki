@@ -105,6 +105,101 @@ function Assert-WindowsInstallerRecordAccess {
 
 Assert-WindowsInstallerRecordAccess
 
+function Assert-WindowsInstallerMetadataRead {
+    # Load only the read-only metadata functions, never the install/uninstall entrypoint.
+    $Tokens = $null
+    $ParseErrors = $null
+    $SmokeAst = [System.Management.Automation.Language.Parser]::ParseFile(
+        $SmokePath, [ref]$Tokens, [ref]$ParseErrors
+    )
+    foreach ($FunctionName in @(
+        "Assert-RegularFile", "ConvertTo-MsiGuid", "Get-MsiProperties", "Get-InstallerMetadata"
+    )) {
+        $Definitions = @($SmokeAst.FindAll({
+            param($Node)
+            $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $Node.Name -ceq $FunctionName
+        }, $false))
+        if ($Definitions.Count -ne 1) { throw "Missing unique MSI metadata function: $FunctionName" }
+        . ([scriptblock]::Create($Definitions[0].Extent.Text))
+    }
+
+    $ProductName = "AirWiki"
+    $Publisher = "AirWiki"
+    $Expected = @{
+        ProductCode = "{00000000-0000-0000-0000-000000000001}"
+        UpgradeCode = "{00000000-0000-0000-0000-000000000002}"
+        ProductVersion = "0.3.0"
+        ProductName = $ProductName
+        Manufacturer = $Publisher
+    }
+    $FixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("airwiki-msi-metadata-" + [guid]::NewGuid())
+    $null = New-Item -ItemType Directory -Path $FixtureRoot
+
+    function New-MetadataFixture([string] $Path, [hashtable] $Properties) {
+        $InstallerCom = $null
+        $Database = $null
+        $View = $null
+        $Record = $null
+        try {
+            $InstallerCom = New-Object -ComObject WindowsInstaller.Installer
+            $Database = $InstallerCom.OpenDatabase($Path, 3)
+            $View = $Database.OpenView('CREATE TABLE `Property` (`Property` CHAR(72) NOT NULL, `Value` CHAR(0) LOCALIZABLE PRIMARY KEY `Property`)')
+            [void] $View.Execute()
+            [void] $View.Close()
+            [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($View)
+            $View = $null
+            $View = $Database.OpenView('INSERT INTO `Property` (`Property`, `Value`) VALUES (?, ?)')
+            $Record = $InstallerCom.CreateRecord(2)
+            foreach ($Name in $Properties.Keys) {
+                Set-WindowsInstallerRecordStringDataForTest -Record $Record -Field 1 -Value $Name
+                Set-WindowsInstallerRecordStringDataForTest -Record $Record -Field 2 -Value $Properties[$Name]
+                [void] $View.Execute($Record)
+            }
+            [void] $Database.Commit()
+        } finally {
+            if ($null -ne $Record) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($Record) }
+            if ($null -ne $View) { [void] $View.Close(); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($View) }
+            if ($null -ne $Database) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($Database) }
+            if ($null -ne $InstallerCom) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($InstallerCom) }
+        }
+    }
+
+    try {
+        $Fixture = Join-Path $FixtureRoot "valid.msi"
+        New-MetadataFixture $Fixture $Expected
+        $Results = @(Get-MsiProperties $Fixture)
+        if ($Results.Count -ne 1 -or $Results[0] -isnot [hashtable]) {
+            throw "MSI metadata reader must return exactly one property map"
+        }
+        foreach ($Name in $Expected.Keys) {
+            if ($Results[0][$Name] -cne $Expected[$Name]) { throw "MSI property did not round-trip: $Name" }
+        }
+        $Metadata = Get-InstallerMetadata $Fixture
+        if ($Metadata.ProductCode -cne $Expected.ProductCode -or
+            $Metadata.UpgradeCode -cne $Expected.UpgradeCode -or
+            $Metadata.ProductVersion -ne [version]$Expected.ProductVersion -or
+            $Metadata.Sha256 -cne (Get-FileHash -LiteralPath $Fixture -Algorithm SHA256).Hash.ToLowerInvariant()) {
+            throw "MSI metadata reader returned an unexpected identity or digest"
+        }
+        $Invalid = Copy-Hashtable $Expected
+        $Invalid.ProductCode = "not-a-guid"
+        $InvalidFixture = Join-Path $FixtureRoot "invalid-guid.msi"
+        New-MetadataFixture $InvalidFixture $Invalid
+        Assert-Rejected { Get-InstallerMetadata $InvalidFixture } "Invalid MSI product GUID"
+
+        $Missing = Copy-Hashtable $Expected
+        $Missing.Remove("Manufacturer")
+        $MissingFixture = Join-Path $FixtureRoot "missing-property.msi"
+        New-MetadataFixture $MissingFixture $Missing
+        Assert-Rejected { Get-InstallerMetadata $MissingFixture } "Missing MSI manufacturer"
+    } finally {
+        Remove-Item -LiteralPath $FixtureRoot -Recurse -Force
+    }
+}
+
+Assert-WindowsInstallerMetadataRead
+
 foreach ($Required in @(
     '[switch] $AuthorizeDestructiveMsiSmoke',
     '[switch] $AllowGitHubHostedWindowsServer2022',

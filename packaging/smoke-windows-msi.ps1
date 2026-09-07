@@ -172,7 +172,8 @@ function Get-MsiProperties([string] $Path) {
         $InstallerCom = New-Object -ComObject WindowsInstaller.Installer
         $Database = $InstallerCom.OpenDatabase($Path, 0)
         $View = $Database.OpenView('SELECT `Property`, `Value` FROM `Property`')
-        $View.Execute()
+        # Keep COM method results out of this function's property-map output.
+        [void] $View.Execute()
         $Properties = @{}
         while ($true) {
             $Record = $View.Fetch()
@@ -187,7 +188,7 @@ function Get-MsiProperties([string] $Path) {
         }
         return $Properties
     } finally {
-        if ($null -ne $View) { $View.Close(); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($View) }
+        if ($null -ne $View) { [void] $View.Close(); [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($View) }
         if ($null -ne $Database) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($Database) }
         if ($null -ne $InstallerCom) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($InstallerCom) }
     }

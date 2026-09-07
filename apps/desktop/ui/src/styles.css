@@ -362,7 +362,8 @@ button:active:not(:disabled) { transform: scale(.985); }
 .library-name-filter { position: relative; flex: 1 1 200px; max-width: 280px; min-width: 0; }
 .library-name-filter input { min-height: 32px; padding-right: 36px; font-size: var(--font-size-ui); }
 .library-name-filter input::placeholder { color: var(--muted); }
-.library-name-clear { position: absolute; inset-block: 0; right: 4px; display: grid; place-items: center; width: 28px; height: 28px; margin-block: auto; padding: 0; color: var(--muted); background: transparent; border: 0; border-radius: var(--control-radius); cursor: pointer; }
+/* Preserve placement when the shared keyboard-focus rule raises the control. */
+.library-name-filter > .library-name-clear { position: absolute; inset-block: 0; right: 4px; display: grid; place-items: center; width: 28px; height: 28px; margin-block: auto; padding: 0; color: var(--muted); background: transparent; border: 0; border-radius: var(--control-radius); cursor: pointer; }
 .library-name-clear:hover { color: var(--strong); background: var(--surface-raised); }
 .library-filter-count { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--font-size-ui); font-variant-numeric: tabular-nums; }
 .library-heading { flex-wrap: wrap; }

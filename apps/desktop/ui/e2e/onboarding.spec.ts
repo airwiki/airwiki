@@ -1363,6 +1363,20 @@ describe('AirWiki real IPC journey', () => {
     await expect($$('.wiki-row')).toBeElementsArrayOfSize(1);
     await expect($('.wiki-row')).toHaveText(expect.stringContaining('E2E imported wiki'));
     await expect($('.library-filter-count')).toHaveText('1 of 3 Wikis');
+    const clearPlacement = await browser.execute(() => {
+      const input = document.querySelector<HTMLInputElement>('#library-name-filter');
+      const clear = document.querySelector<HTMLButtonElement>('.library-name-clear');
+      clear?.focus();
+      const field = input?.getBoundingClientRect();
+      const control = clear?.getBoundingClientRect();
+      return {
+        focusVisible: clear?.matches(':focus-visible') ?? false,
+        contained: Boolean(field && control && document.activeElement === clear
+          && control.left >= field.left && control.right <= field.right
+          && control.top >= field.top && control.bottom <= field.bottom),
+      };
+    });
+    expect(clearPlacement).toEqual({ focusVisible: true, contained: true });
     // The driver sends synthetic keys and refocuses click targets after their
     // handlers. Native keyboard activation and focus return need a walkthrough.
     await $('.library-name-clear').click();

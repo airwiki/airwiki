@@ -13,6 +13,6 @@ window.AIRWIKI_LAUNCH = {
     label: "Technical beta for evaluators",
     href: "https://github.com/airwiki/airwiki/releases",
     notice:
-      "Unsupported manual test candidates only: Windows packages are unsigned and macOS packages are not notarized. Keep platform protections enabled.",
+      "Development candidates only. Windows packages remain unsigned; check each release for macOS signing status. Keep platform protections enabled.",
   },
 };

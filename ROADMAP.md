@@ -2,6 +2,18 @@
 
 This roadmap describes the current beta's public outcomes, not delivery dates or a promise to implement every request. Priorities can change when privacy, authorization, recoverability, or validation requires it.
 
+## Delivered in the 0.3 desktop redesign
+
+- A contextual sidebar and a reader with independent navigation scrolling.
+- A linked-W Wiki symbol, simpler Library rows and a dedicated review queue.
+- An evidence/proposal workspace with compact headings and full-width actions.
+- One-row search, clearer Settings and onboarding that fits shorter windows.
+- Restoration of the last valid local reading and sidebar preferences.
+
+Everyday journeys were validated in installed development candidates on macOS
+and Windows. Release installers have their own acceptance gate; see the
+[0.3 candidate notes](docs/releases/0.3.0.md).
+
 ## Before a supported public release
 
 1. **Trusted distribution.** Complete legal review, protected signing, notarization, updater custody and verification, and clean-install/upgrade validation on the supported macOS and Windows targets.
@@ -14,7 +26,7 @@ The complete release gate remains the [public release checklist](docs/release-ch
 ## Feedback that helps most now
 
 - Whether a new evaluator can create a Wiki from synthetic files, understand draft versus reviewed knowledge, prepare local AI, and find evidence-backed search results.
-- Clear, reproducible problems with accessibility, keyboard use, first-run recovery, update/install behavior, and privacy controls.
+- Clear, reproducible problems with reading, navigation, search, review, window layout, first-run recovery, update/install behavior, and privacy controls. Keyboard and accessibility regressions remain useful reports.
 - Workflows where AirWiki's local-first and human-review boundaries are unclear or surprising.
 - Missing ingestion, platform, or integration capability that prevents a safe evaluation, described as an outcome rather than a presumed implementation.
 

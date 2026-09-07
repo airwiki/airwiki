@@ -77,12 +77,47 @@ The Linux archive contains `airwiki-federation-index`, a server for maintainers
 following the public-federation runbook. It is not AirWiki Desktop and provides
 no desktop UI.
 
+## Platform release candidate
+
+A `v<version>-rc.<number>` entry, when present, uses the separate
+[platform RC workflow](https://github.com/airwiki/airwiki/actions/workflows/package-platform-rc.yml).
+It remains **Pre-release**, never **Latest**, and supplies no updater manifest.
+Its Apple-silicon DMG is Developer ID signed and notarized; its two Windows MSI
+packages remain unsigned technical betas. This channel contains no Linux asset.
+
+Read `PLATFORM-RELEASE-CANDIDATE.txt`, `PROVENANCE.json`,
+`MACOS-VERIFICATION.json` and `SHA256SUMS.txt` from that exact release. Verify the
+selected file’s checksum and build provenance using the RC workflow:
+
+```text
+gh attestation verify <asset> --repo airwiki/airwiki --signer-workflow airwiki/airwiki/.github/workflows/package-platform-rc.yml --source-ref refs/heads/main --source-digest <commit> --deny-self-hosted-runners
+```
+
+Use the complete commit in that release’s provenance for `<commit>`. A notarized
+Mac candidate does not make Windows signed or establish a stable updater channel.
+See the [0.3 candidate notes](releases/0.3.0.md) for the desktop changes.
+
+## Updating an existing candidate
+
+Quit AirWiki completely before replacing its application files. Keep a private
+backup of the existing application and its complete local-data root; do not
+copy a live SQLite database or include backups in public reports. Install the
+newer package normally and retain local data. Existing Wikis, identity references,
+permissions and verified model assets belong to the retained profile.
+
+The 0.3 workspace adds database migration 0019 for bounded reading state. Older
+builds may reject that schema. Recovery requires either a compatible newer build
+or restoring the complete pre-upgrade profile together with its matching older
+application while AirWiki is stopped. Do not delete the database or restore only
+selected database files to force a downgrade.
+
 ## macOS arm64
 
 1. Open the DMG and move **AirWiki** to Applications.
-2. For a technical pre-release, compare the DMG hash with `SHA256SUMS.txt`. Its
-   filename states that it is unsigned for public trust and not notarized. A
-   future stable release must pass Developer ID signing and notarization.
+2. Compare the DMG hash with `SHA256SUMS.txt`. A technical-beta filename states
+   that it is unsigned for public trust and not notarized. A platform RC uses
+   `SIGNED-NOTARIZED-RC` and includes a macOS verification receipt. Both remain
+   development candidates; keep Gatekeeper enabled.
 3. When replacing one ad-hoc internal candidate with another, macOS can ask
    whether the new build may access AirWiki's existing device identity in the
    login Keychain. Authorize that access only after verifying the candidate
@@ -93,7 +128,8 @@ no desktop UI.
 5. Review the optional hardware recommendation, licenses, and remaining
    download size. You can finish onboarding and prepare local AI later; when
    search is unavailable, AirWiki keeps a visible **Open local AI settings**
-   path in setup and a **View local AI status** action beside the search field.
+   path in setup. Search recovery guidance appears in the Search workspace;
+   local AI is also available in **Settings → General**.
 6. Allow the application to prepare only the selected local model assets.
 
 No daemon, system service, or Internet-facing port is installed. Optional
@@ -225,12 +261,12 @@ without an actual grant is not presented as shared access, and public permission
 with an offline or expired announcement is not presented as confirmed Internet
 availability.
 
-The Library landing view is deliberately operational rather than decorative.
-Use **All**, **Needs attention**, **Only you**, and **Shared** to narrow the Wiki
-list without changing knowledge search. Each Wiki is one keyboard-operable shelf
-row: its name and origin lead into separate detected, searchable and review
-counts, a Local/LAN/Internet exposure route, and the next required action. The
-row remains understandable without relying on a separate table header.
+Library groups local Wikis into compact rows showing content, access and the
+next action. The contextual sidebar offers **Library**, **To review**, your
+Wikis, **New wiki** and **Settings**. **To review** groups pending proposals by
+Wiki. At wide sizes, source evidence and the proposal appear side by side; at
+compact sizes, tabs switch between them. Review actions reserve their own row
+across the workspace, keeping the end of the editor reachable.
 
 On macOS and Windows, the native application menu provides **New wiki…**,
 standard Edit and Window commands, and Library, Search, and Settings navigation.
@@ -238,10 +274,12 @@ The menu follows AirWiki's saved language preference; **System** follows the
 operating-system language. Its commands use the same local flows as the visible
 controls; they do not add a second configuration or publication path.
 
-Inside a Wiki, use the page scrollbar for its status bar and local content.
-The page list and selected document do not create separate vertical scroll
-areas. The compact bar stays beside the review-state filters, view switch and
-**Details**, so searchable state, exposure and AI access remain in context.
+Inside a Wiki, the sidebar index scrolls independently from the selected
+article. The article has one reading scroll area, with trust and freshness
+near the title and expanded details after the content. Resize the sidebar or
+use its visible toggle for reading mode. Restarting reopens the last valid local
+article and sidebar layout; a missing Wiki or page returns to Library. Search
+text, remote browsing, consent and pending operations are not restored.
 
 Use the [two-node runbook](two-node-runbook.md) for acceptance. A visible screen
 is not evidence by itself; verify the stated effect.
@@ -269,12 +307,12 @@ reader access to compatible Wikis. It never enables LAN sharing or public
 publication. See
 [local chat integrations](chat-integrations.md).
 
-The Settings button uses three labelled status rings for local knowledge,
-Connections and AI apps. Open **Settings → Connections** for LAN permission,
+The named **Settings** action opens a workspace with **General**, **Connections**
+and **AI apps**, each with textual status. Open **Settings → Connections** for LAN permission,
 trusted devices, pairing, Wiki grants and advanced public configuration. Open
 **Settings → General** for local-model preparation, appearance, language,
 background behavior, startup and updates. A Back action restores the Library
-state from which Settings was opened.
+or local reading state from which Settings was opened.
 
 ## Background operation, autostart, and updates
 

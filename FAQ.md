@@ -24,13 +24,23 @@ Use the public forms in [SUPPORT.md](SUPPORT.md) with a minimal synthetic reprod
 
 Search stays unavailable until the required local assets pass verification and startup checks. Model preparation can require substantial disk space, network access, and time. You may complete onboarding before preparing the model, but that does not make local search ready; follow the recovery guidance in [docs/install.md](docs/install.md#first-start-and-local-models).
 
+## What changed in the 0.3 desktop redesign?
+
+The contextual sidebar keeps the Wiki index beside the reader. **To review**
+groups pending proposals, with evidence beside the editor and actions spanning
+the workspace. Search stays in one row; local-AI recovery guidance appears in
+Search or **Settings → General**. The app reopens the last valid local article
+and remembers sidebar width and reading mode. It does not restore search text,
+remote browsing, consent or pending operations. See the
+[0.3 candidate notes](docs/releases/0.3.0.md).
+
 ## Can I share a Wiki with another device or publicly?
 
 Only reviewed, current knowledge can cross a sharing boundary, and only after explicit human action. LAN access needs both device verification and a specific Wiki grant. Experimental public federation is separate and opt-in. Neither choice uploads your original folder contents or automatically shares future material. See [docs/search-and-federation.md](docs/search-and-federation.md).
 
 ## Known limitations
 
-- No supported stable download, signed public macOS installer, Windows public-trust signature, or active stable updater channel exists yet.
+- No supported stable download, Windows public-trust signature, or active stable updater channel exists yet. A signed and notarized macOS platform RC remains a candidate; check the exact release’s status.
 - The beta has not completed the installed acceptance matrix or five-person nontechnical onboarding study required for public release.
 - Onboarding can finish before local models are prepared; search then remains unavailable until preparation succeeds.
 - The app does not provide OCR, DOCX ingestion, image/audio/video processing, cloud sync, accounts, SSO, source-document replication, arbitrary remote editing, automatic Git operations, a system daemon, silent updates, or web/mobile access.

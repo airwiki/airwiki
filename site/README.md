@@ -34,7 +34,9 @@ privacy information are intentional visitor-initiated destinations.
 `launch-config.js` is the only release-state switch. It is set to
 `technical-beta` and intentionally makes **View source** the primary action.
 The secondary action leads to technical pre-releases for evaluators and repeats
-the unsigned / non-notarized warning.
+the Windows unsigned warning and the need to check each release’s macOS signing
+status. A platform RC may contain a notarized Mac installer while Windows remains
+a technical beta; it does not change this landing’s stable-release gate.
 
 Do not replace the primary action with a download link until all of the
 following are true:
@@ -48,6 +50,16 @@ following are true:
 Then change `releaseState`, `primaryCta`, and `secondaryCta` in
 `launch-config.js` in the same reviewable change as the release decision. Do
 not infer a stable URL.
+
+## Current product media
+
+The tour and review image show the 0.3 desktop redesign using committed synthetic
+macOS acceptance captures from `apps/desktop/ui/e2e/baselines/darwin/`:
+`en-light-library-1180x728.png`, `en-light-reader-1180x728.png`,
+`en-light-review-comparison-1180x728.png` and
+`en-light-settings-1180x728.png`. The poster uses the reader capture. The ten-second
+video is a montage of these four states, not a recording of a continuous task or
+proof of model output. Update the transcript when replacing its scenes.
 
 ## GitHub Pages boundary
 

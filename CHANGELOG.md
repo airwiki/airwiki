@@ -4,6 +4,11 @@ All notable user-visible changes to AirWiki will be documented here. The project
 
 ## [Unreleased]
 
+The workspace version is **0.3.0**, preparing the first candidate after the
+reading-focused redesign. Candidate highlights and upgrade guidance live in
+[the 0.3 notes](docs/releases/0.3.0.md); this heading remains unreleased until
+publication completes.
+
 - Keep onboarding navigation visible in shorter desktop windows. Long setup
   steps scroll independently so finishing without local AI remains reachable.
 

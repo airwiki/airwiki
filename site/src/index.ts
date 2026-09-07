@@ -47,11 +47,11 @@ function decodeDataUrl(dataUrl: string): Uint8Array<ArrayBuffer> {
 const protectedAssets = new Map<string, ProtectedAsset>([
   [
     "airwiki-demo-poster.png",
-    { contentType: "image/png", dataUrl: demoPosterDataUrl, size: 106_092 },
+    { contentType: "image/png", dataUrl: demoPosterDataUrl, size: 470_434 },
   ],
   [
     "airwiki-demo.mp4",
-    { contentType: "video/mp4", dataUrl: demoVideoDataUrl, size: 663_509 },
+    { contentType: "video/mp4", dataUrl: demoVideoDataUrl, size: 178_132 },
   ],
   [
     "airwiki-mark.png",
@@ -59,7 +59,7 @@ const protectedAssets = new Map<string, ProtectedAsset>([
   ],
   [
     "airwiki-review-flow.png",
-    { contentType: "image/png", dataUrl: reviewFlowDataUrl, size: 191_525 },
+    { contentType: "image/png", dataUrl: reviewFlowDataUrl, size: 267_183 },
   ],
 ]);
 

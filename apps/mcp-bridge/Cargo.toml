@@ -14,7 +14,7 @@ build = "build.rs"
 e2e = ["airwiki-mcp/e2e"]
 
 [dependencies]
-airwiki-mcp = { version = "0.2.0", path = "../../crates/airwiki-mcp" }
+airwiki-mcp = { version = "0.3.0", path = "../../crates/airwiki-mcp" }
 tokio.workspace = true
 
 [dev-dependencies]

@@ -1,6 +1,6 @@
 # Rust architecture audit
 
-Status: In progress.
+Status: Completed — findings corrected and installed-platform acceptance passed.
 
 ## Scope and acceptance
 
@@ -62,8 +62,7 @@ the premature completion before that wait was added. It uses a synthetic shared
 resource, an explicitly started blocking operation and a cancelled async parent;
 shutdown must remain pending until the operation releases the resource, after
 which exclusive ownership must be recoverable. The corrected desktop package
-tests pass. The installed macOS lifecycle checks below also pass; Windows
-installed acceptance remains pending.
+tests pass. The installed macOS and Windows lifecycle checks below also pass.
 
 ### Catalog language selection
 
@@ -155,15 +154,14 @@ The implementation at `d40a2fa00789873db0466181d4b13f7991702ff6` passed:
 - The release index benchmark and cancellation, recovery, protocol preference,
   expiry and withdrawal regressions described above.
 
-Cross-platform CI for `bbe22b7547d144e0b73934b46c1074029e682ecc` also passed:
-[CI run 34077506850](https://github.com/airwiki/airwiki/actions/runs/34077506850)
+Cross-platform CI for `e04add6fce2d004b48f62fbe387fee1df621f700` also passed:
+[CI run 34107633322](https://github.com/airwiki/airwiki/actions/runs/34107633322)
 completed workspace Clippy, tests, documentation, generated contracts and both
 native desktop E2E journeys on macOS and Windows. Dependency, license and
 frontend checks passed, as did
-[CodeQL](https://github.com/airwiki/airwiki/actions/runs/34077505279) and
-[DCO](https://github.com/airwiki/airwiki/actions/runs/34078823847).
-Hosted-runner E2E supplements the installed-platform evidence below; it does not
-replace the pending interactive Windows check.
+[CodeQL](https://github.com/airwiki/airwiki/actions/runs/34107630466) and
+[DCO](https://github.com/airwiki/airwiki/actions/runs/34107682388).
+Hosted-runner E2E supplements the separate installed-platform evidence below.
 
 The SQL-projection follow-up passed all 38 index-package tests, package Clippy
 with all targets and features and warnings denied, workspace formatting and
@@ -190,6 +188,31 @@ profile and the parallel UI checkout untouched. The native-menu check exercised
 the installed app interactively; the existing WebDriver journey checked state
 restoration and clean process exit. Visual baselines were disabled.
 
+An isolated development candidate built from
+`e04add6fce2d004b48f62fbe387fee1df621f700` was installed on Windows 11 Home
+25H2, build 26200.9278, x64. The test ran in an interactive desktop session with
+the pinned Rust 1.96.1 toolchain, the `e2e` feature, a separate installation and
+the existing temporary-profile guards and synthetic fixtures. Incremental
+compilation and development debug symbols were disabled to reduce disk use.
+The installed executable matched the build output by SHA-256:
+`96a923571a082c24561c85428a3111e5caa87aac39d8d576f5aa0fdf22468a28`.
+
+| Installed Windows journey | Result |
+| --- | --- |
+| Existing real IPC journey and automated session restoration | PASS; runner exited with code 0 |
+| Open the same installed candidate and select a synthetic page through the native UI | PASS |
+| Hide the sidebar, request native close and select **Quit completely** | PASS; process exited with code 0 and no longer existed |
+| Relaunch the same candidate and temporary profile | PASS |
+| Recover the selected page and hidden sidebar through the native UI | PASS |
+| Quit again through the native UI and verify no QA process remains | PASS; process exited with code 0 |
+
+The Windows task's native-control observations and process-exit checks establish
+this lifecycle result separately from hosted CI. The normal application remained
+running, real data and the parallel UI work were preserved, and the QA copy was
+left closed. The test used no real peers or downloaded models. As on macOS,
+this development candidate does not establish public signing, installer,
+firewall, LAN or distribution acceptance.
+
 ## Independent review
 
 A separate reviewer context inspected the Rust changes against the architecture,
@@ -198,17 +221,15 @@ above. After the SQL projection correction, a second pass found that issue
 resolved and no further actionable integrity, v1/v2 compatibility or availability
 regressions in the follow-up diff. That second pass was static; the author ran
 the 38 passing index-package tests and Clippy with warnings denied separately.
-The review does not substitute for the remaining installed Windows acceptance
-or maintainer acceptance of the changes.
+The separate installed-platform checks complement this review. Maintainers
+remain responsible for accepting the changes through the normal PR flow.
 
-## Remaining validation and review
+## Delivery and deferred work
 
-- Run the shortest installed Windows lifecycle check in an interactive Windows
-  session: start an isolated candidate, complete a local operation, quit through
-  the native UI, assert process exit, and relaunch to verify state recovery.
-  macOS evidence does not certify Windows behavior.
-- Require green applicable CI and DCO checks before integration, and synchronize
-  confirmed architecture conclusions in the project AirWiki memory.
+Integration requires green applicable CI and DCO checks on the final pull-request
+revision. Confirmed architecture conclusions are synchronized in the project
+AirWiki memory at task closure; versioned repository documentation remains
+authoritative.
 
 Broad module splitting, a database pool, additional crates and protocol changes
 need a demonstrated benefit before implementation. Public infrastructure

@@ -6,7 +6,7 @@ A plan records intent and acceptance, not a transcript, command log, or speculat
 
 ## Rust application and public index architecture
 
-Status: Active
+Status: Completed — corrections, review and installed-platform acceptance passed.
 
 Improve correctness, recovery and resource use in the desktop Rust services and
 the public routing index while preserving the separate UI work. Findings and
@@ -22,9 +22,11 @@ their evidence are recorded in the [architecture audit](docs/rust-architecture-a
   benchmark checks; verify installed macOS quit and session restoration.
 - [x] Complete independent code and security review; resolve the catalog-wide
   decoding finding with indexed SQL selection and compatibility coverage.
-- [ ] Verify the installed Windows lifecycle in an interactive session.
-- [ ] Prepare the final validated changes for the normal
-  pull-request flow; synchronize confirmed architecture conclusions in AirWiki.
+- [x] Verify the installed Windows lifecycle in an interactive session.
+- [x] Prepare the final validated changes for the normal pull-request flow.
+
+Integration requires the final applicable PR checks. Confirmed architecture
+conclusions are synchronized in AirWiki when the task closes.
 
 Acceptance covers both components and their relevant failure paths. Public
 infrastructure deployment, visual changes and broad speculative refactors are

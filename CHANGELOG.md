@@ -9,6 +9,10 @@ reading-focused redesign. Candidate highlights and upgrade guidance live in
 [the 0.3 notes](docs/releases/0.3.0.md); this heading remains unreleased until
 publication completes.
 
+- Adopted **W essential** as the AirWiki identity, preserving the existing Wiki
+  symbol and its three nodes. Desktop, native application/tray icons,
+  documentation, landing and social assets share the same vector artwork.
+
 - Stop owned LAN, public and application-worker tasks when startup or teardown
   is abandoned. A lost MCP mutation response now reports an unknown outcome
   that requires checking the Wiki before retrying.

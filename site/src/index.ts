@@ -44,22 +44,33 @@ function decodeDataUrl(dataUrl: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
+function bundledAssetSize(dataUrl: string): number {
+  const separator = dataUrl.indexOf(",");
+  if (separator === -1 || !dataUrl.slice(0, separator).endsWith(";base64")) {
+    throw new Error("Bundled launch asset is not a base64 data URL");
+  }
+  const padding = dataUrl.endsWith("==") ? 2 : dataUrl.endsWith("=") ? 1 : 0;
+  // HEAD and range metadata stay correct after an asset refresh without decoding
+  // the media during isolate startup.
+  return ((dataUrl.length - separator - 1) * 3) / 4 - padding;
+}
+
 const protectedAssets = new Map<string, ProtectedAsset>([
   [
     "airwiki-demo-poster.png",
-    { contentType: "image/png", dataUrl: demoPosterDataUrl, size: 470_434 },
+    { contentType: "image/png", dataUrl: demoPosterDataUrl, size: bundledAssetSize(demoPosterDataUrl) },
   ],
   [
     "airwiki-demo.mp4",
-    { contentType: "video/mp4", dataUrl: demoVideoDataUrl, size: 178_132 },
+    { contentType: "video/mp4", dataUrl: demoVideoDataUrl, size: bundledAssetSize(demoVideoDataUrl) },
   ],
   [
     "airwiki-mark.png",
-    { contentType: "image/png", dataUrl: markDataUrl, size: 877_237 },
+    { contentType: "image/png", dataUrl: markDataUrl, size: bundledAssetSize(markDataUrl) },
   ],
   [
     "airwiki-review-flow.png",
-    { contentType: "image/png", dataUrl: reviewFlowDataUrl, size: 267_183 },
+    { contentType: "image/png", dataUrl: reviewFlowDataUrl, size: bundledAssetSize(reviewFlowDataUrl) },
   ],
 ]);
 

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 128 128" fill="none">
+  <title>AirWiki — W essential</title>
+  <rect x="5" y="5" width="118" height="118" rx="27" fill="#1461e8" />
+  <g transform="translate(17 17) scale(3.9166666666666665)" color="#ffffff">
+    <path d="M2.75 5.25 7.25 18.25 12 9 16.75 18.25 21.25 5.25" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="7.25" cy="18.25" r="2.35" fill="currentColor" />
+    <circle cx="12" cy="9" r="2.1" fill="currentColor" />
+    <circle cx="16.75" cy="18.25" r="2.35" fill="currentColor" />
+  </g>
+</svg>

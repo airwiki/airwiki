@@ -13,8 +13,10 @@ cada pantalla de controles técnicos.
 
 La aceptación del diseño incluye el símbolo de **W enlazada** para las wikis.
 El [vector de referencia](assets/wiki-linked-w.svg) forma parte de este plan;
-el componente `WikiIcon` utiliza esta geometría. El logo oficial de
-AirWiki conserva su identidad. Las alternativas de iniciales, ausencia de
+el componente `WikiIcon` utiliza esta geometría. La decisión posterior de marca
+**W esencial** adopta esta misma W para el logo de AirWiki, en blanco sobre un
+cuadrado azul redondeado; véase [branding](../resources/branding/README.md).
+Las alternativas de iniciales, ausencia de
 iconos y controles de experimentación de la maqueta no forman parte de la
 primera implementación.
 

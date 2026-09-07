@@ -345,7 +345,11 @@ platforms or used outside Apple terms.
 Wikis use the linked-W geometry in `WikiIcon.svelte`, consistently across local
 and remote libraries, page indexes and empty states. It inherits text color and
 is decorative beside a named control; labels convey identity and access state.
-The official application logo remains a separate brand asset.
+The application uses **W essential**: exactly the same linked W in white on a
+blue rounded square. The app header and operating-system icons use generated
+brand assets; named Wiki controls retain their bare `currentColor` symbol.
+The canonical artwork and regeneration procedure live in
+[`resources/branding`](../resources/branding/README.md).
 
 Reduced motion disables CSS animations and transitions. Do not assign a small
 nonzero transition duration globally: it also animates otherwise static layout

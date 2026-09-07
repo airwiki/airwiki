@@ -97,6 +97,13 @@ and transient pointer decoration; they do not prove keyboard focus, screen-reade
 behavior or installed-platform acceptance. Hosted CI runs the functional journeys
 with `AIRWIKI_E2E_VISUAL=0` because its window chrome is not a stable visual target.
 
+The embedded WebDriver sends synthetic keyboard events: `Enter` and `Space` do
+not reproduce the browser's default button activation. Use a click to exercise
+the action in E2E. The driver also focuses a click target after its handler,
+which can overwrite the application's focus return. Verify Tab, native keyboard
+activation and focus return in the installed candidate. Do not add application
+key handlers to compensate for these test-driver limitations.
+
 Manual evidence attached to a pull request must be sanitized according to [docs/maintainer-validation.md](docs/maintainer-validation.md). Record only the minimum commit, package, version, timing, and PASS/FAIL facts needed for review. Never attach document content, questions, snippets, identities, addresses, local paths, databases, or application logs.
 
 ## Rust and architecture expectations

@@ -193,7 +193,7 @@
     {#if browse.workspaceSupported}
           <aside class="file-list" aria-label={t('knowledge-pages')}>
             {#each descriptors as descriptor (pageKey(descriptor.page))}
-              <button class:active={selectedDescriptor && samePage(selectedDescriptor.page, descriptor.page)} aria-current={selectedDescriptor && samePage(selectedDescriptor.page, descriptor.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage(descriptor)} disabled={pageLoading}>
+              <button title={`${pageTitle(descriptor)}\n${descriptor.logicalPath}`} class:active={selectedDescriptor && samePage(selectedDescriptor.page, descriptor.page)} aria-current={selectedDescriptor && samePage(selectedDescriptor.page, descriptor.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => selectPage(descriptor)} disabled={pageLoading}>
                 {#if descriptor.page.kind === 'index'}<WikiIcon size={17} />{:else if descriptor.page.kind === 'log'}<History size={17} aria-hidden="true" />{:else}<FileText size={17} aria-hidden="true" />{/if}
                 <span><strong>{pageTitle(descriptor)}</strong><small>{descriptor.logicalPath}</small></span>
               </button>
@@ -206,7 +206,7 @@
     {:else}
         <aside class="file-list" aria-label={t('knowledge-pages')}>
           {#each browse.concepts as concept (`${concept.conceptId}:${concept.sourceRevision}`)}
-            <button class:active={selectedConcept?.conceptId === concept.conceptId} onmousedown={focusChoiceWithoutScroll} onclick={() => selectedPage = { kind: 'concept', conceptId: concept.conceptId }}><FileText size={17} aria-hidden="true" /><span><strong>{concept.title}</strong><small>{concept.conceptType} · {concept.language}</small></span></button>
+            <button title={concept.title} class:active={selectedConcept?.conceptId === concept.conceptId} onmousedown={focusChoiceWithoutScroll} onclick={() => selectedPage = { kind: 'concept', conceptId: concept.conceptId }}><FileText size={17} aria-hidden="true" /><span><strong>{concept.title}</strong><small>{concept.conceptType} · {concept.language}</small></span></button>
           {/each}
         </aside>
     {/if}

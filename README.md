@@ -1,7 +1,7 @@
 # AirWiki
 
 <p align="center">
-  <img src="resources/branding/airwiki-app-icon.png" alt="AirWiki" width="128">
+  <img src="resources/branding/airwiki-app-icon.png" alt="AirWiki — linked W logo" width="128">
 </p>
 
 <p align="center">

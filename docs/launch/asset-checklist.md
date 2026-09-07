@@ -15,7 +15,7 @@ address, or unsupported product claim.
 | Review-flow screenshot | [`docs/assets/airwiki-review-flow.png`](../assets/airwiki-review-flow.png) | Gallery image explaining human review before search. |
 | AI-app search screenshot | [`docs/assets/airwiki-ai-app-search.png`](../assets/airwiki-ai-app-search.png) | Gallery image explaining per-app public-search consent. |
 | Search-origin screenshot | [`docs/assets/airwiki-search-sources.png`](../assets/airwiki-search-sources.png) | Gallery image explaining local, nearby, and public origins. |
-| Branding source notes | [`resources/branding/README.md`](../../resources/branding/README.md) | Reuse constraints and source information. |
+| Branding source notes | [`resources/branding/README.md`](../../resources/branding/README.md), [`airwiki-mark.svg`](../../resources/branding/airwiki-mark.svg) | W essential vector, reuse constraints and regeneration instructions. |
 
 ## Required preflight
 

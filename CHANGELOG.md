@@ -9,6 +9,10 @@ reading-focused redesign. Candidate highlights and upgrade guidance live in
 [the 0.3 notes](docs/releases/0.3.0.md); this heading remains unreleased until
 publication completes.
 
+- Adopted **W essential** as the AirWiki identity, preserving the existing Wiki
+  symbol and its three nodes. Desktop, native application/tray icons,
+  documentation, landing and social assets share the same vector artwork.
+
 - Find a local Wiki by name without preparing AI. The Library name filter
   ignores case and accents, combines with state and access categories, and
   offers a focused reset when nothing matches. Status checks now sit beside

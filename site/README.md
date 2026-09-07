@@ -53,6 +53,11 @@ not infer a stable URL.
 
 ## Current product media
 
+The header, footer, favicon and social preview use the approved **W essential**
+identity. Regenerate them with the shared
+[branding workflow](../resources/branding/README.md); keep the original linked-W
+geometry consistent with the desktop app.
+
 The tour and review image show the 0.3 desktop redesign using committed synthetic
 macOS acceptance captures from `apps/desktop/ui/e2e/baselines/darwin/`:
 `en-light-library-1180x728.png`, `en-light-reader-1180x728.png`,
@@ -60,6 +65,11 @@ macOS acceptance captures from `apps/desktop/ui/e2e/baselines/darwin/`:
 `en-light-settings-1180x728.png`. The poster uses the reader capture. The ten-second
 video is a montage of these four states, not a recording of a continuous task or
 proof of model output. Update the transcript when replacing its scenes.
+
+The documentation's search-origin and AI-app gallery images are captured from
+the current `apps/desktop/ui/visual.html` development fixture, with synthetic
+data (`media=1`, English, dark appearance). These two gallery images demonstrate
+UI states; they are not native acceptance evidence or real search results.
 
 ## GitHub Pages boundary
 

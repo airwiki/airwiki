@@ -9,6 +9,9 @@ reading-focused redesign. Candidate highlights and upgrade guidance live in
 [the 0.3 notes](docs/releases/0.3.0.md); this heading remains unreleased until
 publication completes.
 
+- Correct Windows MSI metadata extraction so the release install/uninstall
+  smoke receives one property map and can validate the package identity.
+
 - Adopted **W essential** as the AirWiki identity, preserving the existing Wiki
   symbol and its three nodes. Desktop, native application/tray icons,
   documentation, landing and social assets share the same vector artwork.

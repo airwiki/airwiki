@@ -1,7 +1,7 @@
 # Plan de rediseño de la interfaz de AirWiki
 
-Estado: Activo; implementación y validación autorizadas.
-Fecha: 2026-09-05.
+Estado: Completado; siete fases implementadas y aceptación cotidiana finalizada.
+Fecha: 2026-09-05. Cierre: 2026-09-06.
 
 ## Resultado y alcance
 
@@ -18,10 +18,10 @@ AirWiki conserva su identidad. Las alternativas de iniciales, ausencia de
 iconos y controles de experimentación de la maqueta no forman parte de la
 primera implementación.
 
-Este documento describe el estado objetivo. Las
+Este documento conserva el plan aprobado y su resultado. Las
 [guías de diseño vigentes](ui-design-guidelines.md) y las reglas de producto
 siguen siendo la autoridad sobre el comportamiento actual. El plan se enlaza
-desde [PLANS.md](../PLANS.md) como activo. El trabajo de instaladores queda en
+desde [PLANS.md](../PLANS.md) como completado. El trabajo de instaladores queda en
 pausa, conservando sus pendientes y sin crear una dependencia con su firma pública.
 
 ### Prioridad de cierre — 2026-09-06
@@ -81,9 +81,9 @@ aplazadas siguen sin certificar; no se registran como aprobadas.
   desembocan en Biblioteca. Una selección remota no provoca consultas de red
   automáticas al reiniciar.
 
-## Dependencias confirmadas en el código
+## Diagnóstico inicial y dependencias
 
-| Punto | Situación actual | Consecuencia para el plan |
+| Punto | Situación al iniciar | Consecuencia para el plan |
 | --- | --- | --- |
 | Ventana mínima | La regla de 1040 px apila `.file-list` antes de `.file-preview`; la lista no limita su altura | Corregir primero el recorrido de lectura con una lista larga |
 | Estilos | `styles.css` acumula capas de rediseño y sobrescrituras | Consolidar los selectores al migrar cada superficie, sin una reescritura global previa |
@@ -303,8 +303,8 @@ Este plan, por sí solo, se valida con
 - Los PR visuales se pueden revertir sin migrar el conocimiento. Una ampliación
   persistida conserva migraciones append-only y lecturas compatibles; no se
   revierte borrando datos. No se mantienen dos shells completos indefinidamente.
-- PLANS.md mantiene este rediseño como único plan activo. El trabajo de
-  instaladores queda en pausa; sus pendientes no se consideran terminados.
+- PLANS.md registra el cierre de este rediseño. El trabajo de instaladores
+  queda en pausa; sus pendientes no se consideran terminados.
 - El cierre exige todas las entregas aceptadas, documentación actualizada,
   revisión y checks verdes, evidencia instalada de ambas plataformas y ninguna
   regresión de permisos. Los aplazamientos deben ser explícitos; una entrega
@@ -328,8 +328,8 @@ sigue el proceso de PR, revisión independiente y checks actuales verdes.
   confirmadas, evidencia obsoleta y recuperación de propuestas excluidas.
 - [x] Fase 6: ajustes simplificados y restauración local acotada en SQLite;
   fallo de escritura recuperable y reapertura con selección revalidada.
-- [ ] Fase 7: coherencia y aceptación instalada completadas; falta integrar los
-  PR con sus checks actuales verdes.
+- [x] Fase 7: coherencia y aceptación instalada completadas; revisión
+  independiente sin hallazgos y entrega por PR con checks actuales verdes.
 
 Las 128 referencias visuales cubren macOS y Windows en ES/EN, claro/oscuro y
 los tres tamaños del plan. Se inspeccionaron antes de actualizarlas; las

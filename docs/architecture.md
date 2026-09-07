@@ -222,9 +222,14 @@ server's existing 64-request admission bound still caps pending requests.
 Signed metadata validation, atomic registration/withdrawal and replay high-water
 marks remain owned by the catalog store.
 Language-filtered catalog requests apply their result budget to matching Wikis.
-They rank row IDs within the catalog capacity, decode one signed payload at a
-time and stop once enough matching entries are found. Protocol preference and
-withdrawal/expiry filtering still precede that selection.
+An indexed SQL language projection filters row IDs before ranking and limiting,
+so a language miss does not deserialize every signed payload. Queries decode at
+most twice the requested candidate count and recheck the declared languages.
+Protocol preference and withdrawal/expiry filtering precede selection. The
+projection is rebuilt atomically on startup from stored, previously admitted
+manifests, and registration, withdrawal and expiry maintain it in the same
+SQLite transactions as the payload and FTS metadata. An unreadable startup
+payload aborts rebuilding and preserves existing state and replay history.
 
 Desktop blocking jobs that retain the service graph use its task tracker.
 Shutdown first aborts and joins async worker jobs, then waits for their tracked

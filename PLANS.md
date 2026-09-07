@@ -20,8 +20,10 @@ their evidence are recorded in the [architecture audit](docs/rust-architecture-a
   misses; cover runtime owner loss and unknown MCP mutation completion.
 - [x] Run workspace Clippy and tests, documentation, licensing, dependency and
   benchmark checks; verify installed macOS quit and session restoration.
+- [x] Complete independent code and security review; resolve the catalog-wide
+  decoding finding with indexed SQL selection and compatibility coverage.
 - [ ] Verify the installed Windows lifecycle in an interactive session.
-- [ ] Complete independent review and prepare the focused changes for the normal
+- [ ] Prepare the final validated changes for the normal
   pull-request flow; synchronize confirmed architecture conclusions in AirWiki.
 
 Acceptance covers both components and their relevant failure paths. Public

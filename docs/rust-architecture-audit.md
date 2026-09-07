@@ -72,17 +72,39 @@ the declared manifest languages. With a one-result request, two higher-ranked
 entries in another language hid a third matching entry. The search and browse
 regressions both failed with an empty result before the correction.
 
-Language-filtered requests now scan ranked row IDs up to the catalog's existing
-capacity bound, load and decode one payload at a time, and stop when the result
-budget is full. Sorting row IDs avoids buffering the complete catalog's signed
-payloads. The result cap, protocol preference and existing signatures and
-withdrawal semantics are preserved. The expanded release benchmark passed with
-100,000 collections across 10,000 synthetic publishers: selective query p95 was
-below 1 ms, a full-catalog search language miss took 514 ms, and the browse miss
-took 523 ms, against the existing 1,500 ms gate. This is a local release-build
-measurement, not a deployed-network latency claim.
+Language-filtered requests use an indexed SQL projection before ranking and
+limiting. They load payloads individually, with at most twice the requested
+candidate count selected by SQL, and recheck their declared languages. The
+result cap, protocol preference, signatures and withdrawal semantics remain.
 
-The benchmark's load phase plus selective samples took approximately 589 seconds.
+Independent review identified that scanning every payload after ranking spent
+the catalog's full capacity budget on a single language miss while retaining
+database admission. That earlier implementation took 514 ms for search and
+523 ms for browse at 100,000 collections. It met the 1,500 ms latency gate but
+unnecessarily serialized payload decoding against registrations and withdrawals.
+The SQL projection removes that catalog-wide decoding work from queries.
+The release benchmark with the SQL projection passed at the same 100,000
+synthetic collections: the no-match search took 28.354 ms and browse took
+0.130 ms. Selective search p95 increased from below 1 ms to 11 ms; both workloads
+remain below the existing 1,500 ms gate. These local runs establish the measured
+tradeoff and the regression test establishes the bound on payload decoding;
+they do not establish deployment throughput or an improvement for every query.
+
+The projection is additive and rebuilt atomically on startup from previously
+admitted stored manifests, including after a stopped older binary changed the
+database. Registration, replacement, withdrawal and expiry maintain it in the
+same transactions as payload and FTS metadata. Rebuilding reads one payload at
+a time; an unreadable payload aborts the transaction without losing prior
+projection state or replay high-water marks.
+
+`language_queries_do_not_decode_unrelated_payloads` fails with the prior query
+implementation and passes with SQL language selection. Additional regressions
+cover original and versioned catalog schemas, repeated reopening, rollback on
+startup corruption, updates across two connections, empty and duplicate
+languages, and v2 preference when the legacy and current languages differ.
+
+The latest benchmark's load phase plus selective samples took approximately
+591 seconds (589 seconds before the SQL projection).
 Registration repeatedly checks distinct-entry capacity and expiry; profiling
 that cost is a separate performance follow-up before proposing transactional
 counter projections or changing maintenance cadence. Any optimization must keep
@@ -133,6 +155,21 @@ The implementation at `d40a2fa00789873db0466181d4b13f7991702ff6` passed:
 - The release index benchmark and cancellation, recovery, protocol preference,
   expiry and withdrawal regressions described above.
 
+Cross-platform CI for `bbe22b7547d144e0b73934b46c1074029e682ecc` also passed:
+[CI run 34077506850](https://github.com/airwiki/airwiki/actions/runs/34077506850)
+completed workspace Clippy, tests, documentation, generated contracts and both
+native desktop E2E journeys on macOS and Windows. Dependency, license and
+frontend checks passed, as did
+[CodeQL](https://github.com/airwiki/airwiki/actions/runs/34077505279) and
+[DCO](https://github.com/airwiki/airwiki/actions/runs/34078823847).
+Hosted-runner E2E supplements the installed-platform evidence below; it does not
+replace the pending interactive Windows check.
+
+The SQL-projection follow-up passed all 38 index-package tests, package Clippy
+with all targets and features and warnings denied, workspace formatting and
+documentation checks. Its release benchmark results are recorded above. CI must
+also pass on the final pull-request revision before integration.
+
 An isolated development candidate was installed on macOS 26.6.2, arm64. It used
 the `e2e` feature, a distinct app identifier, synthetic fixtures and a temporary
 profile. The executable SHA-256 was
@@ -153,14 +190,23 @@ profile and the parallel UI checkout untouched. The native-menu check exercised
 the installed app interactively; the existing WebDriver journey checked state
 restoration and clean process exit. Visual baselines were disabled.
 
+## Independent review
+
+A separate reviewer context inspected the Rust changes against the architecture,
+threat model and ADR 0008. It identified the catalog-wide decoding cost described
+above. After the SQL projection correction, a second pass found that issue
+resolved and no further actionable integrity, v1/v2 compatibility or availability
+regressions in the follow-up diff. That second pass was static; the author ran
+the 38 passing index-package tests and Clippy with warnings denied separately.
+The review does not substitute for the remaining installed Windows acceptance
+or maintainer acceptance of the changes.
+
 ## Remaining validation and review
 
 - Run the shortest installed Windows lifecycle check in an interactive Windows
   session: start an isolated candidate, complete a local operation, quit through
   the native UI, assert process exit, and relaunch to verify state recovery.
   macOS evidence does not certify Windows behavior.
-- Complete independent code and security review of task ownership, cancellation
-  and uncertain mutation completion against the threat model and ADR 0008.
 - Require green applicable CI and DCO checks before integration, and synchronize
   confirmed architecture conclusions in the project AirWiki memory.
 

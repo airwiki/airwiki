@@ -30,6 +30,21 @@ Use that deployment for beta candidate acceptance. The single-host Azure and
 Windows procedures below remain temporary validation options and do not satisfy
 the independent-node beta closure criterion.
 
+### Catalog language projection compatibility
+
+The index maintains an additive SQL language projection derived from its stored
+signed manifests. Existing original-v1 and versioned catalogs are supported;
+startup rebuilds the projection atomically without resetting manifests,
+tombstones or replay sequence history. Active writers maintain the projection
+alongside their payload and FTS changes in the same transaction.
+
+Stop the index before changing binary versions; do not run old and new writers
+against one database concurrently. Reopening with the current binary rebuilds
+the projection, including changes written by a stopped older binary. If a
+stored payload cannot be decoded, startup fails and the rebuild rolls back.
+Preserve the database for diagnosis or recovery from a known backup; clearing
+its sequence history would weaken replay protection.
+
 ### Azure validation relay
 
 For temporary Azure acceptance, use one Ubuntu 24.04 x64 VM with a Standard

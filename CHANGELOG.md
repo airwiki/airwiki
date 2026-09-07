@@ -15,7 +15,8 @@ publication completes.
 
 - Find public Wikis in the requested language even when earlier ranked entries
   use another language. Search and directory browsing apply the result budget
-  to matching Wikis and stream candidate payloads individually.
+  to matching Wikis, filter indexed language metadata before loading payloads,
+  and preserve existing catalogs through an atomic startup rebuild.
 
 - Let ongoing local blocking operations finish before normal desktop service
   cleanup, even after their async callers are cancelled during quit. The

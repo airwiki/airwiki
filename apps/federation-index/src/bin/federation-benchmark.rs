@@ -90,8 +90,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if p95 >= P95_GATE {
         return Err(format!("catalog p95 {:?} exceeded gate {:?}", p95, P95_GATE).into());
     }
-    // A language miss must inspect the complete ranked candidate set. Exercise
-    // both operations at capacity, not just selective lexical queries.
+    // Exercise the no-match language filter at capacity for both operations,
+    // in addition to selective lexical queries.
     for operation in [
         PublicCatalogOperation::Search,
         PublicCatalogOperation::Browse,
@@ -119,13 +119,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err("catalog returned a manifest outside the requested language".into());
         }
         println!(
-            "language_miss={label} collections={} elapsed_ms={} gate_ms={}",
+            "language_miss={label} collections={} elapsed_ms={} elapsed_us={} gate_ms={}",
             PUBLISHERS * COLLECTIONS_PER_PUBLISHER,
             elapsed.as_millis(),
+            elapsed.as_micros(),
             P95_GATE.as_millis()
         );
         if elapsed >= P95_GATE {
-            return Err("catalog language-filter scan exceeded the latency gate".into());
+            return Err("catalog language-filter query exceeded the latency gate".into());
         }
     }
     Ok(())

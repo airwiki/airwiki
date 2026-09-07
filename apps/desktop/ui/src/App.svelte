@@ -14,6 +14,7 @@
   import RefreshCw from '@lucide/svelte/icons/refresh-cw';
   import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
   import Sparkles from '@lucide/svelte/icons/sparkles';
+  import X from '@lucide/svelte/icons/x';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick, type Snippet } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
@@ -71,6 +72,7 @@
   };
   type NavigationEntry = {
     hash: string;
+    library: { filter: LibraryFilter; name: string };
     reading: ReadingContext | null;
     shared: SharedReadingContext | null;
     review: { wikiId: string; conceptId: string; sourceRevision: number } | null;
@@ -135,6 +137,7 @@
   let searchFilter: SearchFilter = 'all';
   let libraryScope: LibraryScope = 'device';
   let libraryFilter: LibraryFilter = 'all';
+  let libraryNameFilter = '';
   let runtimeMessageId = 'status-working';
   let snapshot: AppSnapshot | null = null;
   let folderSelection: FolderSelection | null = null;
@@ -546,6 +549,7 @@
       && previousReading?.wikiId === selectedWikiId ? previousReading : null;
     return {
       hash, scrollTop, indexScrollTop,
+      library: { filter: libraryFilter, name: libraryNameFilter },
       review: destination === 'review' && selectedReview
         ? { wikiId: selectedReview.wikiId, conceptId: selectedReview.conceptId, sourceRevision: selectedReview.sourceRevision } : null,
       search: destination === 'library' && activeSearchSessionId
@@ -744,7 +748,8 @@
   $: attentionWikis = orderedWikis.filter(wikiNeedsAttention);
   $: privateWikiCount = orderedWikis.filter((wiki) => wikiIsPrivate(wiki, snapshot?.peers ?? [])).length;
   $: sharedWikiCount = orderedWikis.length - privateWikiCount;
-  $: filteredLibraryWikis = orderedWikis.filter((wiki) => (
+  $: libraryNameNeedle = normalizeWikiName(libraryNameFilter);
+  $: filteredLibraryWikis = orderedWikis.filter((wiki) => normalizeWikiName(wiki.name).includes(libraryNameNeedle) && (
     libraryFilter === 'all'
     || (libraryFilter === 'attention' && wikiNeedsAttention(wiki))
     || (libraryFilter === 'private' && wikiIsPrivate(wiki, snapshot?.peers ?? []))
@@ -1001,6 +1006,8 @@
         if (entry && entryId) {
           activeNavigationId = entryId;
           activeNavigationHash = entry.hash;
+          libraryFilter = entry.library.filter;
+          libraryNameFilter = entry.library.name;
           if (entry.review) {
             const review = snapshot?.reviews.find((candidate) => candidate.wikiId === entry.review?.wikiId && candidate.conceptId === entry.review.conceptId);
             if (review) {
@@ -1384,12 +1391,23 @@
     libraryScope = scope;
     actionMessage = '';
     libraryFilter = 'all';
+    libraryNameFilter = '';
     pushHash(scope === 'public' ? '#library/public' : '#library');
     scrollMainTo(0);
     focusRouteHeading();
     if (scope === 'public' && snapshot?.publicCatalog === null) {
       void refreshPublicCatalog();
     }
+  }
+
+  function normalizeWikiName(value: string): string {
+    return value.trim().normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  }
+
+  function clearLibraryFilters() {
+    libraryFilter = 'all';
+    libraryNameFilter = '';
+    document.getElementById('library-name-filter')?.focus();
   }
 
   async function refreshPublicCatalog() {
@@ -3428,15 +3446,15 @@
                       {/each}
                       {#each filteredKnowledgeConcepts as concept (pageKey(concept.page))}
                         {@const reviewState = conceptReviewState(concept)}
-                        <button aria-label={`${concept.title}, ${concept.page.kind === 'concept' ? concept.page.path : concept.description}, ${t(`desktop-review-state-${reviewState}`)}`} class:active={knowledgePageIsActive(concept.page)} aria-current={knowledgePageIsActive(concept.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => openKnowledgePage(concept.page, concept.fingerprint)}>
+                        <button title={`${concept.title}\n${concept.page.kind === 'concept' ? concept.page.path : concept.description}\n${t(`desktop-review-state-${reviewState}`)}`} aria-label={`${concept.title}, ${concept.page.kind === 'concept' ? concept.page.path : concept.description}, ${t(`desktop-review-state-${reviewState}`)}`} class:active={knowledgePageIsActive(concept.page)} aria-current={knowledgePageIsActive(concept.page) ? 'page' : undefined} onmousedown={focusChoiceWithoutScroll} onclick={() => openKnowledgePage(concept.page, concept.fingerprint)}>
                           {#if reviewState === 'reviewed'}<CheckCircle2 size={17} aria-hidden="true" />{:else}<FileText size={17} aria-hidden="true" />{/if}
                           <span><strong>{concept.title}</strong><small>{concept.page.kind === 'concept' ? concept.page.path : concept.description}</small></span>
-                          <em class={`concept-review-state ${reviewState}`}>{t(`desktop-review-state-${reviewState}`)}</em>
+                          {#if reviewState !== 'reviewed'}<em class={`concept-review-state ${reviewState}`}>{t(`desktop-review-state-${reviewState}`)}</em>{/if}
                         </button>
                       {/each}
                     {/if}
                     {#each filteredReviewOnlyItems as review (`review-only:${review.conceptId}:${review.sourceRevision}`)}
-                      <button aria-label={`${review.sourceName}, ${t(review.excluded ? 'desktop-review-state-excluded' : 'desktop-review-state-draft')}`} onclick={() => openReview(review)}>
+                      <button title={`${review.draft.title}\n${review.sourceName}`} aria-label={`${review.draft.title}, ${review.sourceName}, ${t(review.excluded ? 'desktop-review-state-excluded' : 'desktop-review-state-draft')}`} onclick={() => openReview(review)}>
                         <FileText size={17} aria-hidden="true" />
                         <span><strong>{review.draft.title}</strong><small>{review.sourceName}</small></span>
                         <em class={`concept-review-state ${review.excluded ? 'excluded' : 'draft'}`}>{t(review.excluded ? 'desktop-review-state-excluded' : 'desktop-review-state-draft')}</em>
@@ -3500,6 +3518,12 @@
                 <h1 tabindex="-1">{t(question.trim() ? 'desktop-library-search-title' : libraryScope === 'public' ? 'desktop-public-library-title' : 'desktop-wiki-list-title')}</h1>
                 {#if !question.trim() && libraryScope === 'public'}<p>{t('desktop-public-library-body')}</p>{/if}
               </div>
+              {#if !question.trim() && libraryScope === 'device' && orderedWikis.length > 0}
+                <div class="library-command-status">
+                  <span>{t('desktop-library-concept-count', { count: publishedConceptCount })}</span>
+                  <button class="text-action" onclick={refreshHealth} disabled={wikiHealthRequestId !== null}><RefreshCw size={14} aria-hidden="true" />{t(wikiHealthRequestId !== null ? 'desktop-library-checking' : 'desktop-library-check-status')}</button>
+                </div>
+              {/if}
             </header>
             {#if !question.trim()}
               <nav class="library-scope-tabs" aria-label={t('desktop-library-scope-label')}>
@@ -3516,11 +3540,19 @@
                   <button class:active={libraryFilter === 'private'} aria-pressed={libraryFilter === 'private'} onclick={() => { libraryFilter = 'private'; }}>{t('desktop-library-filter-private')}<b>{privateWikiCount}</b></button>
                   <button class:active={libraryFilter === 'shared'} aria-pressed={libraryFilter === 'shared'} onclick={() => { libraryFilter = 'shared'; }}>{t('desktop-library-filter-shared')}<b>{sharedWikiCount}</b></button>
                 </div>
-                <div class="library-command-status">
-                  <span><WikiIcon size={15} />{t('desktop-library-concept-count', { count: publishedConceptCount })}</span>
-                  <button class="text-action" onclick={refreshHealth} disabled={wikiHealthRequestId !== null}><RefreshCw size={14} aria-hidden="true" />{t(wikiHealthRequestId !== null ? 'desktop-library-checking' : 'desktop-library-check-status')}</button>
+                <div class="library-name-filter">
+                  <TextField id="library-name-filter" variant="search" label={t('desktop-library-name-filter')} placeholder={t('desktop-library-name-filter')} bind:value={libraryNameFilter} maxlength={200} />
+                  {#if libraryNameFilter}
+                    <button class="library-name-clear" aria-label={t('desktop-library-name-clear')} title={t('desktop-library-name-clear')} onclick={() => {
+                      libraryNameFilter = '';
+                      document.getElementById('library-name-filter')?.focus();
+                    }}><X size={14} aria-hidden="true" /></button>
+                  {/if}
                 </div>
               </section>
+              {#if libraryNameNeedle}
+                <p class="library-filter-count" role="status">{t('desktop-library-filter-count', { count: filteredLibraryWikis.length, total: orderedWikis.length })}</p>
+              {/if}
             {/if}
             {#if question.trim()}
               {#if restoredSearch && activeSearchSession}
@@ -3601,8 +3633,8 @@
               {:else}
                 <section class="library-filter-empty" role="status">
                   <WikiIcon size={27} />
-                  <div><strong>{t('desktop-library-filter-empty-title')}</strong><p>{t('desktop-library-filter-empty-body')}</p></div>
-                  <button class="secondary" onclick={() => { libraryFilter = 'all'; }}>{t('desktop-library-filter-clear')}</button>
+                  <div><strong>{t('desktop-library-filter-empty-title')}</strong><p>{t(libraryNameNeedle ? 'desktop-library-name-empty-body' : 'desktop-library-filter-empty-body')}</p></div>
+                  <button class="secondary" onclick={clearLibraryFilters}>{t('desktop-library-filter-clear')}</button>
                 </section>
               {/if}
             {/if}

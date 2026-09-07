@@ -9,6 +9,16 @@ reading-focused redesign. Candidate highlights and upgrade guidance live in
 [the 0.3 notes](docs/releases/0.3.0.md); this heading remains unreleased until
 publication completes.
 
+- Find a local Wiki by name without preparing AI. The Library name filter
+  ignores case and accents, combines with state and access categories, and
+  offers a focused reset when nothing matches. Status checks now sit beside
+  the Library heading, leaving the list toolbar for filtering.
+
+- Give page titles two lines in the local and shared sidebar indexes. Reviewed
+  pages keep their check icon and accessible state without repeating a label on
+  every row; drafts and exclusions remain labeled. Full titles and filenames
+  are available in tooltips, and pending proposals have complete accessible names.
+
 - Keep onboarding navigation visible in shorter desktop windows. Long setup
   steps scroll independently so finishing without local AI remains reachable.
 

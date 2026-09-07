@@ -492,6 +492,85 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.getByRole('search')).toBeInTheDocument();
   });
 
+  it('finds local Wikis by name without a model and combines the name with the selected category', async () => {
+    snapshot.model = null;
+    snapshot.wikis[0].name = 'Guía de diseño';
+    snapshot.wikis[0].needsReviewCount = 1;
+    snapshot.wikis.push({ ...snapshot.wikis[0], id: 'second-wiki', name: 'Lecturas', needsReviewCount: 0 });
+    render(App);
+
+    const name = await screen.findByRole('textbox', { name: 'Filtrar wikis por nombre' });
+    const list = within(screen.getByRole('list', { name: 'Tus wikis' }));
+    await fireEvent.input(name, { target: { value: '  GUIA DE DISENO  ' } });
+    expect(list.getByRole('button', { name: /^Guía de diseño / })).toBeInTheDocument();
+    expect(list.queryByRole('button', { name: /^Lecturas / })).not.toBeInTheDocument();
+    expect(screen.getByText('1 de 2 wikis')).toBeInTheDocument();
+    const attention = screen.getByRole('button', { name: /Necesitan atención.*1/ });
+    await fireEvent.click(attention);
+    await fireEvent.input(name, { target: { value: 'lecturas' } });
+    expect(screen.getByText('0 de 2 wikis')).toBeInTheDocument();
+    expect(screen.getByText('Prueba otro nombre o borra los filtros para ver todas las wikis.')).toBeInTheDocument();
+    expect(attention).toHaveAttribute('aria-pressed', 'true');
+    expect(searchKnowledge).not.toHaveBeenCalled();
+    expect(explorePublicWikis).not.toHaveBeenCalled();
+    expect(window.location.hash).not.toContain('lecturas');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Mostrar todas' }));
+    expect(name).toHaveValue('');
+    expect(name).toHaveFocus();
+    expect(screen.getByRole('button', { name: /Todas.*2/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(screen.getByRole('list', { name: 'Tus wikis' })).getAllByRole('listitem')).toHaveLength(2);
+  });
+
+  it('clears only the name with its clear control and preserves it during a snapshot refresh', async () => {
+    snapshot.wikis[0].needsReviewCount = 1;
+    render(App);
+    const name = await screen.findByRole('textbox', { name: 'Filtrar wikis por nombre' });
+    await fireEvent.click(screen.getByRole('button', { name: /Necesitan atención.*1/ }));
+    await fireEvent.input(name, { target: { value: 'Atlas' } });
+    await deliverSnapshot();
+    expect(name).toHaveValue('Atlas');
+    await fireEvent.click(screen.getByRole('button', { name: 'Borrar filtro de nombre' }));
+    expect(name).toHaveValue('');
+    expect(name).toHaveFocus();
+    expect(screen.getByRole('button', { name: /Necesitan atención.*1/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: 'Borrar filtro de nombre' })).not.toBeInTheDocument();
+  });
+
+  it('restores each Library name and category filter through Back and Forward', async () => {
+    snapshot.wikis[0].needsReviewCount = 1;
+    snapshot.wikis.push({ ...snapshot.wikis[0], id: 'second-wiki', name: 'Lecturas', needsReviewCount: 0 });
+    render(App);
+
+    await fireEvent.input(await screen.findByRole('textbox', { name: 'Filtrar wikis por nombre' }), { target: { value: 'Atlas' } });
+    await fireEvent.click(screen.getByRole('button', { name: /Necesitan atención.*1/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Públicas' }));
+    await fireEvent.click(screen.getByRole('button', { name: /En este dispositivo/ }));
+    const name = await screen.findByRole('textbox', { name: 'Filtrar wikis por nombre' });
+    expect(name).toHaveValue('');
+    expect(screen.getByRole('button', { name: /Todas.*2/ })).toHaveAttribute('aria-pressed', 'true');
+    await fireEvent.input(name, { target: { value: 'Lecturas' } });
+
+    window.history.back();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Públicas' })).toHaveAttribute('aria-current', 'page'));
+    window.history.back();
+    expect(await screen.findByRole('textbox', { name: 'Filtrar wikis por nombre' })).toHaveValue('Atlas');
+    expect(screen.getByRole('button', { name: /Necesitan atención.*1/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(screen.getByRole('list', { name: 'Tus wikis' })).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(screen.getByRole('list', { name: 'Tus wikis' })).getByRole('button', { name: /^Atlas / })).toBeInTheDocument();
+
+    window.history.forward();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Públicas' })).toHaveAttribute('aria-current', 'page'));
+    window.history.forward();
+    expect(await screen.findByRole('textbox', { name: 'Filtrar wikis por nombre' })).toHaveValue('Lecturas');
+    expect(screen.getByRole('button', { name: /Todas.*2/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(screen.getByRole('list', { name: 'Tus wikis' })).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(screen.getByRole('list', { name: 'Tus wikis' })).getByRole('button', { name: /^Lecturas / })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#library');
+    expect(Object.keys(window.history.state)).toEqual(['airwikiNavigation']);
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
   it('keeps AI connections separate from the network sharing filter', async () => {
     const wiki = snapshot.wikis[0];
     wiki.origin = 'aiMemory';
@@ -1990,7 +2069,7 @@ describe('AirWiki wiki workspace', () => {
 
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 3 revisados/ }));
     await fireEvent.click(screen.getByRole('button', { name: /^Borradores/ }));
-    await fireEvent.click(screen.getByRole('button', { name: 'updating.md, Borrador' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Draft proposal, updating.md, Borrador' }));
     const dialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
 
     expect(within(dialog).getByText('Volviendo a analizar los borradores actuales')).toBeInTheDocument();
@@ -2016,7 +2095,7 @@ describe('AirWiki wiki workspace', () => {
 
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 3 revisados/ }));
     await fireEvent.click(screen.getByRole('button', { name: /^Borradores/ }));
-    await fireEvent.click(screen.getByRole('button', { name: 'without-evidence.md, Borrador' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Draft proposal, without-evidence.md, Borrador' }));
     const dialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
     const exclude = within(dialog).getByRole('button', { name: 'Excluir de esta wiki' });
 
@@ -2046,7 +2125,7 @@ describe('AirWiki wiki workspace', () => {
 
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 3 revisados/ }));
     await fireEvent.click(screen.getByRole('button', { name: /^Borradores/ }));
-    await fireEvent.click(screen.getByRole('button', { name: 'draft.md, Borrador' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Draft proposal, draft.md, Borrador' }));
 
     let dialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
     expect(within(dialog).getByRole('status')).toHaveTextContent('Cargando el texto extraído…');
@@ -2113,7 +2192,7 @@ describe('AirWiki wiki workspace', () => {
 
     await fireEvent.click(await screen.findByRole('button', { name: /Atlas 2 de 3 revisados/ }));
     await fireEvent.click(screen.getByRole('button', { name: /^Borradores/ }));
-    await fireEvent.click(screen.getByRole('button', { name: 'legacy.md, Borrador' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Legacy proposal, legacy.md, Borrador' }));
     const legacyDialog = await screen.findByRole('region', { name: 'Revisión de propuesta' });
 
     expect(within(legacyDialog).getByText(/Vuelve a crearla desde la carpeta de origen/)).toBeInTheDocument();

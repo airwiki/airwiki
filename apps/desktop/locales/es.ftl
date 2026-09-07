@@ -1128,6 +1128,10 @@ desktop-public-wiki-concept-count =
     }
 desktop-library-controls = Controles de la lista de wikis
 desktop-library-filter-label = Mostrar
+desktop-library-name-filter = Filtrar wikis por nombre
+desktop-library-name-clear = Borrar filtro de nombre
+desktop-library-name-empty-body = Prueba otro nombre o borra los filtros para ver todas las wikis.
+desktop-library-filter-count = { $count } de { $total } wikis
 desktop-library-filter-all = Todas
 desktop-library-filter-attention = Necesitan atención
 desktop-library-filter-private = Solo tú

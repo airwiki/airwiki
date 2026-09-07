@@ -17,7 +17,14 @@ export async function setCssViewport(width: number, height: number): Promise<voi
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await browser.setWindowSize(physicalWidth, physicalHeight);
     const clientWidth = await browser.execute(() => document.documentElement.clientWidth);
-    if (clientWidth >= width) return;
+    if (clientWidth >= width) {
+      // Native geometry can arrive before the WebView's resize listeners and
+      // reactive layout. Let both settle before opening a responsive inspector.
+      await browser.executeAsync((done) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => done(true)));
+      });
+      return;
+    }
     physicalWidth += Math.ceil((width - clientWidth) * ratio);
   }
   throw new Error(`could not reach the ${width}x${height} CSS viewport`);
@@ -60,6 +67,7 @@ export async function captureVisual(tag: string): Promise<void> {
       .action-message { visibility: hidden !important; }
       .workspace-sidebar button:hover:not(.active):not(.wiki-picker) { color: var(--muted) !important; background: transparent !important; }
       .secondary:hover:not(:disabled) { background: transparent !important; border-color: var(--line) !important; }
+      .table-empty > .primary:hover:not(:disabled) { background: var(--action-fill) !important; }
       .system-status-button:hover { color: var(--muted) !important; background: transparent !important; }
       .review-columns .control-field > input:hover:not(:disabled):not([aria-invalid="true"]), .review-columns .control-field > textarea:hover:not(:disabled):not([aria-invalid="true"]) {
         border-color: var(--control-border, var(--line)) !important;

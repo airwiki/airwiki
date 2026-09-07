@@ -233,6 +233,8 @@ const bridge: DevelopmentBridge = {
     return snapshot;
   },
   async invoke(_command, arguments_) {
+    if (_command === 'load_desktop_workspace') return null;
+    if (_command === 'save_desktop_workspace') return undefined;
     const requestId = typeof arguments_?.requestId === 'string' ? arguments_.requestId : null;
     if (destination === 'search' && _command === 'search' && requestId && snapshot.search) {
       snapshot.search = { ...snapshot.search, requestId };

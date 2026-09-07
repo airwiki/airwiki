@@ -433,6 +433,13 @@ impl From<FirewallActionError> for ConnectivityIssueCode {
 
 #[derive(Debug)]
 pub enum WorkerCommand {
+    LoadDesktopWorkspace {
+        completed: oneshot::Sender<Result<Option<airwiki_core::DesktopWorkspaceState>, ()>>,
+    },
+    SaveDesktopWorkspace {
+        state: airwiki_core::DesktopWorkspaceState,
+        completed: oneshot::Sender<Result<(), ()>>,
+    },
     InstallModels,
     CancelInstall,
     SetModelProfile(ModelProfile),
@@ -1829,6 +1836,16 @@ pub(crate) async fn run_worker(
                                 WorkerEvent::Notice("No hay una instalación cancelable".into()),
                             ).await,
                         }
+                    }
+                    WorkerCommand::LoadDesktopWorkspace { completed } => {
+                        let database = services.database().clone();
+                        let result = run_blocking(move || database.load_desktop_workspace()).await.map_err(|_| ());
+                        let _ = completed.send(result);
+                    }
+                    WorkerCommand::SaveDesktopWorkspace { state, completed } => {
+                        let database = services.database().clone();
+                        let result = run_blocking(move || database.save_desktop_workspace(state)).await.map_err(|_| ());
+                        let _ = completed.send(result);
                     }
                     WorkerCommand::SetModelProfile(profile) => {
                         if !can_change_model_profile(model_lifecycle) {

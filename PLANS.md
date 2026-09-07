@@ -6,7 +6,7 @@ A plan records intent and acceptance, not a transcript, command log, or speculat
 
 ## Desktop reading-first redesign
 
-Status: Active — implementation and validation authorized.
+Status: Completed — seven phases implemented and installed acceptance passed.
 Last updated: 2026-09-06
 
 The [desktop UI redesign plan](docs/ui-redesign-plan.md) records seven phased
@@ -14,18 +14,25 @@ deliveries: minimum-window reading and the linked-W Wiki symbol, navigation and
 Library, reader and sources, search, dedicated review, settings and local
 session restoration, then installed-platform acceptance. It preserves explicit
 sharing and AI-app permissions and does not depend on public package signing.
-The installer plan is paused while this user-prioritized redesign is active;
-its unfinished acceptance remains recorded below.
+The installer plan remains paused; its unfinished acceptance is recorded below
+and is not part of the completed redesign.
 
 Current acceptance prioritizes everyday layout, navigation, reading, review,
 and recovery on macOS and Windows. Specialized screen-reader and exhaustive
 accessibility validation is deferred, as requested by the product owner;
 existing keyboard, focus, semantics, contrast, and reduced-motion support stays.
 
+The delivered design is recorded in the current UI guidelines, architecture and
+changelog. The [Mac acceptance](docs/desktop-redesign-macos-validation.md) and
+[Windows acceptance](docs/desktop-redesign-windows-validation.md) record tested
+candidates, recovery paths and precise deferrals. Independent review found no
+remaining actionable issues; delivery follows the required green-check PR flow.
+The separate installer work remains paused.
+
 ## Windows MSI and open-source signing
 
-Status: Paused — desktop redesign is the active priority.
-Last updated: 2026-08-11
+Status: Paused — awaiting a separate resumption of installer work.
+Last updated: 2026-09-06
 
 ### User-visible outcome
 

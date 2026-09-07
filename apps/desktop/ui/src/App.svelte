@@ -25,6 +25,8 @@
   import GlobalSearch from './GlobalSearch.svelte';
   import IntegrationList from './IntegrationList.svelte';
   import LocalAiSettings from './components/LocalAiSettings.svelte';
+  import { loadDesktopWorkspace, saveDesktopWorkspace, type WorkspaceStateDto, type WorkspaceSelectionDto } from './api';
+  import { createWorkspacePersistence } from './workspacePersistence';
   import OnboardingFlow from './OnboardingFlow.svelte';
   import PublicWikiTable from './PublicWikiTable.svelte';
   import SharedWikiViewer from './SharedWikiViewer.svelte';
@@ -121,9 +123,13 @@
   let destination: Destination = 'library';
   let sidebarCollapsed = false;
   let sidebarWidth = 224;
+  let workspacePersistence: ReturnType<typeof createWorkspacePersistence> | null = null;
+  let workspaceStartup: { state: WorkspaceStateDto | null; navigationId: string | null; restore: boolean } | null = null;
+  let workspaceReady = false;
+  let workspaceSaveFailed = false;
   let settingsSection: SettingsSection = 'general';
   let lastSettingsSection: SettingsSection = 'general';
-  let settingsReturnContext: { hash: string; scrollTop: number; indexScrollTop: number; review?: NavigationEntry['review'] } | null = null;
+  let settingsReturnContext: { hash: string; scrollTop: number; indexScrollTop: number; readingWikiId: string | null; review?: NavigationEntry['review'] } | null = null;
   let settingsLeavePending = false;
   let settingsLeaveIntent: SettingsLeaveIntent | null = null;
   let searchFilter: SearchFilter = 'all';
@@ -236,7 +242,7 @@
   const wikiReadingContexts = new SvelteMap<string, ReadingContext>();
   let activeNavigationId: string | null = null;
   let activeNavigationHash = '';
-  let readingRestore: { context: ReadingContext; requestId: string; stage: 'bundle' | 'page' } | null = null;
+  let readingRestore: { context: ReadingContext; requestId: string; stage: 'bundle' | 'page'; startup?: WorkspaceSelectionDto } | null = null;
   let localPageHidden = false;
   let wikiLoadFailedId: string | null = null;
   let guidedRepairRequestId: string | null = null;
@@ -922,6 +928,7 @@
 
   onMount(() => {
     let disposed = false;
+    const explicitStartupRoute = window.location.hash.length > 1;
     const syncRoute = (event?: Event) => {
       const entryId = historyEntryId();
       const entry = entryId ? navigationEntries.get(entryId) : undefined;
@@ -956,10 +963,10 @@
             ? 'connections'
             : null;
       if (requestedSettings) {
+        rememberSettingsReturn();
         destination = 'settings';
         settingsSection = requestedSettings;
         lastSettingsSection = requestedSettings;
-        settingsReturnContext ??= { hash: '#library', scrollTop: 0, indexScrollTop: 0 };
         const canonical = `#settings/${requestedSettings}`;
         if (event || activeNavigationId === null) {
           if (entry && entryId) {
@@ -1072,6 +1079,7 @@
       resumePendingSearch();
     };
     syncRoute();
+    const startupNavigationId = activeNavigationId;
     window.addEventListener('hashchange', syncRoute);
     window.addEventListener('popstate', syncRoute);
     const handleShortcut = (event: KeyboardEvent) => {
@@ -1260,6 +1268,19 @@
       runtimeMessageId = connected.phase === 'ready' ? 'status-ready' : runtimeMessageId;
       await tick();
       syncRoute();
+      void loadDesktopWorkspace().then((state) => {
+        if (disposed) return;
+        workspacePersistence = createWorkspacePersistence(saveDesktopWorkspace, (failed) => { workspaceSaveFailed = failed; }, state);
+        workspaceStartup = { state, navigationId: startupNavigationId, restore: !explicitStartupRoute };
+      }).catch(() => {
+        if (disposed) return;
+        // A failed read must not immediately overwrite an unknown saved
+        // selection with the startup defaults. A later user change may save.
+        const baseline = snapshot ? workspaceState(snapshot, workspaceWikiId, !localPageHidden, sidebarWidth, sidebarCollapsed) : null;
+        workspacePersistence = createWorkspacePersistence(saveDesktopWorkspace, (failed) => { workspaceSaveFailed = failed; }, baseline);
+        workspaceStartup = { state: null, navigationId: startupNavigationId, restore: false };
+        actionMessage = t('desktop-workspace-restore-failed');
+      });
       startAutomaticSystemStatusRefresh(connected);
       if (destination === 'settings') void refreshAutostartState();
     }).catch(() => { runtimeMessageId = 'error-generic'; });
@@ -1267,6 +1288,7 @@
       disposed = true;
       mainScrollGeneration += 1;
       dialogFocusGeneration += 1;
+      workspacePersistence?.dispose();
       cancelScheduledSearch();
       window.removeEventListener('hashchange', syncRoute);
       window.removeEventListener('popstate', syncRoute);
@@ -1279,6 +1301,54 @@
       void unlistenNativeMenu.then((unlisten) => unlisten());
     };
   });
+
+  $: if (workspaceStartup && snapshot?.phase === 'ready' && snapshot.preferences) initializeWorkspace(workspaceStartup, snapshot);
+  $: workspaceWikiId = destination === 'settings' ? settingsReturnContext?.readingWikiId ?? null
+    : destination === 'library' && !sharedBrowseOpen ? selectedWikiId : null;
+  $: if (workspaceReady && snapshot?.preferences?.completedOnboardingVersion != null && !readingRestore && !pendingKnowledgePage) {
+    workspacePersistence?.update(workspaceState(snapshot, workspaceWikiId, !localPageHidden, sidebarWidth, sidebarCollapsed));
+  }
+
+  function workspaceState(current: AppSnapshot, wikiId: string | null, visible: boolean, width: number, collapsed: boolean): WorkspaceStateDto {
+    const bundle = current.knowledge;
+    const page = visible && current.knowledgePage?.wikiId === wikiId && current.knowledgePage.status === 'ready' ? current.knowledgePage.page : null;
+    let selection: WorkspaceSelectionDto | null = null;
+    if (wikiId && page && current.wikis.some((wiki) => wiki.id === wikiId) && bundle?.wikiId === wikiId && bundle.status === 'ready') {
+      if (page.kind === 'concept') {
+        const concept = bundle.concepts.find((concept) => pageKey(concept.page) === pageKey(page));
+        if (concept) selection = { wikiId, page: { kind: 'concept', conceptId: concept.conceptId } };
+      } else selection = { wikiId, page };
+    }
+    return { selection, sidebarWidth: Math.max(200, Math.min(360, Math.round(width))), sidebarCollapsed: collapsed };
+  }
+
+  function initializeWorkspace(startup: NonNullable<typeof workspaceStartup>, current: AppSnapshot) {
+    workspaceStartup = null;
+    workspaceReady = true;
+    const state = startup.state;
+    if (state && sidebarWidth === 224 && !sidebarCollapsed) {
+      sidebarWidth = Math.max(200, Math.min(360, state.sidebarWidth));
+      sidebarCollapsed = state.sidebarCollapsed;
+    }
+    if (!startup.restore || current.preferences?.completedOnboardingVersion == null || startup.navigationId !== activeNavigationId || !state?.selection) return;
+    const selection = state.selection;
+    selectedWikiId = selection.wikiId;
+    registerNavigation('#library/wiki', true);
+    void restoreReadingContext({ wikiId: selection.wikiId, page: selection.page.kind === 'concept' ? null : selection.page, mode: 'document', filter: 'all', scrollTop: 0, indexScrollTop: 0 }, selection);
+  }
+
+  function unavailableStartupPage() {
+    readingRestore = null;
+    pendingKnowledgePage = null;
+    selectedWikiId = null;
+    localPageHidden = true;
+    destination = 'library';
+    libraryScope = 'device';
+    registerNavigation('#library', true);
+    actionMessage = t('desktop-workspace-page-unavailable');
+    scrollMainTo(0);
+    focusRouteHeading();
+  }
 
   function select(next: Destination) {
     if (!canLeaveReview(() => select(next))) return;
@@ -1341,18 +1411,24 @@
     openSettings(target);
   }
 
+  function rememberSettingsReturn() {
+    if (destination !== 'settings') {
+      const navigation = currentNavigation();
+      settingsReturnContext = {
+        hash: navigation.hash,
+        scrollTop: navigation.scrollTop,
+        indexScrollTop: navigation.indexScrollTop,
+        readingWikiId: navigation.reading?.wikiId ?? null,
+        review: navigation.review
+      };
+    }
+  }
+
   function openSettings(section: SettingsSection = lastSettingsSection) {
     if (!canLeaveReview(() => openSettings(section))) return;
     cancelScheduledSearch();
     rememberNavigation();
-    if (destination !== 'settings') {
-      settingsReturnContext = {
-        hash: window.location.hash || '#library',
-        scrollTop: mainScrollRegion?.scrollTop ?? 0,
-        indexScrollTop: currentPageIndex()?.scrollTop ?? 0,
-        review: currentNavigation().review
-      };
-    }
+    rememberSettingsReturn();
     clearReview();
     destination = 'settings';
     activateSettingsSection(section);
@@ -1381,7 +1457,7 @@
 
   function restoreLibraryContext() {
     rememberNavigation();
-    const context = settingsReturnContext ?? { hash: '#library', scrollTop: 0, indexScrollTop: 0 };
+    const context: NonNullable<typeof settingsReturnContext> = settingsReturnContext ?? { hash: '#library', scrollTop: 0, indexScrollTop: 0, readingWikiId: null };
     destination = context.hash === '#review' ? 'review' : 'library';
     settingsLeavePending = false;
     settingsReturnContext = null;
@@ -3073,7 +3149,7 @@
     }
   }
 
-  async function restoreReadingContext(context: ReadingContext) {
+  async function restoreReadingContext(context: ReadingContext, startup?: WorkspaceSelectionDto) {
     cancelScheduledSearch();
     dismissSharedBrowse();
     pendingSearchConcept = null;
@@ -3089,6 +3165,7 @@
     wikiLoadFailedId = null;
     actionMessage = '';
     if (!snapshot?.wikis.some((wiki) => wiki.id === context.wikiId)) {
+      if (startup) { unavailableStartupPage(); return; }
       selectedWikiId = null;
       libraryScope = 'device';
       registerNavigation('#library', true);
@@ -3098,12 +3175,13 @@
       return;
     }
     const requestId = crypto.randomUUID();
-    readingRestore = { context, requestId, stage: 'bundle' };
+    readingRestore = { context, requestId, stage: 'bundle', startup };
     scrollMainTo(0);
     try {
       await loadWikiBundle(context.wikiId, requestId);
     } catch {
       if (readingRestore?.requestId !== requestId) return;
+      if (startup) { unavailableStartupPage(); return; }
       readingRestore = null;
       wikiLoadFailedId = context.wikiId;
       actionMessage = t('home-wiki-failed');
@@ -3117,14 +3195,19 @@
     if (restore.stage === 'bundle') {
       const bundle = current.knowledge;
       if (!bundle || bundle.wikiId !== context.wikiId || bundle.status !== 'ready') {
+        if (restore.startup) { unavailableStartupPage(); return; }
         readingRestore = null;
         wikiLoadFailedId = context.wikiId;
         return;
       }
-      const descriptor = context.page?.kind === 'concept'
+      const startupPage = restore.startup?.page;
+      const descriptor = startupPage?.kind === 'concept'
+        ? bundle.concepts.find((concept) => concept.conceptId === startupPage.conceptId)
+        : context.page?.kind === 'concept'
         ? bundle.concepts.find((concept) => pageKey(concept.page) === pageKey(context.page!))
         : bundle.reservedPages.find((reserved) => context.page && reserved.page.kind === context.page.kind);
-      if (!context.page || !descriptor) {
+      if (restore.startup && !descriptor) { unavailableStartupPage(); return; }
+      if ((!context.page && !restore.startup) || !descriptor) {
         readingRestore = null;
         if (context.page) actionMessage = t('knowledge-page-unavailable');
         restoreIndexScroll(context.indexScrollTop);
@@ -3132,12 +3215,15 @@
         return;
       }
       const pageRequestId = crypto.randomUUID();
-      readingRestore = { context, requestId: pageRequestId, stage: 'page' };
+      const currentContext = { ...context, page: descriptor.page };
+      readingRestore = { context: currentContext, requestId: pageRequestId, stage: 'page', startup: restore.startup };
+      if (restore.startup) registerNavigation('#library/wiki', true, descriptor.page);
       pendingKnowledgePage = { wikiId: context.wikiId, page: descriptor.page, requestId: pageRequestId };
       try {
         await loadWikiPage(context.wikiId, descriptor.page, descriptor.fingerprint, pageRequestId);
       } catch (error) {
         if (readingRestore?.requestId !== pageRequestId) return;
+        if (restore.startup) { unavailableStartupPage(); return; }
         readingRestore = null;
         pendingKnowledgePage = null;
         actionMessage = t(uiErrorMessageKey(error) === 'currentKnowledgeSnapshotRequired'
@@ -3148,6 +3234,10 @@
     readingRestore = null;
     pendingKnowledgePage = null;
     const page = current.knowledgePage;
+    if (restore.startup && (!page || page.status !== 'ready' || page.wikiId !== context.wikiId || !context.page || pageKey(page.page) !== pageKey(context.page))) {
+      unavailableStartupPage();
+      return;
+    }
     localPageHidden = !page || page.wikiId !== context.wikiId || !context.page
       || pageKey(page.page) !== pageKey(context.page);
     const navigationId = activeNavigationId;
@@ -3263,6 +3353,8 @@
     }
     if (!canLeaveReview(() => void requestQuit())) return;
     if (!canLeaveSettings({ kind: 'quit' })) return;
+    await tick();
+    await workspacePersistence?.flushForQuit();
     await quitCompletely();
   }
 
@@ -3379,6 +3471,9 @@
       class:shared-wiki-open={destination === 'library' && sharedBrowseOpen}
       bind:this={mainScrollRegion}
     >
+        {#if workspaceSaveFailed}
+          <div class="workspace-save-warning" role="alert"><p>{t('desktop-workspace-save-failed')}</p><button class="text-action" onclick={() => workspacePersistence?.flush()}>{t('action-retry')}</button></div>
+        {/if}
         {#if sharedBrowseOpen && destination === 'library'}
           <div class="route-page drive-route shared-wiki-route" data-route="library">{@render content()}</div>
         {:else}

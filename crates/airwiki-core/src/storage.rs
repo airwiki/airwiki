@@ -44,6 +44,13 @@ const MIGRATION_15: &str = include_str!("../migrations/0015_peer_device_platform
 const MIGRATION_16: &str = include_str!("../migrations/0016_project_memory.sql");
 const MIGRATION_17: &str = include_str!("../migrations/0017_application_search_grants.sql");
 const MIGRATION_18: &str = include_str!("../migrations/0018_ai_federated_search.sql");
+const MIGRATION_19: &str = include_str!("../migrations/0019_desktop_workspace.sql");
+
+#[path = "storage_workspace.rs"]
+mod workspace;
+pub use workspace::{
+    DesktopWorkspaceState, LocalReadingSelection, WORKSPACE_SIDEBAR_MAX, WORKSPACE_SIDEBAR_MIN,
+};
 
 const APPLICATION_MUTATIONS_PER_MINUTE: u32 = 30;
 const APPLICATION_WIKI_CREATIONS_PER_HOUR: u32 = 5;
@@ -1233,7 +1240,13 @@ impl Database {
             tx.pragma_update(None, "user_version", 18)?;
             tx.commit()?;
         }
-        if version > 18 {
+        if version < 19 {
+            let tx = connection.transaction()?;
+            tx.execute_batch(MIGRATION_19)?;
+            tx.pragma_update(None, "user_version", 19)?;
+            tx.commit()?;
+        }
+        if version > 19 {
             bail!("database schema {version} is newer than this application supports");
         }
         let database = Self {
@@ -8274,7 +8287,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("db.sqlite");
         let db = Database::open(&path).unwrap();
-        assert_eq!(db.schema_version().unwrap(), 18);
+        assert_eq!(db.schema_version().unwrap(), 19);
         for table in [
             "collections",
             "source_documents",
@@ -8294,7 +8307,7 @@ mod tests {
             assert_eq!(db.count(table).unwrap(), 0);
         }
         drop(db);
-        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 18);
+        assert_eq!(Database::open(path).unwrap().schema_version().unwrap(), 19);
     }
 
     #[test]
@@ -8816,7 +8829,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 18);
+        assert_eq!(database.schema_version().unwrap(), 19);
         assert_eq!(database.count("collections").unwrap(), 1);
         assert_eq!(database.count("source_documents").unwrap(), 1);
         assert_eq!(database.count("publication_claims").unwrap(), 0);
@@ -8856,7 +8869,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 18);
+        assert_eq!(database.schema_version().unwrap(), 19);
         assert_eq!(
             database.collection(collection_id).unwrap().unwrap().policy,
             CollectionPolicy::local_only()
@@ -8891,7 +8904,7 @@ mod tests {
 
         let database = Database::open(&path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
-        assert_eq!(database.schema_version().unwrap(), 18);
+        assert_eq!(database.schema_version().unwrap(), 19);
         assert_eq!(collection.policy, CollectionPolicy::local_only());
         assert!(
             database
@@ -8923,7 +8936,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 18);
+        assert_eq!(database.schema_version().unwrap(), 19);
         let indexes = database.list_federation_indexes().unwrap();
         assert_eq!(indexes.len(), 1);
         assert_eq!(indexes[0].registry_version, 0);
@@ -8962,7 +8975,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::days(1),
         }];
 
-        assert_eq!(database.schema_version().unwrap(), 18);
+        assert_eq!(database.schema_version().unwrap(), 19);
         assert_eq!(
             database
                 .count("federation_bootstrap_registry_state")
@@ -9004,7 +9017,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let collection = database.collection(collection_id).unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 18);
+        assert_eq!(database.schema_version().unwrap(), 19);
         assert_eq!(collection.origin, WikiOrigin::Folder);
         assert_eq!(collection.indexing_mode, IndexingMode::Manual);
         assert_eq!(collection.okf_version, "0.1");
@@ -9092,7 +9105,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 18);
+        assert_eq!(database.schema_version().unwrap(), 19);
         assert_eq!(collection.policy, CollectionPolicy::local_only());
         assert_eq!(collection.indexing_mode, IndexingMode::Manual);
         assert_eq!(database.count("collections").unwrap(), 1);
@@ -9224,7 +9237,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let concepts = database.list_okf_concept_projection(collection_id).unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 18);
+        assert_eq!(database.schema_version().unwrap(), 19);
         assert_eq!(concepts.len(), 1);
         assert_eq!(concepts[0].concept_type.to_string(), "Unknown Type");
         assert_eq!(concepts[0].lifecycle_status, "stable");
@@ -9950,7 +9963,7 @@ mod tests {
         let database = Database::open(path).unwrap();
         let peer = database.peer("existing-peer").unwrap().unwrap();
 
-        assert_eq!(database.schema_version().unwrap(), 18);
+        assert_eq!(database.schema_version().unwrap(), 19);
         assert_eq!(peer.display_name.as_deref(), Some("Atlas Mac"));
         assert!(peer.trusted);
         assert_eq!(peer.device_platform, None);
@@ -10781,7 +10794,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 18);
+        assert_eq!(database.schema_version().unwrap(), 19);
         assert_eq!(
             database.collection(id).unwrap().unwrap().memory_scope,
             Some(MemoryScope::Personal)
@@ -10931,7 +10944,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 18);
+        assert_eq!(database.schema_version().unwrap(), 19);
         assert_eq!(
             database
                 .application_wiki_role(editor_app_id, approved_memory_id)
@@ -11048,7 +11061,7 @@ mod tests {
         drop(connection);
 
         let database = Database::open(&path).unwrap();
-        assert_eq!(database.schema_version().unwrap(), 18);
+        assert_eq!(database.schema_version().unwrap(), 19);
         assert!(
             !database
                 .application_capability_by_app_id(app_id)

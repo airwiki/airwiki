@@ -330,6 +330,8 @@ button:active:not(:disabled) { transform: scale(.985); }
 .drive-route { width: min(1240px, 100%); margin: 0 auto; }
 .drive-page:has(> .route-page > .review-workspace) { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .drive-page > .route-page:has(> .review-workspace) { display: flex; flex: 1; min-height: 0; width: 100%; }
+.workspace-save-warning { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 20px; margin-bottom: 16px; color: var(--amber); }
+.workspace-save-warning p { margin: 0; font: 400 13px/1.5 var(--font-ui); }
 .drive-page.wiki-open { padding-bottom: 42px; overflow-x: hidden; overflow-y: auto; }
 .drive-page.shared-wiki-open { padding-bottom: 48px; overflow-x: hidden; overflow-y: auto; }
 .wiki-route { min-height: 100%; }

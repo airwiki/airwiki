@@ -131,6 +131,33 @@ requested during a review decision waits for its completion; a failed decision
 retains edits and offers the same discard/cancel choice. Hiding keeps the
 workspace alive. Startup can still quit before the UI has connected.
 
+Desktop continuity is a single bounded record in the operational SQLite database
+(`0019_desktop_workspace.sql`). It stores an optional local Wiki UUID and page
+kind/concept UUID, plus sidebar width (200–360 logical pixels) and collapsed state.
+It stores no path, query, snippet, fingerprint, pending operation, remote owner
+or permission. The IPC DTO rejects unknown fields and the worker performs reads
+and atomic replacement through `spawn_blocking`; completion means the write has
+finished. UI changes coalesce for 400 ms and serialize so an older write cannot
+replace a newer selection. Native quit flushes the latest preference after
+resolving edits, waiting at most 1.5 seconds for this cosmetic preference; a failed
+or stalled preference write does not prevent reading or quitting
+and offers an explicit retry while the window remains open.
+
+Restoration waits for the initial ready snapshot. Explicit routes, onboarding
+and intervening navigation take precedence. A saved local concept resolves by
+UUID in a freshly requested bundle, then loads its current path and fingerprint.
+Missing Wiki/page, invalid state and load failure return safely to Library;
+no persisted value authorizes network browsing or restores public-query consent.
+Settings retains its local return article so quitting there resumes that article,
+not the Settings route. Entering Settings from Library, search, review or remote
+browsing does not revive an older local selection. Other non-reading destinations
+save no selection. The layout clamps again to the
+current window. Schema 19 is additive and preserves existing content and grants;
+an older application rejects the newer database schema. A future workspace
+record version is neither read nor overwritten by this build. Invalid current
+preferences can be replaced by subsequent navigation; never downgrade by deleting
+operational data. Use a compatible build or an existing pre-upgrade backup.
+
 Manual source updates are Wiki-scoped and exist only for ordinary folder
 Wikis. One request first reconciles the complete folder, then reruns local
 enrichment for the drafts that were pending when the request began. Newly

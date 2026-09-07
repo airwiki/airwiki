@@ -226,14 +226,16 @@ async function deleteWebDriverSession(sessionId, context) {
   }
 }
 
-async function requestGracefulShutdown(child) {
+async function requestGracefulShutdown(child, throughUi = false) {
   const sessionId = await createWebDriverSession('shutdown');
   try {
     await fetch(`${webDriverUrl}/session/${sessionId}/execute/sync`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        script: "return window.__TAURI_INTERNALS__.invoke('quit_completely')",
+        script: throughUi
+          ? "return window.__TAURI_INTERNALS__.invoke('plugin:event|emit', { event: 'quit-requested', payload: null })"
+          : "return window.__TAURI_INTERNALS__.invoke('quit_completely')",
         args: []
       })
     });
@@ -252,43 +254,53 @@ async function requestGracefulShutdown(child) {
   if (exitCode !== 0) throw new Error(`AirWiki graceful shutdown returned ${exitCode}`);
 }
 
-const app = spawn(appBinaryPath, [], {
-  env: {
-    ...process.env,
-    AIRWIKI_E2E_DATA_ROOT: testRoot,
-    AIRWIKI_E2E_CONFIRMATIONS: 'allow',
-    AIRWIKI_E2E_WIKI_FOLDER: sourceFixture,
-    AIRWIKI_E2E_OKF_FOLDER: okfFixture,
-    AIRWIKI_E2E_PROJECT_FOLDER: projectFixture,
-    AIRWIKI_E2E_MCP_PORT: String(e2eMcpPort),
-    TAURI_WEBDRIVER_PORT: String(e2eWebDriverPort)
-  },
-  stdio: 'inherit'
-});
-
-try {
-  await waitForWebDriver(app);
-  const wdioEntry = fileURLToPath(import.meta.resolve('@wdio/cli'));
-  const wdioCli = resolve(dirname(wdioEntry), '..', 'bin', 'wdio.js');
-  const result = spawnSync(process.execPath, [wdioCli, 'run', 'wdio.conf.ts'], {
-    cwd: uiRoot,
+function launchApp() {
+  return spawn(appBinaryPath, [], {
     env: {
       ...process.env,
       AIRWIKI_E2E_DATA_ROOT: testRoot,
+      AIRWIKI_E2E_CONFIRMATIONS: 'allow',
+      AIRWIKI_E2E_WIKI_FOLDER: sourceFixture,
+      AIRWIKI_E2E_OKF_FOLDER: okfFixture,
       AIRWIKI_E2E_PROJECT_FOLDER: projectFixture,
       AIRWIKI_E2E_MCP_PORT: String(e2eMcpPort),
       TAURI_WEBDRIVER_PORT: String(e2eWebDriverPort)
     },
     stdio: 'inherit'
   });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    process.exitCode = result.status ?? 1;
-  } else {
-    await requestGracefulShutdown(app);
+}
+
+let app;
+try {
+  const wdioEntry = fileURLToPath(import.meta.resolve('@wdio/cli'));
+  const wdioCli = resolve(dirname(wdioEntry), '..', 'bin', 'wdio.js');
+  const review = process.env.AIRWIKI_E2E_REVIEW_FIXTURE === '1';
+  for (const restoring of review ? [false] : [false, true]) {
+    app = launchApp();
+    await waitForWebDriver(app);
+    const result = spawnSync(process.execPath, [wdioCli, 'run', 'wdio.conf.ts'], {
+      cwd: uiRoot,
+      env: {
+        ...process.env,
+        AIRWIKI_E2E_SESSION_RESTORE: restoring ? '1' : '0',
+        AIRWIKI_E2E_DATA_ROOT: testRoot,
+        AIRWIKI_E2E_PROJECT_FOLDER: projectFixture,
+        AIRWIKI_E2E_MCP_PORT: String(e2eMcpPort),
+        TAURI_WEBDRIVER_PORT: String(e2eWebDriverPort)
+      },
+      stdio: 'inherit'
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      process.exitCode = result.status ?? 1;
+      break;
+    }
+    await requestGracefulShutdown(app, !review);
+    await stopApp(app);
+    app = undefined;
   }
 } finally {
-  await stopApp(app);
+  if (app) await stopApp(app);
   if (process.env.AIRWIKI_E2E_KEEP_DATA === '1') {
     console.error(`E2E data retained at ${testRoot}`);
   } else {

@@ -61,10 +61,19 @@ Run `cargo deny --locked check` whenever dependencies or `Cargo.lock` change. UI
 Tests must not download models, contact real peers or external services, open external URLs, or require private credentials. Loopback, in-process peers, fake providers, and temporary directories are acceptable.
 
 `pnpm --dir apps/desktop/ui e2e` builds and runs the isolated desktop journey.
+The normal journey then exits through the UI quit handler and starts a second
+process against the same temporary database to verify local reading and panel
+restoration. It does not restore a query or remote browsing session.
 Set `AIRWIKI_E2E_REVIEW_FIXTURE=1` for the review journey with synthetic drafts,
 stored evidence and real publication IPC, without installing inference models.
 The fixture is compiled only with the debug-only `e2e` feature and requires a
 temporary E2E data root. The runner creates and removes that root automatically.
+Every `e2e` build requires an existing `airwiki-e2e-*` directory directly inside
+the operating system's temporary directory. Launching it without that explicit
+root fails before profile discovery; it never falls back to the normal user
+profile. Retained profiles can be reused, but linked data/config directories
+are rejected. Use the runner or provide its isolated environment before attaching
+a UI inspection tool to an installed debug candidate.
 Rebuild with `e2e` after other Cargo commands rebuild the desktop binary so the
 runner uses the Tauri E2E configuration and embedded UI.
 Its quit-event checks complement, but do not replace, installed-platform checks

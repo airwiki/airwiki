@@ -221,6 +221,12 @@ export type PreferencesSummary = { completedOnboardingVersion: number | null, lo
 
 export type PreferencesInput = { locale: LocalePreference, theme: ThemePreference, lanPreference: LanPreference, closeBehavior: CloseBehavior, automaticUpdateChecks: boolean, completeOnboarding: boolean, };
 
+export type WorkspaceStateDto = { selection: WorkspaceSelectionDto | null, sidebarWidth: number, sidebarCollapsed: boolean, };
+
+export type WorkspaceSelectionDto = { wikiId: string, page: WorkspacePageDto, };
+
+export type WorkspacePageDto = { "kind": "index" } | { "kind": "log" } | { "kind": "concept", conceptId: string, };
+
 export type HostPlatform = "macOs" | "windows";
 
 export type AppPhase = "starting" | "failed" | "ready";

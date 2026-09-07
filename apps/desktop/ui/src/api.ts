@@ -14,6 +14,7 @@ import type {
   SystemDestination,
   UiEventEnvelope
 } from './generated/ui-contract';
+import type { WorkspaceStateDto } from './generated/ui-contract';
 
 export type * from './generated/ui-contract';
 
@@ -45,6 +46,14 @@ export async function connect(onEvent: (event: UiEventEnvelope) => void): Promis
 
 export async function installModels(): Promise<void> {
   return invoke('install_models');
+}
+
+export async function loadDesktopWorkspace(): Promise<WorkspaceStateDto | null> {
+  return invoke('load_desktop_workspace');
+}
+
+export async function saveDesktopWorkspace(state: WorkspaceStateDto): Promise<void> {
+  return invoke('save_desktop_workspace', { state });
 }
 
 export async function cancelModelInstall(): Promise<void> {

@@ -150,8 +150,8 @@ The sidebar starts at 224 logical pixels and can be resized between 200 and a
 viewport-dependent maximum of 360. Its focusable separator supports arrow keys,
 Home and End. Enter hides it and returns focus to the visible restore control.
 Hiding the sidebar preserves its index DOM and scroll position; it does not
-change the selected page. Geometry is currently session state, pending the
-planned local persistence contract.
+change the selected page. Width and collapsed state persist locally and are
+clamped again against the current window when restored.
 
 Returning from Settings restores the article and index scroll positions. A
 remote reader also retains its page and list/graph choice within the same live
@@ -174,8 +174,8 @@ replays a free-form search. A failed reopen hides the earlier body, and a blocke
 public publisher cannot be reopened from history. Reloading a shared route
 without its in-memory entry returns to Library without network activity.
 Back/Forward supports Command/Control with `[` / `]`, and Alt with Left/Right,
-outside editable fields and dialogs. These session controls do not implement
-the planned SQLite persistence across application restarts.
+outside editable fields and dialogs. This history remains in memory; a separate
+bounded SQLite preference restores one valid local reading across restarts.
 
 The concept index has its own bounded scroll region beside the article at the
 supported 1024-pixel minimum width. A long index must never push the selected
@@ -230,6 +230,16 @@ An already active runtime remains usable while another model awaits restart.
 Keep the global search bar to one row. When a person enters a query while local
 search is unavailable or preparing, show the explanation and Settings recovery
 action in the search page rather than a permanent second row in the input.
+
+Reopening can resume one local reading after a fresh bundle/page check. Explicit
+routes and onboarding take precedence; a missing selection returns to Library
+with a brief explanation. Only local identifiers and sidebar geometry persist.
+Search, remote browsing and pending operations start afresh. Keep the sidebar
+within the current window's limits and its show control available when collapsed.
+Settings preserves the local article it will return to, including when quitting
+after discarding preference edits; reopening resumes reading rather than Settings.
+Settings opened from a non-reading destination does not revive an older article.
+A failed continuity save must not block reading; show a concise retry action.
 
 Search groups prioritize concept titles, excerpts and provenance. Keep the Wiki
 name, source owner and total match count in a compact header; extended Wiki

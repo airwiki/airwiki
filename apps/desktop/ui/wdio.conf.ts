@@ -15,9 +15,10 @@ if (!Number.isInteger(webDriverPort) || webDriverPort < 1 || webDriverPort > 65_
   throw new Error(`invalid TAURI_WEBDRIVER_PORT: ${configuredWebDriverPort}`);
 }
 const reviewJourney = process.env.AIRWIKI_E2E_REVIEW_FIXTURE === '1';
-if (process.env.UPDATE_VISUAL_BASELINES === '1' && existsSync(baselineFolder)) {
+if (process.env.UPDATE_VISUAL_BASELINES === '1' && process.env.AIRWIKI_E2E_SESSION_RESTORE !== '1'
+  && existsSync(baselineFolder)) {
   // Each fixture updates its own images without deleting the other journey's
-  // reviewed references.
+  // reviewed references. No cleanup is performed by the second process launch.
   for (const name of readdirSync(baselineFolder)) {
     if (name.endsWith('.png') && /-review-/.test(name) === reviewJourney) rmSync(join(baselineFolder, name));
   }
@@ -25,7 +26,9 @@ if (process.env.UPDATE_VISUAL_BASELINES === '1' && existsSync(baselineFolder)) {
 
 export const config: WebdriverIO.Config = {
   runner: 'local',
-  specs: process.env.AIRWIKI_E2E_REVIEW_FIXTURE === '1'
+  specs: process.env.AIRWIKI_E2E_SESSION_RESTORE === '1'
+    ? ['./e2e/session-restore.spec.ts']
+    : process.env.AIRWIKI_E2E_REVIEW_FIXTURE === '1'
     ? ['./e2e/review.spec.ts']
     : ['./e2e/onboarding.spec.ts'],
   maxInstances: 1,
@@ -43,7 +46,7 @@ export const config: WebdriverIO.Config = {
       formatImageName: '{tag}-{width}x{height}',
       autoSaveBaseline: process.env.UPDATE_VISUAL_BASELINES === '1',
       alwaysSaveActualImage: true,
-      clearRuntimeFolder: !reviewJourney,
+      clearRuntimeFolder: !reviewJourney && process.env.AIRWIKI_E2E_SESSION_RESTORE !== '1',
       disableBlinkingCursor: true,
       disableCSSAnimation: true,
       enableLegacyScreenshotMethod: true,

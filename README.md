@@ -27,11 +27,11 @@
 AirWiki is an open-source desktop app that turns folders, [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundles, and assistant conversations into wikis you can search, review, and selectively share. Knowledge stays on the device that owns it by default. Local AI can organize and index it, but cannot publish it or grant access.
 
 > [!IMPORTANT]
-> AirWiki is in active development and has no supported stable download yet. Public technical pre-releases are unsigned or unnotarized test candidates, are never selected by the updater, and may be blocked by platform policy. Read [Availability](#availability) before installing one.
+> AirWiki is in active development and has no supported stable download yet. Pre-releases are manual test candidates, are never selected by the updater, and may be blocked by platform policy. Signing status is stated per platform in each release. Read [Availability](#availability) before installing one.
 
 <p align="center">
   <a href="docs/assets/airwiki-demo.mp4">
-    <img src="docs/assets/airwiki-demo.gif" alt="Animated AirWiki tour showing the Wiki library, progressive review, federated search, and AI app settings">
+    <img src="docs/assets/airwiki-demo.gif" alt="Animated AirWiki 0.3 tour showing Library, the contextual reading sidebar, evidence review, and Settings">
   </a>
   <br>
   <sub>10-second product tour · <a href="docs/assets/airwiki-demo.mp4">MP4 version</a> · synthetic data only</sub>
@@ -83,22 +83,19 @@ The Library decides public search per query. Each connected AI app has its own d
 
 ## See the flow
 
-| Review a draft before it becomes searchable | Choose public search per AI app |
+| Read with your Wiki in reach | Review a draft with its evidence |
 | --- | --- |
-| [![AirWiki review panel showing source evidence beside a draft proposal and review actions](docs/assets/airwiki-review-flow.png)](docs/assets/airwiki-review-flow.png) | [![AirWiki AI app settings showing the disabled Search public knowledge preference for ChatGPT](docs/assets/airwiki-ai-app-search.png)](docs/assets/airwiki-ai-app-search.png) |
-| Evidence stays beside the proposal; approval changes its knowledge state, not its network exposure. | The preference controls query egress for one app and never publishes the owner's wikis. |
+| [![AirWiki reader with a contextual page index and reviewed-state labels](docs/assets/airwiki-reader.png)](docs/assets/airwiki-reader.png) | [![AirWiki review workspace showing evidence, proposal and full-width review actions](docs/assets/airwiki-review-flow.png)](docs/assets/airwiki-review-flow.png) |
+| The index scrolls independently; reading mode can hide it. | Approve, leave for later or exclude without losing the end of the editor. |
 
-<p align="center">
-  <a href="docs/assets/airwiki-search-sources.png">
-    <img src="docs/assets/airwiki-search-sources.png" alt="AirWiki search results grouped by this device, a verified nearby device, and the public network">
-  </a>
-  <br>
-  <sub>Local, nearby, and public origins remain distinct in one search experience.</sub>
-</p>
+The screenshots and ten-second tour show the 0.3 desktop redesign with synthetic
+fixtures. They demonstrate the interface, not model quality or a completed
+publication decision. [Read the 0.3 candidate notes](docs/releases/0.3.0.md).
 
 ## What works today
 
 - **Build knowledge:** create manual or watched wikis from Markdown and text-based PDFs; import hierarchical OKF v0.2 folders and ZIPs; browse draft, reviewed, and excluded concepts.
+- **Read comfortably:** navigate a contextual Wiki index, hide or resize the sidebar, and reopen the last valid local article across sessions.
 - **Review safely:** compare a proposal with revision-bound source evidence, approve at your pace, and withdraw changed source knowledge until its replacement is reviewed.
 - **Find it:** combine lexical and vector search across local, authorized LAN, and explicitly selected public sources with provenance, assurance, and partial-coverage state.
 - **Share it:** verify nearby devices and grant individual wikis; independently opt reviewed wikis into experimental public discovery.
@@ -135,12 +132,12 @@ Read the [threat model](docs/threat-model.md) for complete trust boundaries and 
 
 | Platform | Technical pre-release | Current boundary |
 | --- | --- | --- |
-| macOS | Apple silicon, macOS 13+ DMG | Ad-hoc signed and not notarized |
+| macOS | Apple silicon, macOS 13+ DMG | Technical beta: ad-hoc, not notarized; platform RC: Developer ID signed and notarized, when listed |
 | Windows | Windows 10/11 x64 with AVX2 | Unsigned `en-US` and `es-ES` MSI |
 | Linux x64 | Federation index server | Maintainer service, not AirWiki Desktop |
 | Linux desktop, web, mobile | None | Not currently supported |
 
-Reviewed builds may appear on [GitHub Releases](https://github.com/airwiki/airwiki/releases) as clearly marked technical pre-releases. They are permanent manual downloads, but they are not `Latest`, are never selected by the updater, and do not establish a Windows or macOS publisher identity. Verify `SHA256SUMS.txt` and the GitHub build-provenance attestation, keep operating-system and organization protections enabled, and stop when local policy blocks the candidate.
+Reviewed builds may appear on [GitHub Releases](https://github.com/airwiki/airwiki/releases) as clearly marked technical pre-releases. They are permanent manual downloads, but they are not `Latest`, are never selected by the updater, and are not a supported stable channel. Windows technical betas do not establish a publisher identity; macOS signing and notarization depend on the release channel. Verify `SHA256SUMS.txt` and the GitHub build-provenance attestation, keep operating-system and organization protections enabled, and stop when local policy blocks the candidate.
 
 After the complete acceptance checklist passes, signed installers will use the separate [stable download](https://github.com/airwiki/airwiki/releases/latest). See [Installing and running AirWiki](docs/install.md) for current candidate requirements and first-run behavior.
 

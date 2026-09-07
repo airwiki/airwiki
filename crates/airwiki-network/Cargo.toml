@@ -16,7 +16,7 @@ os-keyring = ["dep:keyring"]
 [dependencies]
 async-trait.workspace = true
 base64 = "0.22.1"
-airwiki-types = { version = "0.2.0", path = "../airwiki-types" }
+airwiki-types = { version = "0.3.0", path = "../airwiki-types" }
 bip39 = "2.2.0"
 ciborium = "0.2.2"
 futures = "0.3.31"

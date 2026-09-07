@@ -20,11 +20,11 @@ e2e = ["dep:tauri-plugin-wdio-webdriver", "airwiki-mcp/e2e"]
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
-airwiki-core = { version = "0.2.0", path = "../../crates/airwiki-core", features = ["fastembed-runtime"] }
-airwiki-inference = { version = "0.2.0", path = "../../crates/airwiki-inference" }
-airwiki-mcp = { version = "0.2.0", path = "../../crates/airwiki-mcp" }
-airwiki-network = { version = "0.2.0", path = "../../crates/airwiki-network" }
-airwiki-types = { version = "0.2.0", path = "../../crates/airwiki-types" }
+airwiki-core = { version = "0.3.0", path = "../../crates/airwiki-core", features = ["fastembed-runtime"] }
+airwiki-inference = { version = "0.3.0", path = "../../crates/airwiki-inference" }
+airwiki-mcp = { version = "0.3.0", path = "../../crates/airwiki-mcp" }
+airwiki-network = { version = "0.3.0", path = "../../crates/airwiki-network" }
+airwiki-types = { version = "0.3.0", path = "../../crates/airwiki-types" }
 chrono.workspace = true
 directories = "6.0.0"
 fluent-bundle = "0.16.0"
@@ -62,7 +62,7 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = ["N
 objc2-service-management = { version = "0.3.2", default-features = false, features = ["SMAppService", "SMErrors", "objc2", "objc2-foundation", "std"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-airwiki-windows-firewall-helper = { version = "0.2.0", path = "../windows-firewall-helper" }
+airwiki-windows-firewall-helper = { version = "0.3.0", path = "../windows-firewall-helper" }
 tempfile = "3.23.0"
 winreg = "0.56.0"
 windows = { version = "0.62.2", features = [

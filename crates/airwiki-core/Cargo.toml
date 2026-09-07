@@ -16,7 +16,7 @@ fastembed-runtime = ["dep:fastembed", "dep:tokenizers"]
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
-airwiki-types = { version = "0.2.0", path = "../airwiki-types" }
+airwiki-types = { version = "0.3.0", path = "../airwiki-types" }
 chrono.workspace = true
 directories = "6.0.0"
 fastembed = { version = "5.17.2", optional = true, default-features = false, features = ["ort-download-binaries"] }
@@ -44,6 +44,6 @@ zip = { version = "6.0.0", default-features = false, features = ["deflate"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
-airwiki-inference = { version = "0.2.0", path = "../airwiki-inference" }
+airwiki-inference = { version = "0.3.0", path = "../airwiki-inference" }
 tempfile = "3.23.0"
 wasm-encoder.workspace = true

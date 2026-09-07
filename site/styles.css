@@ -92,7 +92,7 @@ h3 { margin-bottom: 0.75rem; font-size: 1.4rem; }
 
 .product-tour { padding-top: 0; }
 .demo-frame { margin: 2.5rem 0 0; background: var(--ink); border: 1px solid var(--moss-deep); }
-.demo-frame video { display: block; width: 100%; }
+.demo-frame video { display: block; width: 100%; height: auto; }
 .demo-frame figcaption { padding: 0.8rem 1rem; color: #d2e6d6; font-size: 0.83rem; }
 .demo-frame a { color: white; }
 .transcript { max-width: 53rem; margin-top: 1rem; padding: 1rem 1.15rem; border: 1px solid var(--line); background: var(--paper); }

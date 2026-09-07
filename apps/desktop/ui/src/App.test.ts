@@ -537,6 +537,40 @@ describe('AirWiki wiki workspace', () => {
     expect(screen.queryByRole('button', { name: 'Borrar filtro de nombre' })).not.toBeInTheDocument();
   });
 
+  it('restores each Library name and category filter through Back and Forward', async () => {
+    snapshot.wikis[0].needsReviewCount = 1;
+    snapshot.wikis.push({ ...snapshot.wikis[0], id: 'second-wiki', name: 'Lecturas', needsReviewCount: 0 });
+    render(App);
+
+    await fireEvent.input(await screen.findByRole('textbox', { name: 'Filtrar wikis por nombre' }), { target: { value: 'Atlas' } });
+    await fireEvent.click(screen.getByRole('button', { name: /Necesitan atención.*1/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Públicas' }));
+    await fireEvent.click(screen.getByRole('button', { name: /En este dispositivo/ }));
+    const name = await screen.findByRole('textbox', { name: 'Filtrar wikis por nombre' });
+    expect(name).toHaveValue('');
+    expect(screen.getByRole('button', { name: /Todas.*2/ })).toHaveAttribute('aria-pressed', 'true');
+    await fireEvent.input(name, { target: { value: 'Lecturas' } });
+
+    window.history.back();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Públicas' })).toHaveAttribute('aria-current', 'page'));
+    window.history.back();
+    expect(await screen.findByRole('textbox', { name: 'Filtrar wikis por nombre' })).toHaveValue('Atlas');
+    expect(screen.getByRole('button', { name: /Necesitan atención.*1/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(screen.getByRole('list', { name: 'Tus wikis' })).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(screen.getByRole('list', { name: 'Tus wikis' })).getByRole('button', { name: /^Atlas / })).toBeInTheDocument();
+
+    window.history.forward();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Públicas' })).toHaveAttribute('aria-current', 'page'));
+    window.history.forward();
+    expect(await screen.findByRole('textbox', { name: 'Filtrar wikis por nombre' })).toHaveValue('Lecturas');
+    expect(screen.getByRole('button', { name: /Todas.*2/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(screen.getByRole('list', { name: 'Tus wikis' })).getAllByRole('listitem')).toHaveLength(1);
+    expect(within(screen.getByRole('list', { name: 'Tus wikis' })).getByRole('button', { name: /^Lecturas / })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#library');
+    expect(Object.keys(window.history.state)).toEqual(['airwikiNavigation']);
+    expect(searchKnowledge).not.toHaveBeenCalled();
+  });
+
   it('keeps AI connections separate from the network sharing filter', async () => {
     const wiki = snapshot.wikis[0];
     wiki.origin = 'aiMemory';

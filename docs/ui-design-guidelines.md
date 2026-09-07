@@ -253,8 +253,10 @@ It matches names without case or accent sensitivity and works without local AI.
 Combine it with the selected category; keep category counts scoped to the whole
 local Library and show the filtered total separately. Clearing the name preserves
 the category; the no-results action resets both and returns focus to the input.
-Snapshot refreshes preserve the filter. Name filtering never submits a knowledge
-query, explores public Wikis or enters durable state, URLs or logs. Keep status
+Snapshot refreshes preserve the filter. Back/Forward restores each Library
+entry's name and category in memory; selecting a scope starts with clear filters.
+Name filtering never submits a knowledge query, explores public Wikis or enters
+durable state, URLs or logs. Keep status
 maintenance in the heading so the list toolbar is dedicated to finding Wikis.
 
 Search groups prioritize concept titles, excerpts and provenance. Keep the Wiki

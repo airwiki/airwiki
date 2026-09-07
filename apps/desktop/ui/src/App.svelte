@@ -72,6 +72,7 @@
   };
   type NavigationEntry = {
     hash: string;
+    library: { filter: LibraryFilter; name: string };
     reading: ReadingContext | null;
     shared: SharedReadingContext | null;
     review: { wikiId: string; conceptId: string; sourceRevision: number } | null;
@@ -548,6 +549,7 @@
       && previousReading?.wikiId === selectedWikiId ? previousReading : null;
     return {
       hash, scrollTop, indexScrollTop,
+      library: { filter: libraryFilter, name: libraryNameFilter },
       review: destination === 'review' && selectedReview
         ? { wikiId: selectedReview.wikiId, conceptId: selectedReview.conceptId, sourceRevision: selectedReview.sourceRevision } : null,
       search: destination === 'library' && activeSearchSessionId
@@ -1004,6 +1006,8 @@
         if (entry && entryId) {
           activeNavigationId = entryId;
           activeNavigationHash = entry.hash;
+          libraryFilter = entry.library.filter;
+          libraryNameFilter = entry.library.name;
           if (entry.review) {
             const review = snapshot?.reviews.find((candidate) => candidate.wikiId === entry.review?.wikiId && candidate.conceptId === entry.review.conceptId);
             if (review) {

@@ -37,8 +37,9 @@ The synthetic macOS journeys cover reading and index scrolling, return from
 Settings, review edit retention, explicit approval, exclusion and evidence
 reopening. Inspection of the English/Spanish, light/dark layouts found no further
 review or Settings layout change needed for this iteration. Installed macOS
-acceptance passed. Installed Windows acceptance and independent review remain
-required before completion.
+acceptance passed. Independent review of the implementation and its Library
+filter-history correction passed. Installed Windows acceptance remains required
+before completion.
 
 ## Desktop reading-first redesign
 

@@ -6,7 +6,7 @@ A plan records intent and acceptance, not a transcript, command log, or speculat
 
 ## Desktop refinement after 0.3
 
-Status: Active
+Status: Completed — implementation, independent review and installed acceptance passed.
 Last updated: 2026-09-07
 
 ### User-visible outcome
@@ -23,7 +23,7 @@ Settings while preserving explicit knowledge and access states.
       review state, current selection and independent scrolling.
 - [x] Inspect review and Settings with realistic synthetic content; fix concrete
       usability problems or document evidence that their existing flows suffice.
-- [ ] Complete focused checks, both native journeys, light/dark and English/Spanish
+- [x] Complete focused checks, both native journeys, light/dark and English/Spanish
       layout checks, installed macOS/Windows acceptance and proportional PR review.
 
 Keep changes scoped to everyday UI. Preserve current fonts, semantic tokens,
@@ -36,10 +36,12 @@ activation and empty-state recovery return focus to the input.
 The synthetic macOS journeys cover reading and index scrolling, return from
 Settings, review edit retention, explicit approval, exclusion and evidence
 reopening. Inspection of the English/Spanish, light/dark layouts found no further
-review or Settings layout change needed for this iteration. Installed macOS
-acceptance passed. Independent review of the implementation and its Library
-filter-history correction passed. Installed Windows acceptance remains required
-before completion.
+review or Settings layout change needed for this iteration. Installed acceptance
+passed on macOS and Windows, including native keyboard focus and Library filter
+restoration through Back/Forward. Independent review of the implementation and
+its Library filter-history correction passed. The [Windows acceptance
+report](docs/windows-ui-library-validation.md) records the tested executable,
+native journeys and reviewed platform references.
 
 ## Desktop reading-first redesign
 

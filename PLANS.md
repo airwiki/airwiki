@@ -17,7 +17,7 @@ Settings while preserving explicit knowledge and access states.
 
 ### Acceptance and checkpoints
 
-- [ ] Improve Library finding and compact layout; validate filtering without AI,
+- [x] Improve Library finding and compact layout; validate filtering without AI,
       empty-state recovery and keyboard focus on a synthetic macOS candidate.
 - [x] Improve long-title readability in local and shared page indexes, preserving
       review state, current selection and independent scrolling.
@@ -30,14 +30,15 @@ Keep changes scoped to everyday UI. Preserve current fonts, semantic tokens,
 sidebar geometry, privacy boundaries and unsaved-work recovery. Public signing,
 new knowledge capabilities and framework changes are outside this refinement.
 
-Complete the native focus-placement check for the Library clear control; its
-keyboard outline must not move the control outside the field.
+The Library clear control preserves its position under native keyboard focus;
+activation and empty-state recovery return focus to the input.
 
 The synthetic macOS journeys cover reading and index scrolling, return from
 Settings, review edit retention, explicit approval, exclusion and evidence
 reopening. Inspection of the English/Spanish, light/dark layouts found no further
-review or Settings layout change needed for this iteration. Installed Windows
-acceptance and independent review remain required before completion.
+review or Settings layout change needed for this iteration. Installed macOS
+acceptance passed. Installed Windows acceptance and independent review remain
+required before completion.
 
 ## Desktop reading-first redesign
 

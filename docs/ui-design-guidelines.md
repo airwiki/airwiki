@@ -153,6 +153,13 @@ Hiding the sidebar preserves its index DOM and scroll position; it does not
 change the selected page. Width and collapsed state persist locally and are
 clamped again against the current window when restored.
 
+Page-index titles can use two lines in both local and shared reading. Keep the
+logical filename as secondary context, and expose the full title and path in
+the row tooltip. Local reviewed pages use the check icon and retain their
+explicit review state in the accessible name and selected article. Drafts and
+excluded concepts keep visible textual labels in the index. A pending proposal
+is named by its visible title as well as its source and state.
+
 Returning from Settings restores the article and index scroll positions. A
 remote reader also retains its page and list/graph choice within the same live
 browse; current unavailability still hides its content. If navigation requires
@@ -240,6 +247,15 @@ Settings preserves the local article it will return to, including when quitting
 after discarding preference edits; reopening resumes reading rather than Settings.
 Settings opened from a non-reading destination does not revive an older article.
 A failed continuity save must not block reading; show a concise retry action.
+
+The local Library offers a name filter next to its state and access categories.
+It matches names without case or accent sensitivity and works without local AI.
+Combine it with the selected category; keep category counts scoped to the whole
+local Library and show the filtered total separately. Clearing the name preserves
+the category; the no-results action resets both and returns focus to the input.
+Snapshot refreshes preserve the filter. Name filtering never submits a knowledge
+query, explores public Wikis or enters durable state, URLs or logs. Keep status
+maintenance in the heading so the list toolbar is dedicated to finding Wikis.
 
 Search groups prioritize concept titles, excerpts and provenance. Keep the Wiki
 name, source owner and total match count in a compact header; extended Wiki

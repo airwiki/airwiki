@@ -395,6 +395,15 @@ async function assertReadingVisualMatrix(): Promise<void> {
       for (const viewport of visualViewports) {
         await setCssViewport(viewport.width, viewport.height);
         await browser.execute(() => document.querySelector('.drive-page')?.scrollTo({ top: 0, behavior: 'instant' }));
+        const indexTitle = await browser.execute(() => {
+          const title = document.querySelector<HTMLElement>('.file-list button[title*="Synthetic reference 01"] strong');
+          return {
+            height: title?.getBoundingClientRect().height ?? 0,
+            lineHeight: title ? Number.parseFloat(getComputedStyle(title).lineHeight) : 0,
+          };
+        });
+        expect(indexTitle.height).toBeGreaterThan(indexTitle.lineHeight);
+        expect(indexTitle.height).toBeLessThanOrEqual(indexTitle.lineHeight * 2 + 1);
         await captureVisual(`${locale}-${theme}-reader`);
         await $('.reader-tools').$(`button*=${locale === 'es' ? 'Fuentes' : 'Sources'}`).click();
         const inspector = viewport.width < 1360 ? '.reader-dialog[open]' : '.reader-inspector';
@@ -1349,6 +1358,51 @@ describe('AirWiki real IPC journey', () => {
       expect(row.shelfRadius ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(6);
       expect(row.iconShadow).toBe('none');
       expect(row.descriptionBelowTitle).toBe(true);
+    }
+    await $('#library-name-filter').setValue('IMPORTED');
+    await expect($$('.wiki-row')).toBeElementsArrayOfSize(1);
+    await expect($('.wiki-row')).toHaveText(expect.stringContaining('E2E imported wiki'));
+    await expect($('.library-filter-count')).toHaveText('1 of 3 Wikis');
+    // The driver sends synthetic keys and refocuses click targets after their
+    // handlers. Native keyboard activation and focus return need a walkthrough.
+    await $('.library-name-clear').click();
+    await expect($('#library-name-filter')).toHaveValue('');
+    await expect($$('.wiki-row')).toBeElementsArrayOfSize(3);
+    await $('#library-name-filter').setValue('no matching wiki');
+    await expect($('.library-filter-empty')).toBeDisplayed();
+    await $('.library-filter-empty button').click();
+    await expect($('#library-name-filter')).toHaveValue('');
+    await expect($$('.wiki-row')).toBeElementsArrayOfSize(3);
+    if (process.env.AIRWIKI_E2E_CAPTURE_MATRIX === '1') {
+      for (const locale of ['en', 'es'] as const) {
+        for (const theme of ['light', 'dark'] as const) {
+          await configureVisualPreferences(locale, theme);
+          await returnToLibrary();
+          for (const viewport of visualViewports) {
+            await setCssViewport(viewport.width, viewport.height);
+            const size = await browser.execute(() => `${innerWidth}x${innerHeight}`);
+            const layout = await browser.execute(() => {
+              const controls = document.querySelector<HTMLElement>('.library-command-bar');
+              const input = document.querySelector<HTMLElement>('#library-name-filter');
+              return {
+                width: controls?.clientWidth ?? 0,
+                scrollWidth: controls?.scrollWidth ?? 1,
+                height: controls?.getBoundingClientRect().height ?? Number.POSITIVE_INFINITY,
+                inputWidth: input?.getBoundingClientRect().width ?? 0,
+                clippedCounts: Array.from(document.querySelectorAll<HTMLElement>('.wiki-row-summary strong')).some((count) => count.scrollWidth > count.clientWidth),
+              };
+            });
+            expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width);
+            expect(layout.height).toBeLessThanOrEqual(108);
+            expect(layout.inputWidth).toBeGreaterThanOrEqual(200);
+            expect(layout.clippedCounts).toBe(false);
+            await browser.saveScreenshot(join(process.cwd(), '.artifacts', 'visual', 'matrix', `${locale}-${theme}-library-populated-${size}.png`));
+          }
+        }
+      }
+      await configureVisualPreferences('en', 'light');
+      await returnToLibrary();
+      await setCssViewport(1180, 760);
     }
     await $('.library-scope-tabs').$('button*=Public').click();
     await browser.waitUntil(

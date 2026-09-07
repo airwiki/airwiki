@@ -346,7 +346,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .page-heading h1[tabindex="-1"]:focus { outline: none; }
 .page-heading p { margin: 8px 0 0; color: var(--muted); font-size: 15px; line-height: 1.45; }
 .page-heading .primary, .page-heading .secondary, .heading-actions button { display: inline-flex; align-items: center; gap: 7px; }
-.library-heading { align-items: center; padding-bottom: 14px; }
+.library-heading { align-items: center; gap: var(--space-2) var(--space-6); padding-bottom: 14px; }
 .library-heading h1 { font-size: clamp(28px, 2.8vw, 32px); font-weight: 640; }
 .library-heading .section-label { margin-bottom: 4px; color: var(--cyan); font-size: 10px; }
 .library-heading p { margin-top: 4px; font-size: 13px; }
@@ -358,8 +358,17 @@ button:active:not(:disabled) { transform: scale(.985); }
 .library-scope-tabs button.active { color: var(--strong); background: transparent; }
 .library-scope-tabs button.active::after { background: var(--cyan); }
 .library-scope-tabs button span { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.library-command-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px 24px; min-height: 44px; margin-top: 4px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.library-command-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); min-height: 44px; margin-top: 4px; padding: var(--space-2) 0; border-bottom: 1px solid var(--line); }
+.library-name-filter { position: relative; flex: 1 1 200px; max-width: 280px; min-width: 0; }
+.library-name-filter input { min-height: 32px; padding-right: 36px; font-size: var(--font-size-ui); }
+.library-name-filter input::placeholder { color: var(--muted); }
+.library-name-clear { position: absolute; inset-block: 0; right: 4px; display: grid; place-items: center; width: 28px; height: 28px; margin-block: auto; padding: 0; color: var(--muted); background: transparent; border: 0; border-radius: var(--control-radius); cursor: pointer; }
+.library-name-clear:hover { color: var(--strong); background: var(--surface-raised); }
+.library-filter-count { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--font-size-ui); font-variant-numeric: tabular-nums; }
+.library-heading { flex-wrap: wrap; }
+.library-heading .library-command-status { flex-wrap: wrap; }
 .library-filter-group, .library-command-status { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.library-filter-group { flex-wrap: wrap; }
 .library-filter-group > span { margin-right: 2px; color: var(--muted); font-size: 11px; font-weight: 620; }
 .library-filter-group button { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 4px 8px; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: var(--control-radius); cursor: pointer; font-size: 12px; white-space: nowrap; }
 .library-filter-group button:hover { color: var(--strong); background: var(--surface-raised); }
@@ -423,7 +432,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .wiki-row-knowledge { grid-area: knowledge; display: grid; gap: 5px; min-width: 0; }
 .wiki-row-summary { display: grid; gap: 2px; min-width: 0; }
 .wiki-row-summary strong, .wiki-row-summary small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wiki-row-summary strong { color: var(--strong); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wiki-row-summary strong { overflow: visible; color: var(--strong); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: normal; text-overflow: clip; }
 .wiki-row-summary small { color: var(--muted); font-size: 10.5px; }
 .wiki-row-exposure { grid-area: exposure; display: grid; gap: 5px; min-width: 0; }
 .wiki-row-exposure-text { display: flex; align-items: center; min-width: 0; overflow: hidden; color: var(--muted); font-size: 10.5px; white-space: nowrap; }
@@ -569,7 +578,7 @@ button:active:not(:disabled) { transform: scale(.985); }
 .file-list button { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 8px 6px; color: var(--muted); background: transparent; border: 0; border-radius: var(--control-radius); text-align: left; cursor: pointer; }
 .file-list button:hover, .file-list button:focus-visible { color: var(--strong); background: var(--surface-raised); }
 .file-list strong, .file-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-list strong { color: var(--strong); font-weight: 600; }
+.file-list button strong { display: -webkit-box; overflow-wrap: anywhere; color: var(--strong); font-weight: 600; line-height: 1.35; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .file-list small { margin-top: 3px; }
 .concept-review-state { color: var(--muted); font-size: 10px; font-style: normal; font-weight: 650; letter-spacing: .02em; white-space: nowrap; }
 .concept-review-state.draft { color: var(--amber); }
@@ -843,8 +852,6 @@ button:active:not(:disabled) { transform: scale(.985); }
 @media (max-width: 1120px) {
   :root { --rail-width: 196px; }
   .drive-page { padding-inline: 24px; }
-  .library-command-bar { align-items: stretch; flex-direction: column; }
-  .library-command-status { justify-content: space-between; }
 
   .public-wiki-row { grid-template-columns: minmax(260px, 1.2fr) minmax(220px, 1fr) 20px; }
   .search-scope { max-width: none; }
@@ -1103,8 +1110,8 @@ button, a[href], input:not([type='hidden']), select { min-height: 28px; }
   .global-search kbd { display: none; }
   .global-search .control-field.search > input { min-width: 0; }
   .drive-page { padding: 20px 16px 32px; }
-  .page-heading, .section-heading, .library-command-bar, .repair-summary { align-items: flex-start; flex-direction: column; }
-  .page-heading .heading-actions, .library-command-status { width: 100%; }
+  .page-heading:not(.library-heading), .section-heading, .repair-summary { align-items: flex-start; flex-direction: column; }
+  .page-heading .heading-actions { width: 100%; }
 
   .wiki-row-kicker { margin-bottom: 1px; }
   .wiki-row-summary strong, .wiki-row-summary small, .wiki-row-exposure-text, .wiki-row-status > span strong { white-space: normal; overflow: visible; text-overflow: clip; }

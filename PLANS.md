@@ -4,6 +4,38 @@ Most changes do not need a checked-in plan. Use a persistent plan only when work
 
 A plan records intent and acceptance, not a transcript, command log, or speculative design. Update it when evidence changes the approach. Finish it as `Completed` or `Superseded`; move durable architectural decisions into an ADR and user-visible changes into `CHANGELOG.md`.
 
+## Desktop refinement after 0.3
+
+Status: Active
+Last updated: 2026-09-07
+
+### User-visible outcome
+
+Build on 0.3's reading-first interface: make Wikis easier to find, make the page
+index easier to scan, and remove avoidable friction from reading, review and
+Settings while preserving explicit knowledge and access states.
+
+### Acceptance and checkpoints
+
+- [x] Improve Library finding and compact layout; validate filtering without AI,
+      empty-state recovery and keyboard focus on a synthetic macOS candidate.
+- [x] Improve long-title readability in local and shared page indexes, preserving
+      review state, current selection and independent scrolling.
+- [x] Inspect review and Settings with realistic synthetic content; fix concrete
+      usability problems or document evidence that their existing flows suffice.
+- [ ] Complete focused checks, both native journeys, light/dark and English/Spanish
+      layout checks, installed macOS/Windows acceptance and proportional PR review.
+
+Keep changes scoped to everyday UI. Preserve current fonts, semantic tokens,
+sidebar geometry, privacy boundaries and unsaved-work recovery. Public signing,
+new knowledge capabilities and framework changes are outside this refinement.
+
+The synthetic macOS journeys cover reading and index scrolling, return from
+Settings, review edit retention, explicit approval, exclusion and evidence
+reopening. Inspection of the English/Spanish, light/dark layouts found no further
+review or Settings layout change needed for this iteration. Installed Windows
+acceptance and independent review remain required before completion.
+
 ## Desktop reading-first redesign
 
 Status: Completed — seven phases implemented and installed acceptance passed.

@@ -18,7 +18,9 @@ their evidence are recorded in the [architecture audit](docs/rust-architecture-a
   the service graph, and track those jobs through shutdown.
 - [x] Correct catalog language selection and measure full-catalog language
   misses; cover runtime owner loss and unknown MCP mutation completion.
-- [ ] Run the applicable repository checks and installed lifecycle checks.
+- [x] Run workspace Clippy and tests, documentation, licensing, dependency and
+  benchmark checks; verify installed macOS quit and session restoration.
+- [ ] Verify the installed Windows lifecycle in an interactive session.
 - [ ] Complete independent review and prepare the focused changes for the normal
   pull-request flow; synchronize confirmed architecture conclusions in AirWiki.
 

@@ -62,7 +62,8 @@ the premature completion before that wait was added. It uses a synthetic shared
 resource, an explicitly started blocking operation and a cancelled async parent;
 shutdown must remain pending until the operation releases the resource, after
 which exclusive ownership must be recoverable. The corrected desktop package
-tests pass. Installed lifecycle acceptance remains pending.
+tests pass. The installed macOS lifecycle checks below also pass; Windows
+installed acceptance remains pending.
 
 ### Catalog language selection
 
@@ -120,12 +121,48 @@ reproduced the incorrect classification and now covers both mutation and read
 responses. This preserves the existing fingerprint/reconciliation recovery
 contract and changes no capability, grant or publication authority.
 
+## Validation evidence
+
+The implementation at `d40a2fa00789873db0466181d4b13f7991702ff6` passed:
+
+- Workspace Clippy with all targets, all features and warnings denied.
+- Workspace tests: 1,344 passed, one ignored, across 25 suites.
+- Documentation and license-inventory checks, plus `cargo deny --locked check`
+  (advisories, bans, licenses and sources). Existing duplicate-dependency
+  warnings remain; no dependency version changed.
+- The release index benchmark and cancellation, recovery, protocol preference,
+  expiry and withdrawal regressions described above.
+
+An isolated development candidate was installed on macOS 26.6.2, arm64. It used
+the `e2e` feature, a distinct app identifier, synthetic fixtures and a temporary
+profile. The executable SHA-256 was
+`1ceecfa794c0b525617b79fbaaab7290feb3041ef159ecc62253d6d8d4e7b17e`.
+This is lifecycle evidence for the changed Rust services, not release-signing
+or distribution acceptance.
+
+| Installed macOS journey | Result |
+| --- | --- |
+| Existing onboarding and real IPC journey | PASS |
+| Coordinated quit through the UI event, with successful process exit | PASS |
+| Relaunch and restore the saved page and panel state | PASS |
+| Select **Quit AirWiki** in the native app menu | PASS; process exited with code 0 |
+| Relaunch after native-menu quit and repeat session restoration | PASS |
+
+The checks used no real peers or downloaded models and left the normal app's
+profile and the parallel UI checkout untouched. The native-menu check exercised
+the installed app interactively; the existing WebDriver journey checked state
+restoration and clean process exit. Visual baselines were disabled.
+
 ## Remaining validation and review
 
-- Complete desktop failure-path review and installed lifecycle acceptance.
-- Finish catalog compatibility and recovery review.
-- Complete the applicable workspace, documentation, licensing and dependency
-  checks and the independent review.
+- Run the shortest installed Windows lifecycle check in an interactive Windows
+  session: start an isolated candidate, complete a local operation, quit through
+  the native UI, assert process exit, and relaunch to verify state recovery.
+  macOS evidence does not certify Windows behavior.
+- Complete independent code and security review of task ownership, cancellation
+  and uncertain mutation completion against the threat model and ADR 0008.
+- Require green applicable CI and DCO checks before integration, and synchronize
+  confirmed architecture conclusions in the project AirWiki memory.
 
 Broad module splitting, a database pool, additional crates and protocol changes
 need a demonstrated benefit before implementation. Public infrastructure

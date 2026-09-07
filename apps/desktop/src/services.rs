@@ -78,6 +78,7 @@ use tokio::{
 #[cfg(test)]
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::{AbortOnDropHandle, TaskTracker};
 use uuid::Uuid;
 
 use crate::{
@@ -1720,15 +1721,15 @@ struct ModelServices {
 
 struct NetworkRuntime {
     handle: NetworkHandle,
-    task: JoinHandle<()>,
-    event_forwarder: JoinHandle<()>,
+    task: AbortOnDropHandle<()>,
+    event_forwarder: AbortOnDropHandle<()>,
     started_at: Instant,
 }
 
 struct PublicNetworkRuntime {
     cancellation: CancellationToken,
-    source_task: JoinHandle<()>,
-    renewal_task: JoinHandle<()>,
+    source_task: AbortOnDropHandle<()>,
+    renewal_task: AbortOnDropHandle<()>,
     relay_readiness: watch::Receiver<PublicRelayReadiness>,
 }
 
@@ -1831,6 +1832,7 @@ pub struct NetworkEventEffect {
 
 /// Complete background service graph for one workstation.
 pub struct DesktopServices {
+    blocking_tasks: TaskTracker,
     core_paths: CoreAppPaths,
     database: Database,
     node_id: String,
@@ -1860,7 +1862,7 @@ pub struct DesktopServices {
     computations: ComputationCoordinator,
     application_updates: broadcast::Sender<Uuid>,
     application_backend_cancellation: CancellationToken,
-    application_backend_task: Option<JoinHandle<()>>,
+    application_backend_task: Option<AbortOnDropHandle<()>>,
 }
 
 #[derive(Clone)]
@@ -1922,12 +1924,12 @@ impl McpApplicationBackend for DesktopMcpApplicationBackend {
             .map_err(|_| McpApplicationError::Unavailable)?;
         tokio::time::timeout(MCP_APPLICATION_RESPONSE_TIMEOUT, receiver)
             .await
-            .map_err(|_| mcp_application_timeout_error(tool))?
-            .map_err(|_| McpApplicationError::Unavailable)?
+            .map_err(|_| mcp_application_response_lost_error(tool))?
+            .map_err(|_| mcp_application_response_lost_error(tool))?
     }
 }
 
-fn mcp_application_timeout_error(tool: &str) -> McpApplicationError {
+fn mcp_application_response_lost_error(tool: &str) -> McpApplicationError {
     match tool {
         "create_airwiki_memory"
         | "initialize_airwiki_project"
@@ -1949,7 +1951,7 @@ fn spawn_mcp_application_backend(
 ) -> (
     DesktopMcpApplicationBackend,
     CancellationToken,
-    JoinHandle<()>,
+    AbortOnDropHandle<()>,
 ) {
     const REQUEST_CAPACITY: usize = 64;
     let (sender, mut receiver) = mpsc::channel::<McpApplicationRequest>(REQUEST_CAPACITY);
@@ -2015,7 +2017,7 @@ fn spawn_mcp_application_backend(
             let _ = response.send(result);
         }
     });
-    (backend, cancellation, task)
+    (backend, cancellation, AbortOnDropHandle::new(task))
 }
 
 fn application_update_wiki_id(tool: &str, result: &serde_json::Value) -> Option<Uuid> {
@@ -2592,6 +2594,7 @@ impl DesktopServices {
         };
 
         let services = Self {
+            blocking_tasks: TaskTracker::new(),
             core_paths,
             database,
             node_id,
@@ -2625,6 +2628,21 @@ impl DesktopServices {
         };
         services.reconcile_public_network().await?;
         Ok(services)
+    }
+
+    /// Tracks service-owning work beyond cancellation of its async caller.
+    pub(crate) fn spawn_blocking<T, F>(self: &Arc<Self>, operation: F) -> JoinHandle<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Self) -> T + Send + 'static,
+    {
+        let services = Arc::clone(self);
+        self.blocking_tasks
+            .spawn_blocking(move || operation(&services))
+    }
+
+    pub(crate) fn blocking_tasks(&self) -> &TaskTracker {
+        &self.blocking_tasks
     }
 
     pub fn node_id(&self) -> &str {
@@ -3405,8 +3423,8 @@ impl DesktopServices {
                 ));
                 *guard = Some(PublicNetworkRuntime {
                     cancellation,
-                    source_task,
-                    renewal_task,
+                    source_task: AbortOnDropHandle::new(source_task),
+                    renewal_task: AbortOnDropHandle::new(renewal_task),
                     relay_readiness,
                 });
                 None
@@ -4846,6 +4864,10 @@ impl DesktopServices {
 
 impl Drop for DesktopServices {
     fn drop(&mut self) {
+        self.application_backend_cancellation.cancel();
+        if let Ok(Some(runtime)) = self.public_network.get_mut() {
+            runtime.cancellation.cancel();
+        }
         self.authorized_proxy.clear().ok();
         self.federated_proxy.clear().ok();
         if let Some(mcp) = self.mcp.as_ref() {
@@ -5888,8 +5910,8 @@ fn spawn_network_runtime(
     ));
     Ok(NetworkRuntime {
         handle,
-        task,
-        event_forwarder,
+        task: AbortOnDropHandle::new(task),
+        event_forwarder: AbortOnDropHandle::new(event_forwarder),
         started_at: Instant::now(),
     })
 }
@@ -5977,6 +5999,66 @@ mod tests {
     };
 
     use super::*;
+
+    #[tokio::test]
+    async fn dropping_public_runtime_stops_its_source_and_renewal_tasks() {
+        fn pending_task() -> (JoinHandle<()>, oneshot::Receiver<()>, oneshot::Receiver<()>) {
+            let (started, started_rx) = oneshot::channel();
+            let (lifetime, stopped) = oneshot::channel();
+            let task = tokio::spawn(async move {
+                let _lifetime = lifetime;
+                started.send(()).unwrap();
+                std::future::pending::<()>().await;
+            });
+            (task, started_rx, stopped)
+        }
+
+        let (source_task, source_started, source_stopped) = pending_task();
+        let (renewal_task, renewal_started, renewal_stopped) = pending_task();
+        source_started.await.unwrap();
+        renewal_started.await.unwrap();
+        let (_, relay_readiness) = watch::channel(PublicRelayReadiness::default());
+        let runtime = PublicNetworkRuntime {
+            cancellation: CancellationToken::new(),
+            source_task: AbortOnDropHandle::new(source_task),
+            renewal_task: AbortOnDropHandle::new(renewal_task),
+            relay_readiness,
+        };
+        drop(runtime);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            assert!(source_stopped.await.is_err());
+            assert!(renewal_stopped.await.is_err());
+        })
+        .await
+        .expect("runtime ownership must end both background tasks");
+    }
+
+    #[tokio::test]
+    async fn lost_mcp_worker_response_preserves_mutation_uncertainty() {
+        for (tool, expected) in [
+            ("write_airwiki_memory", McpApplicationError::OutcomeUnknown),
+            ("get_airwiki_memory", McpApplicationError::Unavailable),
+        ] {
+            let (sender, mut receiver) = mpsc::channel::<McpApplicationRequest>(1);
+            let backend = DesktopMcpApplicationBackend {
+                requests: sender,
+                database: Database::in_memory().unwrap(),
+                local_node_id: "test-node".to_owned(),
+            };
+            let call = backend.call(
+                McpApplicationIdentity {
+                    capability: "fixture".to_owned(),
+                },
+                tool,
+                serde_json::json!({}),
+            );
+            let (result, ()) = tokio::join!(call, async {
+                let request = receiver.recv().await.unwrap();
+                drop(request.response);
+            });
+            assert_eq!(result, Err(expected));
+        }
+    }
 
     #[tokio::test]
     async fn generation_admission_serializes_clones_and_releases_on_cancellation() {
@@ -6091,15 +6173,15 @@ mod tests {
             McpApplicationError::QuotaExceeded
         );
         assert_eq!(
-            mcp_application_timeout_error("write_airwiki_memory"),
+            mcp_application_response_lost_error("write_airwiki_memory"),
             McpApplicationError::OutcomeUnknown
         );
         assert_eq!(
-            mcp_application_timeout_error("open_airwiki_project"),
+            mcp_application_response_lost_error("open_airwiki_project"),
             McpApplicationError::OutcomeUnknown
         );
         assert_eq!(
-            mcp_application_timeout_error("get_airwiki_memory"),
+            mcp_application_response_lost_error("get_airwiki_memory"),
             McpApplicationError::Unavailable
         );
     }

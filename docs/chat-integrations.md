@@ -89,6 +89,12 @@ machine-readable result with a stable code and retryability hint; protocol
 errors are reserved for malformed or unknown MCP requests. Client UI approval
 and AirWiki's native confirmations remain the human-in-the-loop boundary.
 
+If the completion of an admitted memory mutation is lost to a deadline or a
+closed worker response channel, the tool returns non-retryable `outcome_unknown`.
+The operation may already have completed; read the current Wiki before deciding
+whether to retry. A request rejected before queue admission remains a temporary
+availability failure. Read-only requests also retain their availability error.
+
 An application may create and maintain only AI-memory Wikis it owns or has an
 explicit reader/editor grant for. Personal memories live in AirWiki's private
 vault. Project memories are visible OKF bundles under `.airwiki`, but their

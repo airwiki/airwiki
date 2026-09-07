@@ -35,6 +35,7 @@ use tokio::sync::{
 };
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use uuid::Uuid;
 
 type Sender<T> = tokio::sync::mpsc::Sender<T>;
@@ -4744,10 +4745,7 @@ pub(crate) async fn run_worker(
     }
     lifecycle.abort_all();
     while lifecycle.join_next().await.is_some() {}
-    // JoinSets abort every in-flight search, scan and model operation. Joining
-    // releases their Arc references before services are consumed for cleanup.
-    background.abort_all();
-    while background.join_next().await.is_some() {}
+    finish_background_tasks(&mut background, services.blocking_tasks()).await;
     drop(watchers);
     match Arc::try_unwrap(services) {
         Ok(services) => {
@@ -4765,6 +4763,15 @@ pub(crate) async fn run_worker(
     }
 }
 
+async fn finish_background_tasks<T: 'static>(background: &mut JoinSet<T>, blocking: &TaskTracker) {
+    background.abort_all();
+    while background.join_next().await.is_some() {}
+    // Aborting an async parent only drops its nested blocking JoinHandle.
+    // Wait for those closures to release the service graph before shutdown.
+    blocking.close();
+    blocking.wait().await;
+}
+
 async fn run_blocking<T, F>(operation: F) -> Result<T, String>
 where
     T: Send + 'static,
@@ -4780,8 +4787,10 @@ where
     T: Send + 'static,
     F: FnOnce(&DesktopServices) -> anyhow::Result<T> + Send + 'static,
 {
-    let services = Arc::clone(services);
-    run_blocking(move || operation(&services)).await
+    services
+        .spawn_blocking(move |services| operation(services).map_err(|error| format!("{error:#}")))
+        .await
+        .map_err(|_| "la operación local terminó inesperadamente".to_owned())?
 }
 
 async fn send_ready(services: &Arc<DesktopServices>, events: &Sender<WorkerEvent>) {
@@ -5646,12 +5655,11 @@ fn spawn_quarantine(
 ) {
     let services = Arc::clone(services);
     background.spawn(async move {
-        let result = tokio::task::spawn_blocking(move || {
-            services.quarantine_collection(collection_id, &reason)
-        })
-        .await
-        .map_err(|error| format!("falló el worker de cuarentena: {error}"))
-        .and_then(|result| result.map_err(|error| format!("{error:#}")));
+        let result = services
+            .spawn_blocking(move |services| services.quarantine_collection(collection_id, &reason))
+            .await
+            .map_err(|error| format!("falló el worker de cuarentena: {error}"))
+            .and_then(|result| result.map_err(|error| format!("{error:#}")));
         BackgroundCompletion::Quarantine {
             collection_id,
             result,
@@ -6103,13 +6111,11 @@ fn spawn_preflight(
 ) {
     let services = Arc::clone(services);
     background.spawn(async move {
-        let preflight_services = Arc::clone(&services);
-        let result = tokio::task::spawn_blocking(move || {
-            preflight_services.preflight_collection(collection_id)
-        })
-        .await
-        .map_err(|error| format!("falló el worker de prevalidación: {error}"))
-        .and_then(|result| result.map_err(|error| format!("{error:#}")));
+        let result = services
+            .spawn_blocking(move |services| services.preflight_collection(collection_id))
+            .await
+            .map_err(|error| format!("falló el worker de prevalidación: {error}"))
+            .and_then(|result| result.map_err(|error| format!("{error:#}")));
         if result.is_ok()
             && services
                 .sync_public_collection(collection_id)
@@ -6185,13 +6191,13 @@ fn spawn_review_approval(
 ) {
     let services = Arc::clone(services);
     background.spawn(async move {
-        let approval_services = Arc::clone(&services);
-        let result = tokio::task::spawn_blocking(move || {
-            approval_services.approve_review(concept_id, &expected_review_version, draft)
-        })
-        .await
-        .map_err(|error| format!("falló el worker de publicación: {error}"))
-        .and_then(|result| result.map_err(|error| format!("{error:#}")));
+        let result = services
+            .spawn_blocking(move |services| {
+                services.approve_review(concept_id, &expected_review_version, draft)
+            })
+            .await
+            .map_err(|error| format!("falló el worker de publicación: {error}"))
+            .and_then(|result| result.map_err(|error| format!("{error:#}")));
         let result = match result {
             Ok(collection_id) => {
                 if services
@@ -6227,15 +6233,16 @@ fn spawn_review_evidence(
 ) {
     let services = Arc::clone(services);
     background.spawn(async move {
-        let task = tokio::task::spawn_blocking(move || {
-            services.load_review_evidence(
-                concept_id,
-                expected_source_revision,
-                expected_review_version.as_ref(),
-                after_ordinal,
-            )
-        })
-        .await;
+        let task = services
+            .spawn_blocking(move |services| {
+                services.load_review_evidence(
+                    concept_id,
+                    expected_source_revision,
+                    expected_review_version.as_ref(),
+                    after_ordinal,
+                )
+            })
+            .await;
         let result = match task {
             Ok(result) => result,
             Err(error) => {
@@ -6290,11 +6297,11 @@ fn spawn_knowledge_bundle(
 ) {
     let services = Arc::clone(services);
     background.spawn(async move {
-        let result =
-            tokio::task::spawn_blocking(move || services.load_knowledge_bundle(collection_id))
-                .await
-                .map_err(|error| format!("falló el worker del visor de conocimiento: {error}"))
-                .and_then(|result| result.map_err(|error| format!("{error:#}")));
+        let result = services
+            .spawn_blocking(move |services| services.load_knowledge_bundle(collection_id))
+            .await
+            .map_err(|error| format!("falló el worker del visor de conocimiento: {error}"))
+            .and_then(|result| result.map_err(|error| format!("{error:#}")));
         BackgroundCompletion::KnowledgeBundle {
             request_id,
             collection_id,
@@ -6314,12 +6321,13 @@ fn spawn_knowledge_page(
     let services = Arc::clone(services);
     let completed_page_id = page_id;
     background.spawn(async move {
-        let result = tokio::task::spawn_blocking(move || {
-            services.load_knowledge_page(collection_id, page_id, &expected_fingerprint)
-        })
-        .await
-        .map_err(|error| format!("falló el worker de lectura de página OKF: {error}"))
-        .and_then(|result| result.map_err(|error| format!("{error:#}")));
+        let result = services
+            .spawn_blocking(move |services| {
+                services.load_knowledge_page(collection_id, page_id, &expected_fingerprint)
+            })
+            .await
+            .map_err(|error| format!("falló el worker de lectura de página OKF: {error}"))
+            .and_then(|result| result.map_err(|error| format!("{error:#}")));
         BackgroundCompletion::KnowledgePage {
             request_id,
             collection_id,
@@ -6339,12 +6347,13 @@ fn spawn_managed_concept_verification(
 ) {
     let services = Arc::clone(services);
     background.spawn(async move {
-        let result = tokio::task::spawn_blocking(move || {
-            services.verify_managed_concept(collection_id, &logical_path, &expected_fingerprint)
-        })
-        .await
-        .map_err(|error| format!("falló el worker de verificación OKF: {error}"))
-        .and_then(|result| result.map_err(|error| format!("{error:#}")));
+        let result = services
+            .spawn_blocking(move |services| {
+                services.verify_managed_concept(collection_id, &logical_path, &expected_fingerprint)
+            })
+            .await
+            .map_err(|error| format!("falló el worker de verificación OKF: {error}"))
+            .and_then(|result| result.map_err(|error| format!("{error:#}")));
         BackgroundCompletion::VerifyManagedConcept {
             collection_id,
             result,
@@ -6634,6 +6643,42 @@ mod tests {
     use crate::connectivity_platform::FirewallHelperState;
 
     use super::*;
+
+    #[tokio::test]
+    async fn shutdown_waits_for_blocking_service_jobs_after_async_callers_exit() {
+        use std::future::{Future, poll_fn};
+        use std::task::Poll;
+
+        let services = Arc::new(());
+        let blocking = TaskTracker::new();
+        let job_tracker = blocking.clone();
+        let job_services = Arc::clone(&services);
+        let (started, started_rx) = oneshot::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let mut background = JoinSet::new();
+        background.spawn(async move {
+            job_tracker
+                .spawn_blocking(move || {
+                    started.send(()).unwrap();
+                    let _ = release_rx.recv_timeout(Duration::from_secs(5));
+                    drop(job_services);
+                })
+                .await
+        });
+        started_rx.await.unwrap();
+        background.abort_all();
+        while background.join_next().await.is_some() {}
+
+        let mut finishing = Box::pin(finish_background_tasks(&mut background, &blocking));
+        poll_fn(|cx| {
+            assert!(finishing.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        release.send(()).unwrap();
+        finishing.await;
+        assert!(Arc::try_unwrap(services).is_ok());
+    }
 
     #[tokio::test]
     async fn durable_event_channel_applies_backpressure_when_saturated() {

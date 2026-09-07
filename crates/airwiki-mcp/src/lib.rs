@@ -1376,8 +1376,9 @@ fn application_tool_failure(error: McpApplicationError) -> McpToolFailure {
         },
         McpApplicationError::OutcomeUnknown => McpToolFailure {
             code: "outcome_unknown".to_owned(),
-            message: "The operation timed out and may have completed; read the wiki before deciding whether to retry"
-                .to_owned(),
+            message:
+                "The operation may have completed; read the wiki before deciding whether to retry"
+                    .to_owned(),
             retryable: false,
             retry_after_seconds: None,
         },

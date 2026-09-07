@@ -4,8 +4,8 @@ use std::time::{Duration, Instant};
 use airwiki_federation_index::CatalogStore;
 use airwiki_network::{Keypair, sign_manifest};
 use airwiki_types::{
-    MAX_PUBLIC_CANDIDATES, PUBLIC_CATALOG_PROTOCOL, PublicCatalogOperation, PublicCatalogQuery,
-    PublicCollectionManifest,
+    MAX_PUBLIC_CANDIDATES, PUBLIC_CATALOG_BROWSE_PROTOCOL, PUBLIC_CATALOG_BROWSE_QUERY,
+    PUBLIC_CATALOG_PROTOCOL, PublicCatalogOperation, PublicCatalogQuery, PublicCollectionManifest,
 };
 use chrono::{Duration as ChronoDuration, Utc};
 use uuid::Uuid;
@@ -89,6 +89,45 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
     if p95 >= P95_GATE {
         return Err(format!("catalog p95 {:?} exceeded gate {:?}", p95, P95_GATE).into());
+    }
+    // Exercise the no-match language filter at capacity for both operations,
+    // in addition to selective lexical queries.
+    for operation in [
+        PublicCatalogOperation::Search,
+        PublicCatalogOperation::Browse,
+    ] {
+        let (label, protocol, text) = match operation {
+            PublicCatalogOperation::Search => ("search", PUBLIC_CATALOG_PROTOCOL, "Synthetic"),
+            PublicCatalogOperation::Browse => (
+                "browse",
+                PUBLIC_CATALOG_BROWSE_PROTOCOL,
+                PUBLIC_CATALOG_BROWSE_QUERY,
+            ),
+        };
+        let request = PublicCatalogQuery {
+            protocol_version: protocol.to_owned(),
+            request_id: Uuid::new_v4(),
+            operation,
+            query: text.to_owned(),
+            languages: vec!["es".to_owned()],
+            limit: MAX_PUBLIC_CANDIDATES,
+        };
+        let started = Instant::now();
+        let results = store.query(&request, Utc::now())?;
+        let elapsed = started.elapsed();
+        if !results.is_empty() {
+            return Err("catalog returned a manifest outside the requested language".into());
+        }
+        println!(
+            "language_miss={label} collections={} elapsed_ms={} elapsed_us={} gate_ms={}",
+            PUBLISHERS * COLLECTIONS_PER_PUBLISHER,
+            elapsed.as_millis(),
+            elapsed.as_micros(),
+            P95_GATE.as_millis()
+        );
+        if elapsed >= P95_GATE {
+            return Err("catalog language-filter query exceeded the latency gate".into());
+        }
     }
     Ok(())
 }

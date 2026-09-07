@@ -58,11 +58,36 @@ impl Default for CatalogLimits {
 #[derive(Debug, Clone)]
 pub struct CatalogBackend {
     store: std::sync::Arc<CatalogStore>,
+    admission: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 impl CatalogBackend {
     pub fn new(store: std::sync::Arc<CatalogStore>) -> Self {
-        Self { store }
+        Self {
+            store,
+            admission: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+        }
+    }
+
+    async fn run<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&CatalogStore) -> Result<T, CatalogStoreError> + Send + 'static,
+    ) -> Result<T, PublicCatalogBackendError> {
+        // SQLite has one connection. Wait asynchronously instead of consuming
+        // blocking-pool threads on its mutex. Keep admission in the closure:
+        // cancelling its caller cannot stop an already running blocking job.
+        let permit = std::sync::Arc::clone(&self.admission)
+            .acquire_owned()
+            .await
+            .map_err(|_| PublicCatalogBackendError::Busy)?;
+        let store = std::sync::Arc::clone(&self.store);
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            operation(&store)
+        })
+        .await
+        .map_err(map_catalog_join_error)?
+        .map_err(map_backend_error)
     }
 }
 
@@ -72,11 +97,8 @@ impl PublicCatalogBackend for CatalogBackend {
         &self,
         manifest: SignedPublicCollectionManifest,
     ) -> Result<(), PublicCatalogBackendError> {
-        let store = std::sync::Arc::clone(&self.store);
-        tokio::task::spawn_blocking(move || store.register(&manifest, Utc::now()))
+        self.run(move |store| store.register(&manifest, Utc::now()))
             .await
-            .map_err(map_catalog_join_error)?
-            .map_err(map_backend_error)
     }
 
     async fn register_versioned(
@@ -84,22 +106,15 @@ impl PublicCatalogBackend for CatalogBackend {
         current: SignedPublicCollectionManifest,
         legacy: SignedPublicCollectionManifest,
     ) -> Result<(), PublicCatalogBackendError> {
-        let store = std::sync::Arc::clone(&self.store);
-        tokio::task::spawn_blocking(move || store.register_versioned(&current, &legacy, Utc::now()))
+        self.run(move |store| store.register_versioned(&current, &legacy, Utc::now()))
             .await
-            .map_err(map_catalog_join_error)?
-            .map_err(map_backend_error)
     }
 
     async fn withdraw(
         &self,
         tombstone: SignedPublicCollectionTombstone,
     ) -> Result<(), PublicCatalogBackendError> {
-        let store = std::sync::Arc::clone(&self.store);
-        tokio::task::spawn_blocking(move || store.withdraw(&tombstone))
-            .await
-            .map_err(map_catalog_join_error)?
-            .map_err(map_backend_error)
+        self.run(move |store| store.withdraw(&tombstone)).await
     }
 
     async fn withdraw_versioned(
@@ -107,26 +122,20 @@ impl PublicCatalogBackend for CatalogBackend {
         current: SignedPublicCollectionTombstone,
         legacy: SignedPublicCollectionTombstone,
     ) -> Result<(), PublicCatalogBackendError> {
-        let store = std::sync::Arc::clone(&self.store);
-        tokio::task::spawn_blocking(move || store.withdraw_versioned(&current, &legacy))
+        self.run(move |store| store.withdraw_versioned(&current, &legacy))
             .await
-            .map_err(map_catalog_join_error)?
-            .map_err(map_backend_error)
     }
 
     async fn query(
         &self,
         query: PublicCatalogQuery,
     ) -> Result<Vec<SignedPublicCollectionManifest>, PublicCatalogBackendError> {
-        let store = std::sync::Arc::clone(&self.store);
-        tokio::task::spawn_blocking(move || {
+        self.run(move |store| {
             let now = Utc::now();
             let _ = store.purge_expired(now)?;
             store.query(&query, now)
         })
         .await
-        .map_err(map_catalog_join_error)?
-        .map_err(map_backend_error)
     }
 }
 
@@ -208,6 +217,7 @@ impl CatalogStore {
              CREATE INDEX IF NOT EXISTS manifests_expiry_idx ON manifests(expires_at);",
         )?;
         migrate_legacy_manifests(&mut connection)?;
+        rebuild_manifest_languages(&mut connection)?;
         Ok(Self {
             connection: Mutex::new(connection),
             limits,
@@ -344,12 +354,29 @@ impl CatalogStore {
                 airwiki_types::PUBLIC_CATALOG_PROTOCOL,
             )
         };
+        // Filter indexed language metadata before ranking and limiting. A miss
+        // must not deserialize the catalog while holding database admission.
+        let languages = if query.languages.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&query.languages).map_err(|_| CatalogStoreError::Encoding)?)
+        };
+        let language_filter = if languages.is_some() {
+            "AND m.manifest_id IN (SELECT manifest_id FROM language_candidates)"
+        } else {
+            ""
+        };
         let row_limit = i64::from(query.limit.min(MAX_PUBLIC_CANDIDATES)).saturating_mul(2);
-        let encoded = if query.is_browse() {
-            let mut statement = connection.prepare(
-                "SELECT m.signed_cbor FROM manifests m
+        let mut statement = if query.is_browse() {
+            connection.prepare(&format!(
+                "WITH language_candidates AS (
+                   SELECT manifest_id FROM manifest_languages
+                   WHERE language IN (SELECT value FROM json_each(?5))
+                 )
+                 SELECT m.manifest_id FROM manifests m
                  WHERE m.withdrawn=0 AND m.expires_at>?1
                    AND m.protocol_version IN (?2,?3)
+                   {language_filter}
                    AND (m.protocol_version=?2 OR NOT EXISTS(
                      SELECT 1 FROM manifests preferred
                      WHERE preferred.publisher_id=m.publisher_id
@@ -358,20 +385,19 @@ impl CatalogStore {
                        AND preferred.withdrawn=0 AND preferred.expires_at>?1
                    ))
                  ORDER BY m.expires_at DESC,m.publisher_id,m.collection_id
-                 LIMIT ?4",
-            )?;
-            statement
-                .query_map(
-                    params![now.to_rfc3339(), protocols.0, protocols.1, row_limit],
-                    |row| row.get::<_, Vec<u8>>(0),
-                )?
-                .collect::<Result<Vec<_>, _>>()?
+                 LIMIT ?4"
+            ))?
         } else {
-            let mut statement = connection.prepare(
-                "SELECT m.signed_cbor FROM catalog_fts f
+            connection.prepare(&format!(
+                "WITH language_candidates AS (
+                   SELECT manifest_id FROM manifest_languages
+                   WHERE language IN (SELECT value FROM json_each(?6))
+                 )
+                 SELECT m.manifest_id FROM catalog_fts f
                  JOIN manifests m ON m.manifest_id=f.rowid
                  WHERE catalog_fts MATCH ?1 AND m.withdrawn=0 AND m.expires_at>?2
                    AND m.protocol_version IN (?3,?4)
+                   {language_filter}
                    AND (m.protocol_version=?3 OR NOT EXISTS(
                      SELECT 1 FROM manifests preferred
                      WHERE preferred.publisher_id=m.publisher_id
@@ -380,26 +406,35 @@ impl CatalogStore {
                        AND preferred.withdrawn=0 AND preferred.expires_at>?2
                    ))
                  ORDER BY bm25(catalog_fts),m.publisher_id,m.collection_id
-                 LIMIT ?5",
-            )?;
-            statement
-                .query_map(
-                    params![fts, now.to_rfc3339(), protocols.0, protocols.1, row_limit],
-                    |row| row.get::<_, Vec<u8>>(0),
-                )?
-                .collect::<Result<Vec<_>, _>>()?
+                 LIMIT ?5"
+            ))?
         };
+        let mut rows = if query.is_browse() {
+            statement.query(params![
+                now.to_rfc3339(),
+                protocols.0,
+                protocols.1,
+                row_limit,
+                languages
+            ])?
+        } else {
+            statement.query(params![
+                fts,
+                now.to_rfc3339(),
+                protocols.0,
+                protocols.1,
+                row_limit,
+                languages
+            ])?
+        };
+        let mut payload =
+            connection.prepare("SELECT signed_cbor FROM manifests WHERE manifest_id=?1")?;
         let mut manifests = Vec::new();
         let mut selected = std::collections::HashSet::new();
-        for row in encoded {
-            let signed: SignedPublicCollectionManifest = decode(&row)?;
-            let key = (
-                signed.manifest.publisher_id.clone(),
-                signed.manifest.collection_id,
-            );
-            if !selected.insert(key) {
-                continue;
-            }
+        while let Some(row) = rows.next()? {
+            let manifest_id = row.get::<_, i64>(0)?;
+            let encoded = payload.query_row([manifest_id], |row| row.get::<_, Vec<u8>>(0))?;
+            let signed: SignedPublicCollectionManifest = decode(&encoded)?;
             if !query.languages.is_empty()
                 && !signed
                     .manifest
@@ -407,6 +442,13 @@ impl CatalogStore {
                     .iter()
                     .any(|language| query.languages.contains(language))
             {
+                continue;
+            }
+            let key = (
+                signed.manifest.publisher_id.clone(),
+                signed.manifest.collection_id,
+            );
+            if !selected.insert(key) {
                 continue;
             }
             manifests.push(signed);
@@ -474,6 +516,63 @@ fn migrate_legacy_manifests(connection: &mut Connection) -> Result<(), CatalogSt
     Ok(())
 }
 
+fn rebuild_manifest_languages(connection: &mut Connection) -> Result<(), CatalogStoreError> {
+    // This additive projection is derived from stored, previously admitted
+    // manifests. Rebuild atomically on open, including after an older binary
+    // has written the database. Payloads and replay high-water marks stay put.
+    let tx = connection.transaction()?;
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS manifest_languages(
+            manifest_id INTEGER NOT NULL,
+            language TEXT NOT NULL,
+            PRIMARY KEY(manifest_id,language)
+         ) WITHOUT ROWID;
+         CREATE INDEX IF NOT EXISTS manifest_languages_language_idx
+            ON manifest_languages(language,manifest_id);
+         DELETE FROM manifest_languages;",
+    )?;
+    {
+        let mut statement =
+            tx.prepare("SELECT manifest_id,signed_cbor FROM manifests WHERE withdrawn=0")?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            let manifest_id = row.get::<_, i64>(0)?;
+            let encoded = row.get::<_, Vec<u8>>(1)?;
+            let signed: SignedPublicCollectionManifest = decode(&encoded)?;
+            insert_manifest_languages(&tx, manifest_id, &signed.manifest.languages)?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+fn insert_manifest_languages(
+    connection: &Connection,
+    manifest_id: i64,
+    languages: &[String],
+) -> Result<(), CatalogStoreError> {
+    let mut insert = connection.prepare_cached(
+        "INSERT INTO manifest_languages(manifest_id,language) VALUES (?1,?2)
+         ON CONFLICT(manifest_id,language) DO NOTHING",
+    )?;
+    for language in languages {
+        insert.execute(params![manifest_id, language])?;
+    }
+    Ok(())
+}
+
+fn remove_manifest_search_metadata(
+    connection: &Connection,
+    manifest_id: i64,
+) -> Result<(), CatalogStoreError> {
+    connection.execute("DELETE FROM catalog_fts WHERE rowid=?1", [manifest_id])?;
+    connection.execute(
+        "DELETE FROM manifest_languages WHERE manifest_id=?1",
+        [manifest_id],
+    )?;
+    Ok(())
+}
+
 fn manifest_expiry_limit(now: DateTime<Utc>) -> DateTime<Utc> {
     now + chrono::Duration::seconds(MAX_PUBLIC_MANIFEST_LIFETIME_SECONDS)
 }
@@ -495,7 +594,7 @@ fn purge_catalog_entries(
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(statement);
     for manifest_id in &expired {
-        connection.execute("DELETE FROM catalog_fts WHERE rowid=?1", [manifest_id])?;
+        remove_manifest_search_metadata(connection, *manifest_id)?;
         connection.execute(
             "UPDATE manifests
              SET signed_cbor=NULL,expires_at=NULL,withdrawn=1
@@ -596,7 +695,7 @@ fn store_manifest(
                 manifest.expires_at.to_rfc3339(),
             ],
         )?;
-        connection.execute("DELETE FROM catalog_fts WHERE rowid=?1", [manifest_id])?;
+        remove_manifest_search_metadata(connection, manifest_id)?;
         manifest_id
     } else {
         connection.execute(
@@ -625,6 +724,7 @@ fn store_manifest(
             manifest.routing_terms.join(" "),
         ],
     )?;
+    insert_manifest_languages(connection, manifest_id, &manifest.languages)?;
     Ok(())
 }
 
@@ -658,7 +758,7 @@ fn store_tombstone(
              WHERE manifest_id=?1",
             params![manifest_id, tombstone.sequence],
         )?;
-        connection.execute("DELETE FROM catalog_fts WHERE rowid=?1", [manifest_id])?;
+        remove_manifest_search_metadata(connection, manifest_id)?;
     } else {
         connection.execute(
             "INSERT INTO manifests(publisher_id,collection_id,protocol_version,sequence,signed_cbor,expires_at,withdrawn)
@@ -748,6 +848,10 @@ fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, CatalogStor
 
 #[cfg(test)]
 mod tests {
+    use std::future::{Future, poll_fn};
+    use std::sync::{Arc, mpsc};
+    use std::task::Poll;
+
     use airwiki_network::{sign_manifest, sign_tombstone};
     use airwiki_types::{
         PUBLIC_CATALOG_BROWSE_PROTOCOL, PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2,
@@ -758,6 +862,93 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+
+    #[test]
+    fn cancelled_catalog_caller_does_not_overlap_blocking_database_jobs() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(2)
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let backend = CatalogBackend::new(Arc::new(CatalogStore::in_memory().unwrap()));
+            let first_backend = backend.clone();
+            let (started, started_rx) = tokio::sync::oneshot::channel();
+            let (release, release_rx) = mpsc::channel();
+            let first = tokio::spawn(async move {
+                first_backend
+                    .run(move |_| {
+                        started.send(()).unwrap();
+                        // Bound the fixture even when a regression panics before release.
+                        let _ = release_rx.recv_timeout(std::time::Duration::from_secs(5));
+                        Ok(())
+                    })
+                    .await
+            });
+            started_rx.await.unwrap();
+            first.abort();
+            assert!(first.await.unwrap_err().is_cancelled());
+
+            let (second_started, second_started_rx) = mpsc::channel();
+            let mut second = Box::pin(backend.run(move |_| {
+                second_started.send(()).unwrap();
+                Ok(())
+            }));
+            poll_fn(|cx| {
+                assert!(second.as_mut().poll(cx).is_pending());
+                Poll::Ready(())
+            })
+            .await;
+            // The first blocking thread is occupied. This marker runs after any
+            // job already submitted to the other thread, without a timed sleep.
+            tokio::task::spawn_blocking(|| ()).await.unwrap();
+            assert!(second_started_rx.try_recv().is_err());
+
+            release.send(()).unwrap();
+            second.await.unwrap();
+            second_started_rx.try_recv().unwrap();
+            backend.run(|_| Ok(())).await.unwrap();
+        });
+    }
+
+    #[tokio::test]
+    async fn cancelled_catalog_waiter_never_runs_and_later_requests_recover() {
+        let backend = CatalogBackend::new(Arc::new(CatalogStore::in_memory().unwrap()));
+        let first_backend = backend.clone();
+        let (started, started_rx) = tokio::sync::oneshot::channel();
+        let (release, release_rx) = mpsc::channel();
+        let first = tokio::spawn(async move {
+            first_backend
+                .run(move |_| {
+                    started.send(()).unwrap();
+                    let _ = release_rx.recv_timeout(std::time::Duration::from_secs(5));
+                    Err::<(), _>(CatalogStoreError::InvalidQuery)
+                })
+                .await
+        });
+        started_rx.await.unwrap();
+        let (cancelled_started, cancelled_started_rx) = mpsc::channel();
+        let mut cancelled = Box::pin(backend.run(move |_| {
+            cancelled_started.send(()).unwrap();
+            Ok(())
+        }));
+        poll_fn(|cx| {
+            assert!(cancelled.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        drop(cancelled);
+        release.send(()).unwrap();
+        assert!(matches!(
+            first.await.unwrap(),
+            Err(PublicCatalogBackendError::Invalid)
+        ));
+        backend.run(|_| Ok(())).await.unwrap();
+        assert!(matches!(
+            cancelled_started_rx.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+    }
 
     fn signed_manifest(
         keypair: &Keypair,
@@ -889,6 +1080,259 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    fn assert_language_filter_precedes_candidate_limit(mut request: PublicCatalogQuery) {
+        let store = CatalogStore::in_memory().unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let now = Utc::now();
+        for ordinal in 1..=4 {
+            let mut manifest = signed_manifest(&keypair, Uuid::from_u128(ordinal), 1, now).manifest;
+            if ordinal > 2 {
+                manifest.languages = vec!["es".to_owned()];
+            }
+            store
+                .register(&sign_manifest(&keypair, manifest).unwrap(), now)
+                .unwrap();
+        }
+        request.limit = 1;
+        request.languages = vec!["es".to_owned()];
+        let results = store.query(&request, now).unwrap();
+        let selected = results
+            .iter()
+            .map(|signed| signed.manifest.collection_id)
+            .collect::<Vec<_>>();
+        assert_eq!(selected, vec![Uuid::from_u128(3)]);
+    }
+
+    #[test]
+    fn search_language_filter_precedes_candidate_limit() {
+        assert_language_filter_precedes_candidate_limit(query("atlas"));
+    }
+
+    #[test]
+    fn browse_language_filter_precedes_candidate_limit() {
+        let mut browse = query(airwiki_types::PUBLIC_CATALOG_BROWSE_QUERY);
+        browse.protocol_version = PUBLIC_CATALOG_BROWSE_PROTOCOL.to_owned();
+        browse.operation = PublicCatalogOperation::Browse;
+        assert_language_filter_precedes_candidate_limit(browse);
+    }
+
+    #[test]
+    fn language_queries_do_not_decode_unrelated_payloads() {
+        let store = CatalogStore::in_memory().unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let now = Utc::now();
+        let english = signed_manifest(&keypair, Uuid::from_u128(1), 1, now);
+        let mut spanish = signed_manifest(&keypair, Uuid::from_u128(2), 1, now).manifest;
+        spanish.languages = vec!["es".to_owned()];
+        let spanish = sign_manifest(&keypair, spanish).unwrap();
+        store.register(&english, now).unwrap();
+        store.register(&spanish, now).unwrap();
+        // An unrelated unreadable payload exposes any attempt to deserialize
+        // beyond the SQL language selection, without a timing-based assertion.
+        store
+            .connection()
+            .unwrap()
+            .execute(
+                "UPDATE manifests SET signed_cbor=X'ff' WHERE collection_id=?1",
+                [english.manifest.collection_id.to_string()],
+            )
+            .unwrap();
+        for operation in [
+            PublicCatalogOperation::Search,
+            PublicCatalogOperation::Browse,
+        ] {
+            let mut request = query("atlas");
+            if operation == PublicCatalogOperation::Browse {
+                request.protocol_version = PUBLIC_CATALOG_BROWSE_PROTOCOL.to_owned();
+                request.query = airwiki_types::PUBLIC_CATALOG_BROWSE_QUERY.to_owned();
+            }
+            request.operation = operation;
+            request.languages = vec!["es".to_owned()];
+            request.limit = 1;
+            assert_eq!(store.query(&request, now).unwrap(), vec![spanish.clone()]);
+            request.languages = vec!["ja".to_owned()];
+            assert!(store.query(&request, now).unwrap().is_empty());
+            request.languages.clear();
+            assert!(matches!(
+                store.query(&request, now),
+                Err(CatalogStoreError::Encoding)
+            ));
+        }
+    }
+
+    #[test]
+    fn language_projection_tracks_transactions_across_connections() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("catalog.sqlite");
+        let first = CatalogStore::open(&path).unwrap();
+        let second = CatalogStore::open(&path).unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let now = Utc::now();
+        let collection_id = Uuid::new_v4();
+        let mut request = query("atlas");
+        request.languages = vec!["en".to_owned()];
+        first
+            .register(&signed_manifest(&keypair, collection_id, 1, now), now)
+            .unwrap();
+        assert_eq!(second.query(&request, now).unwrap().len(), 1);
+
+        let mut replacement = signed_manifest(&keypair, collection_id, 2, now).manifest;
+        replacement.languages = vec!["es".to_owned(), "fr".to_owned(), "es".to_owned()];
+        let replacement = sign_manifest(&keypair, replacement).unwrap();
+        second.register(&replacement, now).unwrap();
+        assert!(first.query(&request, now).unwrap().is_empty());
+        request.languages = vec!["es".to_owned(), "fr".to_owned()];
+        assert_eq!(
+            first.query(&request, now).unwrap(),
+            vec![replacement.clone()]
+        );
+        assert!(matches!(
+            first.register(&replacement, now),
+            Err(CatalogStoreError::StaleSequence)
+        ));
+        assert_eq!(second.query(&request, now).unwrap(), vec![replacement]);
+
+        let mut unspecified = signed_manifest(&keypair, collection_id, 3, now).manifest;
+        unspecified.languages.clear();
+        second
+            .register(&sign_manifest(&keypair, unspecified).unwrap(), now)
+            .unwrap();
+        assert!(first.query(&request, now).unwrap().is_empty());
+        assert_eq!(first.query(&query("atlas"), now).unwrap().len(), 1);
+
+        let tombstone = sign_tombstone(
+            &keypair,
+            PublicCollectionTombstone {
+                protocol_version: PUBLIC_CATALOG_PROTOCOL.to_owned(),
+                publisher_id: keypair.public().to_peer_id().to_string(),
+                collection_id,
+                sequence: 4,
+                withdrawn_at: now,
+            },
+        )
+        .unwrap();
+        first.withdraw(&tombstone).unwrap();
+        assert!(second.query(&query("atlas"), now).unwrap().is_empty());
+        second
+            .register(&signed_manifest(&keypair, collection_id, 5, now), now)
+            .unwrap();
+        first.purge_expired(now + Duration::minutes(16)).unwrap();
+        let remaining: u32 = second
+            .connection()
+            .unwrap()
+            .query_row("SELECT count(*) FROM manifest_languages", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(remaining, 0);
+        assert!(matches!(
+            second.register(&signed_manifest(&keypair, collection_id, 5, now), now),
+            Err(CatalogStoreError::StaleSequence)
+        ));
+    }
+
+    #[test]
+    fn legacy_catalogs_rebuild_languages_without_losing_replay_history() {
+        for versioned in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("catalog.sqlite");
+            let keypair = Keypair::generate_ed25519();
+            let now = Utc::now();
+            let collection_id = Uuid::new_v4();
+            let mut manifest = signed_manifest(&keypair, collection_id, 3, now).manifest;
+            manifest.languages = vec!["es".to_owned()];
+            let manifest = sign_manifest(&keypair, manifest).unwrap();
+            let store = CatalogStore::open(&path).unwrap();
+            store.register(&manifest, now).unwrap();
+            drop(store);
+            let connection = Connection::open(&path).unwrap();
+            // Both persisted formats before language indexing: original v1,
+            // and the existing schema with per-protocol sequence high-water marks.
+            connection
+                .execute_batch("DROP TABLE manifest_languages;")
+                .unwrap();
+            if !versioned {
+                connection.execute_batch(
+                    "CREATE TABLE original_manifests(
+                        manifest_id INTEGER PRIMARY KEY,
+                        publisher_id TEXT NOT NULL,collection_id TEXT NOT NULL,
+                        sequence INTEGER NOT NULL CHECK(sequence>=0),
+                        signed_cbor BLOB,expires_at TEXT,withdrawn INTEGER NOT NULL DEFAULT 0,
+                        UNIQUE(publisher_id,collection_id)
+                     );
+                     INSERT INTO original_manifests
+                     SELECT manifest_id,publisher_id,collection_id,sequence,signed_cbor,expires_at,withdrawn FROM manifests;
+                     DROP TABLE manifests;
+                     ALTER TABLE original_manifests RENAME TO manifests;",
+                ).unwrap();
+            }
+            drop(connection);
+            let mut request = query("atlas");
+            request.languages = vec!["es".to_owned()];
+            for _ in 0..2 {
+                let reopened = CatalogStore::open(&path).unwrap();
+                assert_eq!(
+                    reopened.query(&request, now).unwrap(),
+                    vec![manifest.clone()]
+                );
+                assert!(matches!(
+                    reopened.register(&manifest, now),
+                    Err(CatalogStoreError::StaleSequence)
+                ));
+            }
+            // Simulate a valid update made by an older binary while stopped.
+            // Its write does not know about the additive language projection.
+            let mut replacement = manifest.manifest.clone();
+            replacement.sequence = 4;
+            replacement.languages = vec!["fr".to_owned()];
+            let replacement = sign_manifest(&keypair, replacement).unwrap();
+            Connection::open(&path)
+                .unwrap()
+                .execute(
+                    "UPDATE manifests SET sequence=?1,signed_cbor=?2 WHERE collection_id=?3",
+                    params![
+                        replacement.manifest.sequence,
+                        encode(&replacement).unwrap(),
+                        collection_id.to_string()
+                    ],
+                )
+                .unwrap();
+            let reopened = CatalogStore::open(&path).unwrap();
+            assert!(reopened.query(&request, now).unwrap().is_empty());
+            request.languages = vec!["fr".to_owned()];
+            assert_eq!(reopened.query(&request, now).unwrap(), vec![replacement]);
+        }
+    }
+
+    #[test]
+    fn unreadable_startup_payload_rolls_back_language_rebuild() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("catalog.sqlite");
+        let keypair = Keypair::generate_ed25519();
+        let now = Utc::now();
+        let store = CatalogStore::open(&path).unwrap();
+        store
+            .register(&signed_manifest(&keypair, Uuid::new_v4(), 7, now), now)
+            .unwrap();
+        drop(store);
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute("UPDATE manifests SET signed_cbor=X'ff'", [])
+            .unwrap();
+        assert!(matches!(
+            CatalogStore::open(&path),
+            Err(CatalogStoreError::Encoding)
+        ));
+        let preserved: (u64, u32) = connection
+            .query_row(
+                "SELECT sequence,(SELECT count(*) FROM manifest_languages) FROM manifests",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(preserved, (7, 1));
     }
 
     #[test]
@@ -1116,12 +1560,36 @@ mod tests {
         .manifest;
         current.name = "Current catalog".to_owned();
         current.routing_terms = vec!["recovery".to_owned()];
+        current.languages = vec!["es".to_owned()];
         let current = sign_manifest(&keypair, current).unwrap();
         store.register_versioned(&current, &legacy, now).unwrap();
         let mut current_query = query("recovery");
         current_query.protocol_version = PUBLIC_CATALOG_PROTOCOL_V2.to_owned();
 
-        assert_eq!(store.query(&current_query, now).unwrap(), vec![current]);
+        assert_eq!(
+            store.query(&current_query, now).unwrap(),
+            vec![current.clone()]
+        );
+        for operation in [
+            PublicCatalogOperation::Search,
+            PublicCatalogOperation::Browse,
+        ] {
+            if operation == PublicCatalogOperation::Browse {
+                current_query.protocol_version = PUBLIC_CATALOG_BROWSE_PROTOCOL.to_owned();
+                current_query.query = airwiki_types::PUBLIC_CATALOG_BROWSE_QUERY.to_owned();
+            }
+            current_query.operation = operation;
+            current_query.languages = vec!["en".to_owned()];
+            assert!(store.query(&current_query, now).unwrap().is_empty());
+            current_query.languages = vec!["es".to_owned()];
+            assert_eq!(
+                store.query(&current_query, now).unwrap(),
+                vec![current.clone()]
+            );
+        }
+        let mut legacy_query = query("recovery");
+        legacy_query.languages = vec!["en".to_owned()];
+        assert_eq!(store.query(&legacy_query, now).unwrap(), vec![legacy]);
     }
 
     #[test]

@@ -58,11 +58,36 @@ impl Default for CatalogLimits {
 #[derive(Debug, Clone)]
 pub struct CatalogBackend {
     store: std::sync::Arc<CatalogStore>,
+    admission: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 impl CatalogBackend {
     pub fn new(store: std::sync::Arc<CatalogStore>) -> Self {
-        Self { store }
+        Self {
+            store,
+            admission: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+        }
+    }
+
+    async fn run<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&CatalogStore) -> Result<T, CatalogStoreError> + Send + 'static,
+    ) -> Result<T, PublicCatalogBackendError> {
+        // SQLite has one connection. Wait asynchronously instead of consuming
+        // blocking-pool threads on its mutex. Keep admission in the closure:
+        // cancelling its caller cannot stop an already running blocking job.
+        let permit = std::sync::Arc::clone(&self.admission)
+            .acquire_owned()
+            .await
+            .map_err(|_| PublicCatalogBackendError::Busy)?;
+        let store = std::sync::Arc::clone(&self.store);
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            operation(&store)
+        })
+        .await
+        .map_err(map_catalog_join_error)?
+        .map_err(map_backend_error)
     }
 }
 
@@ -72,11 +97,8 @@ impl PublicCatalogBackend for CatalogBackend {
         &self,
         manifest: SignedPublicCollectionManifest,
     ) -> Result<(), PublicCatalogBackendError> {
-        let store = std::sync::Arc::clone(&self.store);
-        tokio::task::spawn_blocking(move || store.register(&manifest, Utc::now()))
+        self.run(move |store| store.register(&manifest, Utc::now()))
             .await
-            .map_err(map_catalog_join_error)?
-            .map_err(map_backend_error)
     }
 
     async fn register_versioned(
@@ -84,22 +106,15 @@ impl PublicCatalogBackend for CatalogBackend {
         current: SignedPublicCollectionManifest,
         legacy: SignedPublicCollectionManifest,
     ) -> Result<(), PublicCatalogBackendError> {
-        let store = std::sync::Arc::clone(&self.store);
-        tokio::task::spawn_blocking(move || store.register_versioned(&current, &legacy, Utc::now()))
+        self.run(move |store| store.register_versioned(&current, &legacy, Utc::now()))
             .await
-            .map_err(map_catalog_join_error)?
-            .map_err(map_backend_error)
     }
 
     async fn withdraw(
         &self,
         tombstone: SignedPublicCollectionTombstone,
     ) -> Result<(), PublicCatalogBackendError> {
-        let store = std::sync::Arc::clone(&self.store);
-        tokio::task::spawn_blocking(move || store.withdraw(&tombstone))
-            .await
-            .map_err(map_catalog_join_error)?
-            .map_err(map_backend_error)
+        self.run(move |store| store.withdraw(&tombstone)).await
     }
 
     async fn withdraw_versioned(
@@ -107,26 +122,20 @@ impl PublicCatalogBackend for CatalogBackend {
         current: SignedPublicCollectionTombstone,
         legacy: SignedPublicCollectionTombstone,
     ) -> Result<(), PublicCatalogBackendError> {
-        let store = std::sync::Arc::clone(&self.store);
-        tokio::task::spawn_blocking(move || store.withdraw_versioned(&current, &legacy))
+        self.run(move |store| store.withdraw_versioned(&current, &legacy))
             .await
-            .map_err(map_catalog_join_error)?
-            .map_err(map_backend_error)
     }
 
     async fn query(
         &self,
         query: PublicCatalogQuery,
     ) -> Result<Vec<SignedPublicCollectionManifest>, PublicCatalogBackendError> {
-        let store = std::sync::Arc::clone(&self.store);
-        tokio::task::spawn_blocking(move || {
+        self.run(move |store| {
             let now = Utc::now();
             let _ = store.purge_expired(now)?;
             store.query(&query, now)
         })
         .await
-        .map_err(map_catalog_join_error)?
-        .map_err(map_backend_error)
     }
 }
 
@@ -344,10 +353,17 @@ impl CatalogStore {
                 airwiki_types::PUBLIC_CATALOG_PROTOCOL,
             )
         };
-        let row_limit = i64::from(query.limit.min(MAX_PUBLIC_CANDIDATES)).saturating_mul(2);
-        let encoded = if query.is_browse() {
-            let mut statement = connection.prepare(
-                "SELECT m.signed_cbor FROM manifests m
+        // A language mismatch must not spend the caller's result budget. Rank
+        // only row IDs so a selective filter cannot materialize every payload
+        // in SQLite's sort buffer or in a Rust collection.
+        let row_limit = if query.languages.is_empty() {
+            i64::from(query.limit.min(MAX_PUBLIC_CANDIDATES)).saturating_mul(2)
+        } else {
+            i64::from(self.limits.max_entries)
+        };
+        let mut statement = if query.is_browse() {
+            connection.prepare(
+                "SELECT m.manifest_id FROM manifests m
                  WHERE m.withdrawn=0 AND m.expires_at>?1
                    AND m.protocol_version IN (?2,?3)
                    AND (m.protocol_version=?2 OR NOT EXISTS(
@@ -359,16 +375,10 @@ impl CatalogStore {
                    ))
                  ORDER BY m.expires_at DESC,m.publisher_id,m.collection_id
                  LIMIT ?4",
-            )?;
-            statement
-                .query_map(
-                    params![now.to_rfc3339(), protocols.0, protocols.1, row_limit],
-                    |row| row.get::<_, Vec<u8>>(0),
-                )?
-                .collect::<Result<Vec<_>, _>>()?
+            )?
         } else {
-            let mut statement = connection.prepare(
-                "SELECT m.signed_cbor FROM catalog_fts f
+            connection.prepare(
+                "SELECT m.manifest_id FROM catalog_fts f
                  JOIN manifests m ON m.manifest_id=f.rowid
                  WHERE catalog_fts MATCH ?1 AND m.withdrawn=0 AND m.expires_at>?2
                    AND m.protocol_version IN (?3,?4)
@@ -381,25 +391,32 @@ impl CatalogStore {
                    ))
                  ORDER BY bm25(catalog_fts),m.publisher_id,m.collection_id
                  LIMIT ?5",
-            )?;
-            statement
-                .query_map(
-                    params![fts, now.to_rfc3339(), protocols.0, protocols.1, row_limit],
-                    |row| row.get::<_, Vec<u8>>(0),
-                )?
-                .collect::<Result<Vec<_>, _>>()?
+            )?
         };
+        let mut rows = if query.is_browse() {
+            statement.query(params![
+                now.to_rfc3339(),
+                protocols.0,
+                protocols.1,
+                row_limit
+            ])?
+        } else {
+            statement.query(params![
+                fts,
+                now.to_rfc3339(),
+                protocols.0,
+                protocols.1,
+                row_limit
+            ])?
+        };
+        let mut payload =
+            connection.prepare("SELECT signed_cbor FROM manifests WHERE manifest_id=?1")?;
         let mut manifests = Vec::new();
         let mut selected = std::collections::HashSet::new();
-        for row in encoded {
-            let signed: SignedPublicCollectionManifest = decode(&row)?;
-            let key = (
-                signed.manifest.publisher_id.clone(),
-                signed.manifest.collection_id,
-            );
-            if !selected.insert(key) {
-                continue;
-            }
+        while let Some(row) = rows.next()? {
+            let manifest_id = row.get::<_, i64>(0)?;
+            let encoded = payload.query_row([manifest_id], |row| row.get::<_, Vec<u8>>(0))?;
+            let signed: SignedPublicCollectionManifest = decode(&encoded)?;
             if !query.languages.is_empty()
                 && !signed
                     .manifest
@@ -407,6 +424,13 @@ impl CatalogStore {
                     .iter()
                     .any(|language| query.languages.contains(language))
             {
+                continue;
+            }
+            let key = (
+                signed.manifest.publisher_id.clone(),
+                signed.manifest.collection_id,
+            );
+            if !selected.insert(key) {
                 continue;
             }
             manifests.push(signed);
@@ -748,6 +772,10 @@ fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, CatalogStor
 
 #[cfg(test)]
 mod tests {
+    use std::future::{Future, poll_fn};
+    use std::sync::{Arc, mpsc};
+    use std::task::Poll;
+
     use airwiki_network::{sign_manifest, sign_tombstone};
     use airwiki_types::{
         PUBLIC_CATALOG_BROWSE_PROTOCOL, PUBLIC_CATALOG_PROTOCOL, PUBLIC_CATALOG_PROTOCOL_V2,
@@ -758,6 +786,93 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+
+    #[test]
+    fn cancelled_catalog_caller_does_not_overlap_blocking_database_jobs() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(2)
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let backend = CatalogBackend::new(Arc::new(CatalogStore::in_memory().unwrap()));
+            let first_backend = backend.clone();
+            let (started, started_rx) = tokio::sync::oneshot::channel();
+            let (release, release_rx) = mpsc::channel();
+            let first = tokio::spawn(async move {
+                first_backend
+                    .run(move |_| {
+                        started.send(()).unwrap();
+                        // Bound the fixture even when a regression panics before release.
+                        let _ = release_rx.recv_timeout(std::time::Duration::from_secs(5));
+                        Ok(())
+                    })
+                    .await
+            });
+            started_rx.await.unwrap();
+            first.abort();
+            assert!(first.await.unwrap_err().is_cancelled());
+
+            let (second_started, second_started_rx) = mpsc::channel();
+            let mut second = Box::pin(backend.run(move |_| {
+                second_started.send(()).unwrap();
+                Ok(())
+            }));
+            poll_fn(|cx| {
+                assert!(second.as_mut().poll(cx).is_pending());
+                Poll::Ready(())
+            })
+            .await;
+            // The first blocking thread is occupied. This marker runs after any
+            // job already submitted to the other thread, without a timed sleep.
+            tokio::task::spawn_blocking(|| ()).await.unwrap();
+            assert!(second_started_rx.try_recv().is_err());
+
+            release.send(()).unwrap();
+            second.await.unwrap();
+            second_started_rx.try_recv().unwrap();
+            backend.run(|_| Ok(())).await.unwrap();
+        });
+    }
+
+    #[tokio::test]
+    async fn cancelled_catalog_waiter_never_runs_and_later_requests_recover() {
+        let backend = CatalogBackend::new(Arc::new(CatalogStore::in_memory().unwrap()));
+        let first_backend = backend.clone();
+        let (started, started_rx) = tokio::sync::oneshot::channel();
+        let (release, release_rx) = mpsc::channel();
+        let first = tokio::spawn(async move {
+            first_backend
+                .run(move |_| {
+                    started.send(()).unwrap();
+                    let _ = release_rx.recv_timeout(std::time::Duration::from_secs(5));
+                    Err::<(), _>(CatalogStoreError::InvalidQuery)
+                })
+                .await
+        });
+        started_rx.await.unwrap();
+        let (cancelled_started, cancelled_started_rx) = mpsc::channel();
+        let mut cancelled = Box::pin(backend.run(move |_| {
+            cancelled_started.send(()).unwrap();
+            Ok(())
+        }));
+        poll_fn(|cx| {
+            assert!(cancelled.as_mut().poll(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+        drop(cancelled);
+        release.send(()).unwrap();
+        assert!(matches!(
+            first.await.unwrap(),
+            Err(PublicCatalogBackendError::Invalid)
+        ));
+        backend.run(|_| Ok(())).await.unwrap();
+        assert!(matches!(
+            cancelled_started_rx.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+    }
 
     fn signed_manifest(
         keypair: &Keypair,
@@ -889,6 +1004,42 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    fn assert_language_filter_precedes_candidate_limit(mut request: PublicCatalogQuery) {
+        let store = CatalogStore::in_memory().unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let now = Utc::now();
+        for ordinal in 1..=4 {
+            let mut manifest = signed_manifest(&keypair, Uuid::from_u128(ordinal), 1, now).manifest;
+            if ordinal > 2 {
+                manifest.languages = vec!["es".to_owned()];
+            }
+            store
+                .register(&sign_manifest(&keypair, manifest).unwrap(), now)
+                .unwrap();
+        }
+        request.limit = 1;
+        request.languages = vec!["es".to_owned()];
+        let results = store.query(&request, now).unwrap();
+        let selected = results
+            .iter()
+            .map(|signed| signed.manifest.collection_id)
+            .collect::<Vec<_>>();
+        assert_eq!(selected, vec![Uuid::from_u128(3)]);
+    }
+
+    #[test]
+    fn search_language_filter_precedes_candidate_limit() {
+        assert_language_filter_precedes_candidate_limit(query("atlas"));
+    }
+
+    #[test]
+    fn browse_language_filter_precedes_candidate_limit() {
+        let mut browse = query(airwiki_types::PUBLIC_CATALOG_BROWSE_QUERY);
+        browse.protocol_version = PUBLIC_CATALOG_BROWSE_PROTOCOL.to_owned();
+        browse.operation = PublicCatalogOperation::Browse;
+        assert_language_filter_precedes_candidate_limit(browse);
     }
 
     #[test]

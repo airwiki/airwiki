@@ -9,6 +9,22 @@ reading-focused redesign. Candidate highlights and upgrade guidance live in
 [the 0.3 notes](docs/releases/0.3.0.md); this heading remains unreleased until
 publication completes.
 
+- Stop owned LAN, public and application-worker tasks when startup or teardown
+  is abandoned. A lost MCP mutation response now reports an unknown outcome
+  that requires checking the Wiki before retrying.
+
+- Find public Wikis in the requested language even when earlier ranked entries
+  use another language. Search and directory browsing apply the result budget
+  to matching Wikis and stream candidate payloads individually.
+
+- Let ongoing local blocking operations finish before normal desktop service
+  cleanup, even after their async callers are cancelled during quit. The
+  existing application exit deadline remains in force.
+
+- Bound the public routing index to one blocking database job at a time, so
+  concurrent requests wait asynchronously and cancelled waiters leave no queued
+  database work. A running operation retains its turn until completion.
+
 - Keep onboarding navigation visible in shorter desktop windows. Long setup
   steps scroll independently so finishing without local AI remains reachable.
 

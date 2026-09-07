@@ -214,6 +214,31 @@ are retried once. Model-facing system instructions are consistently written in
 English, while human-readable metadata and summaries use the source document's
 primary language.
 
+The public catalog backend shares one asynchronous admission permit across its
+clones before entering the blocking pool for its single SQLite connection.
+The blocking closure retains that permit until completion, even if its async
+caller is cancelled; cancelled waiters submit no database work. The network
+server's existing 64-request admission bound still caps pending requests.
+Signed metadata validation, atomic registration/withdrawal and replay high-water
+marks remain owned by the catalog store.
+Language-filtered catalog requests apply their result budget to matching Wikis.
+They rank row IDs within the catalog capacity, decode one signed payload at a
+time and stop once enough matching entries are found. Protocol preference and
+withdrawal/expiry filtering still precede that selection.
+
+Desktop blocking jobs that retain the service graph use its task tracker.
+Shutdown first aborts and joins async worker jobs, then waits for their tracked
+blocking closures before consuming the graph and stopping services. Dropping
+an async caller's join handle cannot stop an already running blocking operation.
+The native application's existing two-second exit deadline still bounds the
+overall shutdown; interrupted durable work uses the existing recovery paths.
+The LAN runtime, public source and renewal tasks, and MCP application worker
+own abort-on-drop task handles. Normal shutdown signals and joins them; an
+abandoned startup, restart or teardown cannot detach those asynchronous tasks.
+An admitted MCP mutation whose reply is lost returns `outcome_unknown`, whether
+the response deadline elapsed or its worker channel closed. The client must
+inspect current memory before deciding whether to retry.
+
 The WebView loads only bundled assets under a strict CSP. Markdown becomes a
 typed safe AST in Rust; it never reaches `innerHTML`, and images, SVG, embeds,
 files and remote resources are excluded. Folder selection returns an opaque,

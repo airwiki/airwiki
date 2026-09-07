@@ -4,6 +4,28 @@ Most changes do not need a checked-in plan. Use a persistent plan only when work
 
 A plan records intent and acceptance, not a transcript, command log, or speculative design. Update it when evidence changes the approach. Finish it as `Completed` or `Superseded`; move durable architectural decisions into an ADR and user-visible changes into `CHANGELOG.md`.
 
+## Rust application and public index architecture
+
+Status: Active
+
+Improve correctness, recovery and resource use in the desktop Rust services and
+the public routing index while preserving the separate UI work. Findings and
+their evidence are recorded in the [architecture audit](docs/rust-architecture-audit.md).
+
+- [x] Reproduce index blocking-job overlap after caller cancellation and add
+  shared async admission with cancellation/recovery coverage.
+- [x] Reproduce desktop cleanup completing before nested blocking jobs release
+  the service graph, and track those jobs through shutdown.
+- [x] Correct catalog language selection and measure full-catalog language
+  misses; cover runtime owner loss and unknown MCP mutation completion.
+- [ ] Run the applicable repository checks and installed lifecycle checks.
+- [ ] Complete independent review and prepare the focused changes for the normal
+  pull-request flow; synchronize confirmed architecture conclusions in AirWiki.
+
+Acceptance covers both components and their relevant failure paths. Public
+infrastructure deployment, visual changes and broad speculative refactors are
+deferred.
+
 ## Desktop reading-first redesign
 
 Status: Completed — seven phases implemented and installed acceptance passed.

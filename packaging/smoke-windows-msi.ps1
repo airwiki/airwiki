@@ -216,10 +216,6 @@ function Get-InstallerMetadata([string] $Path) {
     }
 }
 
-function Get-ArpPath([string] $ProductCode) {
-    return "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$ProductCode"
-}
-
 function Get-ProductRegistrationPaths([string] $ProductCode) {
     return @(
         "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$ProductCode",
@@ -234,14 +230,38 @@ function Assert-NoProductCodeRegistration($Metadata) {
     }
 }
 
-function Assert-MsiProductNotInstalled($Metadata) {
+function Get-MsiProductState([string] $ProductCode) {
     $InstallerCom = $null
     try {
         $InstallerCom = New-Object -ComObject WindowsInstaller.Installer
-        $State = [int]$InstallerCom.ProductState($Metadata.ProductCode)
+        return [int] $InstallerCom.GetType().InvokeMember(
+            "ProductState", [Reflection.BindingFlags]::GetProperty,
+            $null, $InstallerCom, [object[]]@($ProductCode)
+        )
     } finally {
         if ($null -ne $InstallerCom) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($InstallerCom) }
     }
+}
+
+function Get-MsiProductInfo([string] $ProductCode) {
+    $InstallerCom = $null
+    try {
+        $InstallerCom = New-Object -ComObject WindowsInstaller.Installer
+        $Properties = @{}
+        foreach ($Name in @("InstalledProductName", "Publisher", "InstallLocation", "VersionString", "AssignmentType")) {
+            $Properties[$Name] = [string] $InstallerCom.GetType().InvokeMember(
+                "ProductInfo", [Reflection.BindingFlags]::GetProperty,
+                $null, $InstallerCom, [object[]]@($ProductCode, $Name)
+            )
+        }
+        return $Properties
+    } finally {
+        if ($null -ne $InstallerCom) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($InstallerCom) }
+    }
+}
+
+function Assert-MsiProductNotInstalled($Metadata) {
+    $State = Get-MsiProductState $Metadata.ProductCode
     if ($State -ne -1 -and $State -ne 2) {
         throw "the MSI ProductCode is already known to Windows Installer (state $State); resolve it manually"
     }
@@ -327,14 +347,17 @@ function Test-SamePath([string] $Left, [string] $Right) {
     )
 }
 
-function Wait-ForArp([string] $ProductCode, [bool] $Present) {
-    $Path = Get-ArpPath $ProductCode
+function Wait-ForMsiProduct([string] $ProductCode, [bool] $Present) {
+    # Query Windows Installer, whose per-user registration need not appear as an
+    # HKCU Uninstall entry. Registry paths remain collision/residue checks only.
     $Deadline = [DateTime]::UtcNow.AddMilliseconds($StateWaitMilliseconds)
     do {
-        if ((Test-Path -LiteralPath $Path) -eq $Present) { return }
+        $State = Get-MsiProductState $ProductCode
+        if ($Present -and $State -eq 5) { return }
+        if (-not $Present -and $State -eq -1) { return }
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $Deadline)
-    throw "MSI ARP state did not reach the expected value"
+    throw "MSI registration did not reach the expected state (expected_installed=$Present state=$State $((Get-MsiOperationState $ProductCode)))"
 }
 
 function Assert-EssentialPayload([string] $Root) {
@@ -353,15 +376,23 @@ function Assert-EssentialPayload([string] $Root) {
     }
 }
 
+function Assert-MsiProductRegistration($Metadata, [string] $ExpectedInstallDirectory) {
+    Wait-ForMsiProduct $Metadata.ProductCode $true
+    $Registration = Get-MsiProductInfo $Metadata.ProductCode
+    if ([string]$Registration.AssignmentType -cne "0" -or
+        [string]$Registration.InstalledProductName -cne $ProductName -or
+        [string]$Registration.Publisher -cne $Publisher -or
+        [version]$Registration.VersionString -ne $Metadata.ProductVersion -or
+        [string]::IsNullOrWhiteSpace([string]$Registration.InstallLocation) -or
+        -not (Test-SamePath ([string]$Registration.InstallLocation) $ExpectedInstallDirectory)) {
+        throw "MSI registration does not identify the installed per-user AirWiki payload"
+    }
+}
+
 function Assert-InstalledProduct($Metadata) {
     $SafeInstallDirectory = Assert-PathInsideRoot $InstallDirectory $LocalDataRoot "MSI installation directory"
     $SafeShortcutPath = Assert-PathInsideRoot $ShortcutPath $ProgramsRoot "Start Menu shortcut"
-    Wait-ForArp $Metadata.ProductCode $true
-    $Arp = Get-ItemProperty -LiteralPath (Get-ArpPath $Metadata.ProductCode) -ErrorAction Stop
-    if ([string]$Arp.DisplayName -cne $ProductName -or [string]$Arp.Publisher -cne $Publisher -or
-        -not (Test-SamePath ([string]$Arp.InstallLocation) $SafeInstallDirectory)) {
-        throw "MSI ARP metadata does not identify the installed AirWiki payload"
-    }
+    Assert-MsiProductRegistration $Metadata $SafeInstallDirectory
     Assert-EssentialPayload $SafeInstallDirectory
     $DesktopExecutable = Join-Path $SafeInstallDirectory "airwiki.exe"
     $null = Assert-PathInsideRoot $DesktopExecutable $LocalDataRoot "installed desktop executable"
@@ -431,7 +462,7 @@ function Remove-InstalledProduct($Metadata) {
     try {
         $null = Assert-InstalledProduct $Metadata
         Invoke-MsiExec @("/x", $Metadata.ProductCode, "/qn", "/norestart") "MSI uninstall" $Metadata.ProductCode
-        Wait-ForArp $Metadata.ProductCode $false
+        Wait-ForMsiProduct $Metadata.ProductCode $false
         if (@(Get-ProductRegistrationPaths $Metadata.ProductCode).Count -ne 0) {
             throw "MSI uninstall left a ProductCode registration"
         }
@@ -482,7 +513,7 @@ try {
         }
         Invoke-MsiExec @("/i", $Upgrade.Path, "/qn", "/norestart", "AUTOLAUNCHAPP=0") "MSI upgrade" $Upgrade.ProductCode
         if ($Upgrade.ProductCode -cne $Base.ProductCode) {
-            Wait-ForArp $Base.ProductCode $false
+            Wait-ForMsiProduct $Base.ProductCode $false
         }
         try { $null = Assert-InstalledProduct $Upgrade } catch {
             $script:ManualCleanupRequired = $true

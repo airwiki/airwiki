@@ -334,16 +334,22 @@ the freshly packaged `en-US` MSI. It is deliberately narrower than the
 validated installer smoke: it does not start AirWiki, download WebView2, or
 prepare models. It requires an already-present WebView2 Runtime, a clean AirWiki
 installer/shortcut state, reads the MSI identity through the Windows Installer
-COM API, installs silently with `AUTOLAUNCHAPP=0`, validates ARP,
-`InstallLocation`, essential installed files and the Start Menu target, then
+COM API, installs silently with `AUTOLAUNCHAPP=0`, validates the registered
+product state, per-user assignment, name, publisher, version, `InstallLocation`,
+essential installed files and the Start Menu target, then
 uninstalls by the MSI `ProductCode`. It rejects malformed product identifiers,
 any pre-existing registration for either requested product code, and reparse
 points or paths outside the canonical Windows known-folder roots. The smoke
 revalidates the exact AirWiki identity, location and payload immediately before
 uninstalling; an incomplete or ambiguous state is preserved for manual cleanup.
-ARP is not the sole source of truth: the smoke also asks Windows Installer for
-the product state and rejects advertised, installed or otherwise non-absent
-product codes before installation.
+Registration is read through Windows Installer's `ProductState` and `ProductInfo`
+APIs, rather than requiring an `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall`
+entry. Direct registry probes remain additional collision and residue checks.
+The smoke rejects advertised, installed or otherwise non-absent product codes
+before installation, requires installed state after installation, and requires
+unknown state after uninstall. API failures and mismatched registration preserve
+the ambiguous state instead of authorizing cleanup. See Microsoft's
+[product information contract](https://learn.microsoft.com/en-us/windows/win32/api/msi/nf-msi-msigetproductinfoa).
 
 For a controlled Windows client, invoke it only with explicit authorization:
 

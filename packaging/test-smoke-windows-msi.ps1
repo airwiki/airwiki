@@ -52,6 +52,7 @@ Assert-PowerShellParses $SmokePath "MSI smoke script"
 Assert-PowerShellParses $HostPolicyPath "MSI smoke host policy"
 Assert-PowerShellParses $RecordAccessPath "Windows Installer record access helper"
 & (Join-Path $PSScriptRoot "test-windows-msi-registration.ps1")
+& (Join-Path $PSScriptRoot "test-windows-msi-state.ps1")
 . $HostPolicyPath
 . $RecordAccessPath
 

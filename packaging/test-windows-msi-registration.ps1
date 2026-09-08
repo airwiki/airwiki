@@ -27,6 +27,7 @@ $ArpEntries = @()
 $RegistrationPaths = @()
 $ArpProbeFails = $false
 $RegistrationProbeFails = $false
+$InstalledIdentityFails = $false
 $Observed = @{ ProductStateChecks = 0; Uninstalls = 0; Stage = "" }
 
 function Get-AirWikiArpEntries {
@@ -43,7 +44,11 @@ function Test-WebView2Present { return $true }
 function Test-Path([string] $LiteralPath) { return $false }
 function Get-CimInstance([string] $ClassName, [string] $Filter) { return @() }
 function Assert-MsiProductNotInstalled($Value) { $Observed.ProductStateChecks++ }
-function Assert-InstalledProduct($Value) { $Observed.Stage = "verified"; return $true }
+function Assert-InstalledProduct($Value) {
+    if ($InstalledIdentityFails) { throw "synthetic installed identity mismatch" }
+    $Observed.Stage = "verified"
+    return $true
+}
 function Invoke-MsiExec([string[]] $Arguments, [string] $Label, [string] $ProductCode) {
     if ($Observed.Stage -cne "verified" -or $Label -cne "MSI uninstall" -or
         $ProductCode -cne $Metadata.ProductCode -or $Arguments.Count -ne 4 -or
@@ -54,9 +59,9 @@ function Invoke-MsiExec([string[]] $Arguments, [string] $Label, [string] $Produc
     $Observed.Uninstalls++
     $Observed.Stage = "uninstalled"
 }
-function Wait-ForArp([string] $ProductCode, [bool] $Present) {
+function Wait-ForMsiProduct([string] $ProductCode, [bool] $Present) {
     if ($Observed.Stage -cne "uninstalled" -or $ProductCode -cne $Metadata.ProductCode -or $Present) {
-        throw "unexpected synthetic ARP wait"
+        throw "unexpected synthetic MSI state wait"
     }
     $Observed.Stage = "absent"
 }
@@ -125,6 +130,15 @@ foreach ($Case in @("empty", "one", "multiple", "probe-failure")) {
     if ($Observed.Uninstalls -ne 1 -or $Observed.Stage -cne "absent") {
         throw "synthetic uninstall did not verify identity, uninstall and wait in order"
     }
+}
+
+$InstalledIdentityFails = $true
+$script:InstalledProduct = $Metadata
+$script:ManualCleanupRequired = $false
+$Observed.Uninstalls = 0
+Assert-RejectedWithMessage { Remove-InstalledProduct $Metadata } "synthetic installed identity mismatch"
+if ($Observed.Uninstalls -ne 0 -or $script:InstalledProduct -ne $Metadata -or -not $script:ManualCleanupRequired) {
+    throw "an unverified installation was removed or lost its manual cleanup state"
 }
 
 Write-Host "Windows MSI empty, single and multiple registration guards passed."

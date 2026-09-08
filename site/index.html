@@ -5,23 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <meta name="referrer" content="no-referrer">
-    <meta name="description" content="AirWiki turns folders into private, reviewable wikis without centralizing the source material.">
+    <meta name="description" content="Turn team docs, study notes, and repository decisions into knowledge people and AI can use. Private by default. Open-source desktop technical beta.">
     <link rel="canonical" href="https://airwiki.github.io/airwiki/">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="AirWiki">
-    <meta property="og:title" content="AirWiki — private, reviewable knowledge">
-    <meta property="og:description" content="Turn folders into private, reviewable wikis without centralizing the source material.">
+    <meta property="og:title" content="AirWiki — knowledge for people and AI">
+    <meta property="og:description" content="Share team expertise privately, publish study notes, and give coding assistants lasting project context. Open-source desktop technical beta.">
     <meta property="og:url" content="https://airwiki.github.io/airwiki/">
     <meta property="og:image" content="https://airwiki.github.io/airwiki/assets/airwiki-social-preview.png">
     <meta property="og:image:width" content="1280">
     <meta property="og:image:height" content="640">
     <meta property="og:image:alt" content="AirWiki — local-first, private knowledge with human review">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="AirWiki — private, reviewable knowledge">
-    <meta name="twitter:description" content="Turn folders into private, reviewable wikis without centralizing the source material.">
+    <meta name="twitter:title" content="AirWiki — knowledge for people and AI">
+    <meta name="twitter:description" content="Share team expertise privately, publish study notes, and give coding assistants lasting project context. Open-source desktop technical beta.">
     <meta name="twitter:image" content="https://airwiki.github.io/airwiki/assets/airwiki-social-preview.png">
     <meta name="twitter:image:alt" content="AirWiki — local-first, private knowledge with human review">
-    <title>AirWiki — private, reviewable knowledge</title>
+    <title>AirWiki — knowledge for people and AI</title>
     <link vite-ignore rel="icon" href="/__airwiki-protected/assets/airwiki-mark.png" type="image/png">
     <link vite-ignore rel="stylesheet" href="/__airwiki-protected/styles.css">
     <script vite-ignore src="/__airwiki-protected/launch-config.js" type="module"></script>
@@ -35,6 +35,7 @@
         <span>AirWiki</span>
       </a>
       <nav aria-label="Primary navigation">
+        <a href="#use-cases">Use cases</a>
         <a href="#how-it-works">How it works</a>
         <a href="#boundaries">Privacy</a>
         <a href="#limits">Limits</a>
@@ -46,9 +47,10 @@
     <main id="main">
       <section class="hero" id="top" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="eyebrow">Local-first knowledge, under your control</p>
-          <h1 id="hero-title">Turn folders into a <em>private, reviewable</em> wiki.</h1>
-          <p class="lede">AirWiki turns the knowledge you already keep into a portable wiki. Evidence stays close to each proposal; you decide what becomes searchable or shared.</p>
+          <p class="eyebrow">Team docs. Study notes. Project decisions.</p>
+          <h1 id="hero-title">Turn your docs into <em>knowledge people and AI can use.</em></h1>
+          <p class="lede">Help colleagues find answers across teams. Share your study notes with other students. Give your coding assistant lasting project context. AirWiki makes it searchable, with you in control of access.</p>
+          <p class="audience-links"><a href="#teams">For teams</a><a href="#students">For students</a><a href="#developers">For developers</a></p>
           <div class="hero-actions">
             <a class="button button-primary" data-primary-cta href="https://github.com/airwiki/airwiki">View source</a>
             <a class="button button-secondary" data-secondary-cta href="https://github.com/airwiki/airwiki/releases">Technical beta for evaluators</a>
@@ -58,30 +60,95 @@
         </div>
         <figure class="knowledge-route" aria-labelledby="route-caption">
           <div class="route-grid" aria-hidden="true">
-            <div class="route-node folder-node"><span>01</span><strong>Folder</strong><small>Your files remain yours</small></div>
+            <div class="route-node folder-node"><span>01</span><strong>Your docs</strong><small>Notes, guides, decisions</small></div>
             <div class="route-line line-one"></div>
             <div class="route-node evidence-node"><span>02</span><strong>Evidence</strong><small>Source beside proposal</small></div>
             <div class="route-line line-two"></div>
             <div class="route-node review-node"><span>03</span><strong>Review</strong><small>You decide what is stable</small></div>
             <div class="route-line line-three"></div>
-            <div class="route-node search-node"><span>04</span><strong>Search</strong><small>Only stable knowledge</small></div>
+            <div class="route-node search-node"><span>04</span><strong>Reuse</strong><small>People and permitted AI apps</small></div>
           </div>
-          <figcaption id="route-caption">The knowledge route: automation proposes, people decide.</figcaption>
+          <figcaption id="route-caption">From documents to reusable knowledge. You review it and choose who can use it.</figcaption>
         </figure>
       </section>
 
       <section class="proof-band" aria-label="Product facts">
         <p><strong>Apache-2.0</strong><span>Open source</span></p>
-        <p><strong>OKF v0.2</strong><span>Portable knowledge</span></p>
+        <p><strong>AI apps via MCP</strong><span>Context on demand</span></p>
         <p><strong>Local by default</strong><span>No account required</span></p>
         <p><strong>Human review</strong><span>Before search or sharing</span></p>
       </section>
 
+      <section class="section use-cases" id="use-cases" aria-labelledby="use-cases-title">
+        <div class="section-heading">
+          <p class="eyebrow">Put your knowledge to work</p>
+          <h2 id="use-cases-title">Useful beyond the person who wrote it.</h2>
+          <p>The explanation already exists. Help the next person, or their AI assistant, find it. These example workflows show what to explore in the technical beta.</p>
+        </div>
+        <article class="use-case" id="teams" aria-labelledby="teams-title">
+          <div class="use-case-heading">
+            <p class="eyebrow">Teams · Private LAN sharing</p>
+            <h3 id="teams-title">Make another team's expertise accessible.</h3>
+            <p>Support needs an answer that engineering has already documented.</p>
+          </div>
+          <div class="use-case-detail">
+            <p class="example-question"><span>Example question</span>“How do we recover a failed import?”</p>
+            <p>Engineering reviews its troubleshooting Wiki and grants access to verified colleagues on the local network. Support can search it and read the explanation. A connected assistant can retrieve the evidence when the owner permits that AI access.</p>
+            <p><strong>Give colleagues a way to find answers without asking you to resend the same docs.</strong> Each owner chooses which wikis to share.</p>
+            <p class="use-case-scope">Private sharing currently uses authorized LAN devices. There is no SSO or managed private network between offices.</p>
+            <a href="https://github.com/airwiki/airwiki/blob/main/docs/search-and-federation.md#search-on-a-private-lan">Explore private sharing <span aria-hidden="true">→</span></a>
+          </div>
+        </article>
+        <article class="use-case" id="students" aria-labelledby="students-title">
+          <div class="use-case-heading">
+            <p class="eyebrow">Students · Public discovery</p>
+            <h3 id="students-title">Let your study notes help the next class.</h3>
+            <p>A clear explanation can help classmates and students taking the same subject elsewhere.</p>
+          </div>
+          <div class="use-case-detail">
+            <p class="example-question"><span>Example question</span>“Why does this database need normalization?”</p>
+            <p>Turn your own notes into a Wiki, review the concepts, and choose to publish it to the experimental public network. Other students can discover the topic and read your explanation with its sources. AI study apps can search it when public search is enabled.</p>
+            <p><strong>Build on what other students have already worked through.</strong> Keep personal notes private and publish only material you have the right to share.</p>
+            <p class="use-case-scope">Public sharing is experimental. Publishers must be reachable through configured indexes; there is no supported always-on relay service. Readers can retain published content.</p>
+            <a href="https://github.com/airwiki/airwiki/blob/main/docs/search-and-federation.md#search-on-the-public-network">Explore public discovery <span aria-hidden="true">→</span></a>
+          </div>
+        </article>
+        <article class="use-case" id="developers" aria-labelledby="developers-title">
+          <div class="use-case-heading">
+            <p class="eyebrow">Developers · Project memory</p>
+            <h3 id="developers-title">Give the next AI session your project's context.</h3>
+            <p>The README explains setup. Your project memory keeps the reasoning behind decisions.</p>
+          </div>
+          <div class="use-case-detail">
+            <p class="example-question"><span>Example question</span>“Why do imports run in a background worker?”</p>
+            <p>Initialize a portable <code>.airwiki</code> Wiki in your repository. Authorize Codex, Claude Code, or Gemini CLI to capture confirmed decisions and consult them in later tasks. Review that knowledge as readable files alongside your code.</p>
+            <p><strong>Spend less effort rebuilding context in every conversation.</strong> Keep conventions, architecture decisions, and reusable procedures available across compatible tools.</p>
+            <p class="use-case-scope">You control what enters Git. AirWiki never commits or pushes; a new clone needs local approval before an assistant can use its memory.</p>
+            <a href="https://github.com/airwiki/airwiki/blob/main/docs/chat-integrations.md#assisted-memory-guide">Explore project memory <span aria-hidden="true">→</span></a>
+          </div>
+        </article>
+        <p class="read-more">Try these workflows with synthetic material first. <a href="https://github.com/airwiki/airwiki/blob/main/FAQ.md">Read the beta evaluation FAQ</a>.</p>
+      </section>
+
+      <section class="section ai-context" aria-labelledby="ai-context-title">
+        <div class="section-heading">
+          <p class="eyebrow">What “useful to AI” means</p>
+          <h2 id="ai-context-title">Give your assistant context it can look up.</h2>
+          <p>Connect a compatible AI app through MCP, the connection protocol used by AI tools. It can retrieve relevant passages with source references from the knowledge it is allowed to access, as it works.</p>
+        </div>
+        <ul class="context-list">
+          <li><strong>Knowledge with structure.</strong> Portable OKF pages organize concepts, relationships, and provenance.</li>
+          <li><strong>Evidence on demand.</strong> Local search finds relevant passages so you can stop pasting the same background into every chat.</li>
+          <li><strong>Access you choose.</strong> AI-app permissions, private sharing, and public publication have separate controls.</li>
+        </ul>
+        <p class="context-note">AirWiki prepares and searches knowledge locally. A connected cloud AI provider may process evidence its app receives. This is retrievable context, not model training or a measured claim of token savings.</p>
+      </section>
+
       <section class="section workflow" id="how-it-works" aria-labelledby="workflow-title">
         <div class="section-heading">
-          <p class="eyebrow">A calm path from files to knowledge</p>
-          <h2 id="workflow-title">Keep the source. Make the reasoning inspectable.</h2>
-          <p>AirWiki is designed for people who want useful local AI without letting it silently decide what is true, searchable, or public.</p>
+          <p class="eyebrow">From files to a useful Wiki</p>
+          <h2 id="workflow-title">Start with knowledge you already have.</h2>
+          <p>Bring a folder of Markdown or text-based PDFs, import an OKF Wiki, or create memory with an authorized assistant. Local AI helps prepare it; you review folder-derived concepts before they enter search.</p>
         </div>
         <div class="workflow-grid">
           <article class="workflow-card folder-card">
@@ -136,12 +203,12 @@
       <section class="section boundaries" id="boundaries" aria-labelledby="boundaries-title">
         <div class="boundary-stamp" aria-hidden="true">Private<br>by default</div>
         <div class="boundary-copy">
-          <p class="eyebrow">The useful boundary is a visible one</p>
-          <h2 id="boundaries-title">Connecting an assistant is not the same as publishing a wiki.</h2>
+          <p class="eyebrow">Private by default</p>
+          <h2 id="boundaries-title">You choose who can use your knowledge.</h2>
           <ul>
             <li>New wikis are private from LAN and the Internet.</li>
             <li>Original files remain on the source device and AirWiki does not delete them.</li>
-            <li>Sharing, connecting an AI app, and public-query egress are separate human decisions.</li>
+            <li>Choose separately whether to share a Wiki, let an AI app read it, or let that app search public knowledge.</li>
             <li>Only stable knowledge enters search or external disclosure.</li>
           </ul>
           <p><a href="https://github.com/airwiki/airwiki/blob/main/PRIVACY.md">Read the privacy policy</a> · <a href="https://github.com/airwiki/airwiki/blob/main/docs/threat-model.md">Read the threat model</a> · <a href="https://github.com/airwiki/airwiki/blob/main/SECURITY.md">Report a security issue privately</a></p>
@@ -174,7 +241,7 @@
           </details>
           <details>
             <summary>Do I need to upload my documents?</summary>
-            <p>No. AirWiki is local-first. Original source documents stay on the device that owns them unless you separately choose an authorized sharing path.</p>
+            <p>No. Preparation and retrieval run locally. Sharing exposes the published Wiki; original source files stay on their owner's device. Connected AI apps may receive permitted evidence, which a cloud AI provider may process.</p>
           </details>
           <details>
             <summary>Does using an AI app publish my knowledge?</summary>
@@ -199,13 +266,14 @@
       </section>
 
       <section class="closing" aria-labelledby="closing-title">
-        <p class="eyebrow">Inspect it before you trust it</p>
-        <h2 id="closing-title">Your knowledge should not need a black box.</h2>
-        <p>Read the source, inspect the evidence path, and evaluate a technical beta only if its current platform constraints work for you.</p>
+        <p class="eyebrow">Help shape AirWiki</p>
+        <h2 id="closing-title">Bring a use case. Build with us.</h2>
+        <p>Explore the source or evaluate the technical beta with sample material. Tell us where your team, study group, or coding assistant loses useful context, and help improve that workflow.</p>
         <div class="hero-actions">
           <a class="button button-primary" data-primary-cta href="https://github.com/airwiki/airwiki">View source</a>
           <a class="button button-secondary" data-secondary-cta href="https://github.com/airwiki/airwiki/releases">Technical beta for evaluators</a>
         </div>
+        <p class="closing-feedback"><a href="https://github.com/airwiki/airwiki/blob/main/SUPPORT.md">Share feedback</a> · <a href="https://github.com/airwiki/airwiki/blob/main/CONTRIBUTING.md">Contribute to the project</a></p>
       </section>
     </main>
 

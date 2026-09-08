@@ -5,10 +5,18 @@ is deliberately a preparation kit, not a release approval or a publication
 workflow. Nothing here authorizes a post, a listing, a directory submission, or
 a claim that a technical pre-release is supported.
 
-AirWiki's public promise is intentionally narrow: it is a private, portable,
-reviewable wiki built from knowledge that people already have. Knowledge stays
+AirWiki's public message is **turn your docs into knowledge people and AI can
+use**. Lead with concrete workflows: colleagues finding another team's expertise
+through private LAN sharing, students publishing their own explanations through
+experimental public discovery, and developers keeping portable project memory
+for coding assistants. Explain the benefit and the applicable limit together;
+these examples are not customer stories or measured results.
+
+AI readiness means structured, portable concepts and relevant evidence retrieved
+through MCP, not model training or a token-savings claim. Knowledge stays
 on the owning device by default; people decide before sharing it or connecting
-it to an AI app. The [README](../../README.md), [privacy and security
+it to an AI app, whose provider may process the evidence it receives.
+The [README](../../README.md), [privacy and security
 boundaries](../../docs/threat-model.md), [installation guide](../../docs/install.md),
 and [release process](../../docs/release-process.md) remain the authoritative
 product and release documents.
@@ -45,6 +53,11 @@ channel. Its approved informational deployment target is
 call to action until a supported stable release passes every gate.
 
 ## How to use this kit
+
+The [Product Hunt copy](product-hunt.md) includes wording for the current
+technical-beta draft. Saving that draft is preparation, not approval to schedule
+or publish. Its accurate beta status must remain visible until release facts
+change; the general-launch gates above still apply.
 
 1. Complete the preflight in [launch-day-runbook.md](launch-day-runbook.md).
 2. Replace every bracketed marker only after the corresponding stable-release

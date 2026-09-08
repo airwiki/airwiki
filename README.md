@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Your private, portable wiki—built from the knowledge you already have.</strong>
+  <strong>Turn your docs into knowledge people and AI can use.</strong>
 </p>
 
 <p align="center">
@@ -14,6 +14,7 @@
 
 <p align="center">
   <a href="https://airwiki.github.io/airwiki/">Website</a> ·
+  <a href="#put-your-knowledge-to-work">Use cases</a> ·
   <a href="#how-airwiki-works">How it works</a> ·
   <a href="#availability">Availability</a> ·
   <a href="https://github.com/airwiki/airwiki/releases">Technical beta</a> ·
@@ -24,7 +25,7 @@
   <a href="docs/code-signing-policy.md">Code signing policy</a>
 </p>
 
-AirWiki is an open-source desktop app that turns folders, [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundles, and assistant conversations into wikis you can search, review, and selectively share. Knowledge stays on the device that owns it by default. Local AI can organize and index it, but cannot publish it or grant access.
+AirWiki is an open-source desktop app for turning team documentation, study notes, and project decisions into searchable wikis. Help colleagues find another department's knowledge, let classmates learn from notes you choose to publish, or give a coding assistant the context behind your repository. Start from folders, [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundles, or authorized assistant memory. Your knowledge is private by default; you choose who can use it.
 
 > [!IMPORTANT]
 > AirWiki is in active development and has no supported stable download yet. Pre-releases are manual test candidates, are never selected by the updater, and may be blocked by platform policy. Signing status is stated per platform in each release. Read [Availability](#availability) before installing one.
@@ -36,6 +37,66 @@ AirWiki is an open-source desktop app that turns folders, [Open Knowledge Format
   <br>
   <sub>10-second product tour · <a href="docs/assets/airwiki-demo.mp4">MP4 version</a> · synthetic data only</sub>
 </p>
+
+## Put your knowledge to work
+
+These are example workflows to evaluate with synthetic material in the technical
+beta, not customer deployments or claims of production readiness.
+
+### Teams: find answers across departments
+
+A support colleague needs to understand how engineering handles a failed import.
+Engineering turns its troubleshooting notes into a reviewed Wiki and grants
+access to verified colleagues' devices on the local network. Support can search
+that knowledge and open the published explanation without asking someone to
+resend the same document. Connected assistants can retrieve the evidence when
+the source owner has authorized that AI access.
+
+**The value:** make each team's expertise useful across the company while each
+owner controls which wikis are shared. Private sharing currently uses authorized
+LAN devices; AirWiki does not provide SSO, cloud sync, or a managed private
+network for distributed offices. [How private sharing works](docs/search-and-federation.md#search-on-a-private-lan).
+
+### Students: let a useful explanation reach the next class
+
+A student turns their own notes on database normalization into a Wiki, reviews
+the concepts, and chooses to publish it to the experimental public network.
+Classmates, or students taking the same subject elsewhere, can search for that
+topic and read the published Wiki with its sources. An AI study assistant can
+search it too when public search is enabled for that app.
+
+**The value:** build on explanations other students have already worked through.
+Publish only material you have the right to share. Public content can be retained
+by readers; discovery depends on a reachable publisher and configured public
+indexes, with no supported always-on relay service today.
+[How public discovery works](docs/search-and-federation.md#search-on-the-public-network).
+
+### Developers: carry project context into the next AI session
+
+A repository's README explains setup, but the reason for a design choice is buried
+in an old conversation. Initialize a portable `.airwiki` project Wiki and authorize
+your coding assistant to capture confirmed decisions, conventions, and reusable
+procedures. Codex, Claude Code, or Gemini CLI can consult that memory in later
+tasks, and you can review its files alongside your code.
+
+**The value:** keep project knowledge available across sessions and compatible
+tools, so you spend less effort rebuilding context. You control what enters Git;
+AirWiki never commits or pushes, and a new clone needs local approval before an
+assistant can use its memory. [Connect an assistant and project memory](docs/chat-integrations.md#assisted-memory-guide).
+
+## What makes the knowledge useful to AI?
+
+AirWiki gives compatible assistants a way to **retrieve relevant knowledge on
+demand** through MCP, the connection protocol used by AI tools. Wikis use readable
+OKF concept pages, relationships, and provenance; local lexical and vector search
+finds relevant evidence and returns bounded passages with source references.
+An assistant can consult the project's decisions or a permitted team Wiki as it
+works, instead of relying on you to paste the same background into every chat.
+
+This is structured, retrievable context, not model training or a measured promise
+of lower token costs or better answers. AirWiki's preparation and retrieval run
+locally; a connected cloud AI provider may process the evidence its app receives.
+See the [AI-access boundaries](docs/chat-integrations.md) before connecting one.
 
 ## How AirWiki works
 

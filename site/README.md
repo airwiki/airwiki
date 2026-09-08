@@ -14,6 +14,20 @@ The source intentionally produces two separate artifacts:
 
 Neither artifact changes the desktop product's release state.
 
+## Editorial focus
+
+The hero and first section explain reusable knowledge for people and AI through
+three illustrative workflows: private knowledge sharing across teams on a LAN,
+student explanations in experimental public discovery, and portable repository
+memory for coding assistants. Each pairs a concrete question with the benefit
+and current limits. Keep these aligned with the root README and
+[`docs/launch/product-hunt.md`](../docs/launch/product-hunt.md).
+
+Explain AI readiness through structured concepts, provenance, and relevant
+evidence retrieved through MCP. Do not invent customer stories, token savings,
+answer-quality measurements, or always-on network availability. The final call
+to action invites sample-data evaluation, feedback, and contributions.
+
 ## Local preview
 
 Run `pnpm dev` for the source page. Run `pnpm build && pnpm preview` to inspect

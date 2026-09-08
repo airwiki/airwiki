@@ -1,18 +1,17 @@
 /*
- * Release switch — edit this file only after the stable-release GO has been
- * approved and the signed, notarized installers have passed their acceptance
- * checks. Keep the technical-beta values until then.
+ * The launch targets 0.3 beta. Replace the informational CTAs only after the
+ * exact 0.3 installers are published and anonymously downloadable.
  */
 window.AIRWIKI_LAUNCH = {
   releaseState: "technical-beta",
   primaryCta: {
-    label: "View source",
-    href: "https://github.com/airwiki/airwiki",
+    label: "Explore the 0.3 beta",
+    href: "#download",
   },
   secondaryCta: {
-    label: "Technical beta for evaluators",
-    href: "https://github.com/airwiki/airwiki/releases",
+    label: "View source",
+    href: "https://github.com/airwiki/airwiki",
     notice:
-      "Development candidates only. Windows packages remain unsigned; check each release for macOS signing status. Keep platform protections enabled.",
+      "Beta 0.3 · macOS and Windows installers are being prepared. No supported stable release or automatic updates yet.",
   },
 };

@@ -28,23 +28,24 @@
 AirWiki is an open-source desktop app for turning team documentation, study notes, and project decisions into searchable wikis. Help colleagues find another department's knowledge, let classmates learn from notes you choose to publish, or give a coding assistant the context behind your repository. Start from folders, [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundles, or authorized assistant memory. Your knowledge is private by default; you choose who can use it.
 
 > [!IMPORTANT]
-> AirWiki 0.3 is a technical beta, with no supported stable release or automatic updates. Its launch installers are being prepared and are not yet available. The older 0.2 pre-releases do not contain the interface shown below.
+> AirWiki 0.3 is available as a technical beta, with no supported stable release or automatic updates. The macOS package is signed and notarized; Windows packages remain unsigned.
 
 ## Download AirWiki
 
-**Launch version: 0.3 beta.** The macOS and Windows installers are being validated.
-Direct downloads will appear here when the exact 0.3 packages are published;
-no GitHub account or source build will be required to download them.
+**Download the 0.3 beta (`v0.3.0-rc.1`).** These links download the installers
+directly; no GitHub account, signup or source build is required.
 
 | Platform | 0.3 package | Requirements |
 | --- | --- | --- |
-| macOS | DMG · publication pending | Apple silicon, macOS 13+ |
-| Windows · English / Español | MSI · publication pending | Windows 10/11 x64, AVX2 |
+| macOS | [Download DMG](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/AirWiki_0.3.0_aarch64_SIGNED-NOTARIZED-RC.dmg) · signed and notarized | Apple silicon, macOS 13+ |
+| Windows | [Download MSI in English](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/AirWiki_0.3.0_x64_en-US_UNSIGNED-BETA.msi) · [Descargar en español](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/AirWiki_0.3.0_x64_es-ES_UNSIGNED-BETA.msi) · unsigned | Windows 10/11 x64, AVX2 |
 
-[0.3 changes and upgrade guidance](docs/releases/0.3.0.md) · [Installation help](docs/install.md) · [Release history](https://github.com/airwiki/airwiki/releases) · [Run from source](#run-from-source)
+[Release notes](https://github.com/airwiki/airwiki/releases/tag/v0.3.0-rc.1) · [Checksums](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/SHA256SUMS.txt) · [0.3 changes and upgrade guidance](docs/releases/0.3.0.md) · [Installation help](docs/install.md) · [Run from source](#run-from-source)
 
 The screenshots and tour show the **0.3 interface** with synthetic data.
 Local AI assets download separately during setup.
+Keep operating-system security protections enabled; an unsigned Windows beta
+may be blocked by your device's policy.
 
 <p align="center">
   <a href="docs/assets/airwiki-demo.mp4">

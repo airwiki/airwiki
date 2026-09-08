@@ -5,9 +5,11 @@ Product Hunt draft. Saving a draft does not schedule or publish a launch, approv
 a release, or change the [launch gates](README.md#launch-gates). The repository's
 stable-launch policy requires a supported stable release. The owner has explicitly
 authorized a technical-beta announcement for September 9, 2026, with refreshed
-branding, media, and direct downloads of the latest **0.3 beta**. The 0.3
-packages are not published yet; do not substitute 0.2 downloads or schedule the
-launch before the exact 0.3 assets and their installation status are verified.
+branding, media, and direct downloads of the latest **0.3 beta**. The exact
+packages are published in [v0.3.0-rc.1](https://github.com/airwiki/airwiki/releases/tag/v0.3.0-rc.1):
+macOS is signed and notarized, and Windows remains an unsigned technical beta.
+Use those assets and their documented installation status; do not substitute
+older 0.2 downloads for the launch.
 
 Product Hunt's [official guidance on unreleased products](https://help.producthunt.com/en/articles/484932-can-i-submit-an-unreleased-product)
 prioritizes products people can try and leaves pre-launch inclusion to its
@@ -45,7 +47,7 @@ and the [OKF compatibility profile](../okf-v02-profile.md).
 - Main destination: <https://airwiki.github.io/airwiki/>
 - Source: <https://github.com/airwiki/airwiki>
 - Evaluation builds, clearly labelled technical pre-releases:
-  <https://github.com/airwiki/airwiki/releases>
+  <https://github.com/airwiki/airwiki/releases/tag/v0.3.0-rc.1>
 
 Use **AirWiki** as the name. The current form allows 60 characters for the tagline
 and 500 for the description; paste each quoted field as one paragraph. Suggested
@@ -90,9 +92,10 @@ topics, if available in the form: Open Source, Productivity, and Developer Tools
 > Read the open specification: https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md
 >
 > **Current stage: open-source desktop technical beta, not a supported stable
-> release.** We're preparing the 0.3 beta for Apple silicon Macs and Windows x64.
-> The gallery shows its interface with synthetic data. The 0.3 installers are
-> not available yet; the older 0.2 pre-releases do not contain this interface.
+> release.** The 0.3 beta is available for Apple silicon Macs and Windows x64
+> as v0.3.0-rc.1. The Mac installer is signed and notarized; Windows installers
+> are unsigned. Downloads need no account, and updates are manual. The gallery
+> shows this version's interface with synthetic data.
 > Public federation is experimental, with no supported always-on relay service.
 > Private sharing uses LAN devices; there is no SSO or cloud sync.
 >
@@ -102,13 +105,14 @@ topics, if available in the form: Open Source, Productivity, and Developer Tools
 > documentation, and code contributions are welcome.
 >
 > Explore AirWiki: https://airwiki.github.io/airwiki/
+> Download the 0.3 beta: https://airwiki.github.io/airwiki/#download
 > Feedback: https://github.com/airwiki/airwiki/blob/main/SUPPORT.md
 > Report security concerns privately: https://github.com/airwiki/airwiki/security/advisories/new
 
 Keep this as prepared copy if the edit form does not expose a maker-comment
-field. Do not post it into a public discussion just to save it. Before scheduling
-the 0.3 beta launch, replace the preparation paragraph with the verified package
-version, direct downloads, and platform signing/notarization facts.
+field. Do not post it into a public discussion just to save it. Keep the package
+version, direct-download destination and platform signing/notarization facts
+aligned with the exact published release before scheduling.
 
 ## Gallery story
 
@@ -144,9 +148,9 @@ do not upload or publish a video on another service merely to fill that field.
   permission, or scheduled launch has been created as part of this document.
 - [ ] The title, tagline, description, gallery, demo, and maker comment reflect
   the exact candidate or release, including platform and experimental limits.
-- [ ] The destination gives readers an accurate next step. The beta draft points
-  to the informational landing and source; a stable-download CTA requires the
-  verified stable release URL.
+- [ ] The destination gives readers an accurate next step. The beta landing
+  points directly to the verified 0.3 installers and source; a stable-download
+  CTA requires a separate verified stable release URL.
 - [ ] The listing names material limits: desktop-only support, opt-in sharing,
   and the distinction between local, nearby, and public knowledge where
   relevant.

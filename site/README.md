@@ -1,8 +1,8 @@
 # AirWiki launch landing
 
 This directory contains the official static landing for AirWiki. The page is a
-public, informational technical-beta surface: it introduces the upcoming 0.3
-beta and links to its source, but it is not a supported web
+public, informational technical-beta surface: it introduces the 0.3 beta and
+links directly to its published installers and source, but it is not a supported web
 application, stable download channel, account service, or release approval.
 
 The source intentionally produces two separate artifacts:
@@ -56,15 +56,15 @@ in the Pages verifier's origin allowlist to substantiate the OKF attribution.
 
 `launch-config.js` keeps the `technical-beta` release state. The launch targets
 **0.3 beta**, including the current interface shown in the gallery and tour.
-Until its packages are published, the hero points to the platform information
-and source; it must not substitute an older 0.2 installer for this launch.
+The hero and platform section link directly to the verified public assets of
+`v0.3.0-rc.1`; they must not substitute an older 0.2 installer for this launch.
 
 The owner has authorized direct beta downloads and a beta announcement; neither
-promotes the packages to stable. Once the exact 0.3 installers are published,
-replace the informational CTAs with direct macOS and Windows downloads. Add the
-Spanish Windows installer, requirements, release notes, checksums, installation
-help, and each package's verified signing/notarization status. Do not infer the
-status or filename from another release.
+promotes the packages to stable. The Apple-silicon DMG is signed and notarized;
+the English and Spanish Windows MSI installers are unsigned technical betas.
+The page includes requirements, release notes, checksums and installation help.
+For future releases, verify the exact assets before updating the links. Do not
+infer the status or filename from another release.
 
 Keep configuration, HTML fallbacks, README links, and the installation guide
 aligned with the exact public release assets. Verify those assets before

@@ -17,16 +17,16 @@ use only the signed installers on the
 
 ## Before installing
 
-The **0.3 beta launch installers are not published yet**. The links below are
-for the older **v0.2.0-beta.2** technical pre-release, and download the
-installer directly without a GitHub account:
+The **0.3 beta (`v0.3.0-rc.1`)** installers are available as direct downloads,
+without a GitHub account:
 
-- [macOS DMG](https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_aarch64_UNSIGNED-NOT-NOTARIZED.dmg): Apple silicon, macOS 13+; ad-hoc signed, not notarized.
-- [Windows MSI in English](https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_x64_en-US_UNSIGNED.msi) or [Español](https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_x64_es-ES_UNSIGNED.msi): Windows 10/11 x64 with AVX2; unsigned.
-- [Release notes and checksums](https://github.com/airwiki/airwiki/releases/tag/v0.2.0-beta.2).
+- [macOS DMG](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/AirWiki_0.3.0_aarch64_SIGNED-NOTARIZED-RC.dmg): Apple silicon, macOS 13+; Developer ID signed and notarized.
+- [Windows MSI in English](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/AirWiki_0.3.0_x64_en-US_UNSIGNED-BETA.msi) or [Español](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/AirWiki_0.3.0_x64_es-ES_UNSIGNED-BETA.msi): Windows 10/11 x64 with AVX2; unsigned technical beta.
+- [Release notes](https://github.com/airwiki/airwiki/releases/tag/v0.3.0-rc.1) and [SHA-256 checksums](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/SHA256SUMS.txt).
 
-The 0.3 interface shown in current preview media is not yet the public binary.
-Use the exact release notes for the version you install.
+These packages contain the 0.3 interface shown in the current media. Follow the
+[platform release candidate](#platform-release-candidate) verification below;
+older `-beta` releases use a different workflow and trust state.
 
 1. Keep at least 7 GiB free on a 16 GiB Mac or 5 GiB on an 8 GiB Windows PC.
    The application calculates the exact missing-assets requirement plus a 1 GiB

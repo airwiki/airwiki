@@ -22,6 +22,11 @@ repository decisions into the next AI session. These are illustrative workflows,
 not testimonials, measured outcomes, or production deployments. Explain AI
 readiness as structured concepts and relevant evidence retrieved through MCP;
 do not claim model training, token savings, or improved answer accuracy.
+Name Open Knowledge Format (OKF) as the open standard introduced by Google Cloud.
+Explain AirWiki's independent OKF v0.2 implementation through readable files,
+portability, and traceable context; adoption is not certification or endorsement.
+Keep the attribution aligned with the [landing's sources](../../site/README.md#editorial-focus)
+and the [OKF compatibility profile](../okf-v02-profile.md).
 
 ## Ready copy
 
@@ -31,7 +36,7 @@ do not claim model training, token savings, or improved answer accuracy.
 
 ### Description
 
-> Turn team docs, study notes, and repository decisions into knowledge people and AI can use. Share reviewed wikis with authorized colleagues on a private LAN, publish your own notes to an experimental public network, or give coding assistants portable project memory via MCP. Open source and private by default, with separate controls for sharing and AI access. Desktop technical beta for macOS and Windows; no supported stable release yet.
+> Turn team docs, study notes, and repository decisions into knowledge people and AI can use. Built on Open Knowledge Format (OKF), the open standard introduced by Google Cloud. Share reviewed wikis with authorized colleagues on a private LAN, publish your own notes to an experimental public network, or give coding assistants project memory via MCP. Open source, private by default, with separate sharing and AI controls. Desktop technical beta for macOS and Windows; no supported stable release yet.
 
 ### Links
 
@@ -74,6 +79,13 @@ topics, if available in the form: Open Source, Productivity, and Developer Tools
 > relationships, and relevant passages with source references through MCP.
 > Preparation and retrieval run locally. A connected cloud AI provider may
 > process evidence its app receives; sharing and AI access are separate choices.
+>
+> **Built on an open standard:** AirWiki uses Open Knowledge Format (OKF),
+> introduced by Google Cloud. Our independent OKF v0.2 implementation keeps
+> knowledge in readable Markdown files with structured metadata for provenance,
+> verification, and freshness. You can inspect the files, review changes in Git,
+> and export your Wiki for reuse with compatible tools.
+> Read the open specification: https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md
 >
 > **Current stage: open-source desktop technical beta, not a supported stable
 > release.** There are macOS and Windows evaluation candidates. Windows packages

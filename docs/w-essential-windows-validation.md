@@ -14,7 +14,8 @@ The Windows x64 E2E executable and bridge were copied to an isolated per-user
 candidate directory. Tests used synthetic profiles. The daily installation and
 its data remained unchanged. Application version: 0.3.0; Windows 11 Home 25H2,
 build 26200.9278. Toolchain: Rust 1.96.1, Node 24.15.0, pnpm 10.18.3.
-WebView2: 152.0.0.0.
+The recorded WebView identifier was `152.0.0.0`; the exact installed runtime
+build was not independently recorded.
 
 Installed executable SHA-256:
 `c4c482a7b6c88ff5608bba8eebcdd9ddbb30ed99ee5fa2c1ffa76d75184cb168`.

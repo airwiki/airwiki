@@ -9,6 +9,10 @@ reading-focused redesign. Candidate highlights and upgrade guidance live in
 [the 0.3 notes](docs/releases/0.3.0.md); this heading remains unreleased until
 publication completes.
 
+- Handle empty Windows installer registration results during the release
+  install/uninstall smoke, while preserving rejection of existing installations
+  and manual cleanup when registrations remain after uninstall.
+
 - Correct Windows MSI metadata extraction so the release install/uninstall
   smoke receives one property map and can validate the package identity.
 

@@ -229,7 +229,7 @@ function Get-ProductRegistrationPaths([string] $ProductCode) {
 }
 
 function Assert-NoProductCodeRegistration($Metadata) {
-    if ((Get-ProductRegistrationPaths $Metadata.ProductCode).Count -ne 0) {
+    if (@(Get-ProductRegistrationPaths $Metadata.ProductCode).Count -ne 0) {
         throw "the MSI ProductCode already has a registered installation; resolve it manually"
     }
 }
@@ -281,7 +281,7 @@ function Assert-CleanPreflight($Metadata) {
     if (-not (Test-WebView2Present)) {
         throw "WebView2 Runtime is absent; refusing an installer path that could download it"
     }
-    if ((Get-AirWikiArpEntries).Count -ne 0 -or
+    if (@(Get-AirWikiArpEntries).Count -ne 0 -or
         (Test-Path -LiteralPath $InstallDirectory) -or
         (Test-Path -LiteralPath $ShortcutPath)) {
         throw "the MSI smoke test requires no existing AirWiki installer, payload, or shortcut collision"
@@ -432,7 +432,7 @@ function Remove-InstalledProduct($Metadata) {
         $null = Assert-InstalledProduct $Metadata
         Invoke-MsiExec @("/x", $Metadata.ProductCode, "/qn", "/norestart") "MSI uninstall" $Metadata.ProductCode
         Wait-ForArp $Metadata.ProductCode $false
-        if ((Get-ProductRegistrationPaths $Metadata.ProductCode).Count -ne 0) {
+        if (@(Get-ProductRegistrationPaths $Metadata.ProductCode).Count -ne 0) {
             throw "MSI uninstall left a ProductCode registration"
         }
         $null = Assert-PathInsideRoot $InstallDirectory $LocalDataRoot "MSI installation directory"

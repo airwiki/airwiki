@@ -1,9 +1,9 @@
 # AirWiki launch landing
 
 This directory contains the official static landing for AirWiki. The page is a
-public, informational technical-beta surface: it links to source and explicitly
-labelled evaluator builds, but it is not a supported web application, stable
-download channel, account service, or release approval.
+public, informational technical-beta surface: it offers direct downloads of
+explicitly labelled evaluator builds and source, but it is not a supported web
+application, stable download channel, account service, or release approval.
 
 The source intentionally produces two separate artifacts:
 
@@ -54,14 +54,21 @@ in the Pages verifier's origin allowlist to substantiate the OKF attribution.
 
 ## Release state
 
-`launch-config.js` is the only release-state switch. It is set to
-`technical-beta` and intentionally makes **View source** the primary action.
-The secondary action leads to technical pre-releases for evaluators and repeats
-the Windows unsigned warning and the need to check each release’s macOS signing
-status. A platform RC may contain a notarized Mac installer while Windows remains
-a technical beta; it does not change this landing’s stable-release gate.
+`launch-config.js` keeps the `technical-beta` release state and identifies the
+exact published installers. The hero offers direct macOS and Windows downloads;
+the download section adds the Spanish Windows installer, requirements, release
+notes, checksums, and installation help. Source remains accessible in the header.
+The owner has authorized direct beta downloads and a beta announcement; neither
+promotes the packages to stable. The current links target `v0.2.0-beta.2` and
+state that Windows is unsigned and macOS is not notarized. The gallery and tour
+explicitly preview the upcoming 0.3 interface.
 
-Do not replace the primary action with a download link until all of the
+Keep configuration, HTML fallbacks, README links, and the installation guide
+aligned with the exact public release assets. Verify those assets before
+changing their URLs; links must also work without JavaScript. Do not select a
+platform automatically or require an account, signup, or intermediary page.
+
+Do not label any download as a supported stable release until all of the
 following are true:
 
 1. The public-release checklist has passed, including signing, notarization,

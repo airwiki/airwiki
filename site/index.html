@@ -35,6 +35,7 @@
         <span>AirWiki</span>
       </a>
       <nav aria-label="Primary navigation">
+        <a href="#download">Download</a>
         <a href="#use-cases">Use cases</a>
         <a href="#how-it-works">How it works</a>
         <a href="#boundaries">Privacy</a>
@@ -53,11 +54,11 @@
           <p class="format-note">Built on <a href="#open-format">Open Knowledge Format (OKF)</a>, the open standard introduced by Google Cloud.</p>
           <p class="audience-links"><a href="#teams">For teams</a><a href="#students">For students</a><a href="#developers">For developers</a></p>
           <div class="hero-actions">
-            <a class="button button-primary" data-primary-cta href="https://github.com/airwiki/airwiki">View source</a>
-            <a class="button button-secondary" data-secondary-cta href="https://github.com/airwiki/airwiki/releases">Technical beta for evaluators</a>
+            <a class="button button-primary" data-primary-cta href="https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_aarch64_UNSIGNED-NOT-NOTARIZED.dmg">Download for macOS</a>
+            <a class="button button-secondary" data-secondary-cta href="https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_x64_en-US_UNSIGNED.msi">Download for Windows</a>
           </div>
-          <p class="release-notice" data-release-notice>Development candidates only. Windows packages remain unsigned; check each release for macOS signing status. Keep platform protections enabled.</p>
-          <p class="docs-link"><a href="https://github.com/airwiki/airwiki/blob/main/docs/install.md">Read installation and evaluation guidance</a> before trying a technical beta.</p>
+          <p class="release-notice" data-release-notice>Beta 0.2.0 · Apple silicon / Windows x64. Unsigned for public distribution; macOS is not notarized. Keep platform protections enabled.</p>
+          <p class="docs-link"><a href="https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_x64_es-ES_UNSIGNED.msi">Windows en español</a> · <a href="#download">Requirements and installation help</a></p>
         </div>
         <figure class="knowledge-route" aria-labelledby="route-caption">
           <div class="route-grid" aria-hidden="true">
@@ -78,6 +79,28 @@
         <p><strong>OKF v0.2</strong><span>Open standard introduced by Google Cloud</span></p>
         <p><strong>Local by default</strong><span>No account required</span></p>
         <p><strong>Human review</strong><span>Before search or sharing</span></p>
+      </section>
+
+      <section class="section downloads" id="download" aria-labelledby="download-title">
+        <div class="section-heading">
+          <p class="eyebrow">Free · Open source · Technical beta</p>
+          <h2 id="download-title">Choose your desktop. Download directly.</h2>
+          <p>These buttons download the published 0.2.0 beta directly from GitHub, without an account or sign-up. The screenshots below preview the upcoming 0.3 interface.</p>
+        </div>
+        <div class="download-options">
+          <article>
+            <h3>macOS</h3>
+            <p>Apple silicon · macOS 13 or later<br>DMG · about 50 MB</p>
+            <a class="button button-primary" href="https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_aarch64_UNSIGNED-NOT-NOTARIZED.dmg">Download macOS beta</a>
+          </article>
+          <article>
+            <h3>Windows</h3>
+            <p>Windows 10/11 · x64 with AVX2<br>MSI · about 36 MB</p>
+            <div class="hero-actions"><a class="button button-primary" href="https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_x64_en-US_UNSIGNED.msi">Download Windows · English</a><a href="https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_x64_es-ES_UNSIGNED.msi" lang="es">Descargar en español</a></div>
+          </article>
+        </div>
+        <p class="context-note">This is an unsupported technical beta with manual updates. Windows installers are unsigned; the macOS app is ad-hoc signed and not notarized. Your operating system may block installation. Keep its protections enabled. Local AI assets download separately during setup.</p>
+        <p class="docs-link"><a href="https://github.com/airwiki/airwiki/blob/main/docs/install.md">Installation help</a> · <a href="https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/SHA256SUMS.txt">Checksums</a> · <a href="https://github.com/airwiki/airwiki/releases/tag/v0.2.0-beta.2">Release notes and all files</a> · <a href="https://github.com/airwiki/airwiki">Source code</a></p>
       </section>
 
       <section class="section use-cases" id="use-cases" aria-labelledby="use-cases-title">
@@ -199,7 +222,7 @@
             <source vite-ignore src="/__airwiki-protected/assets/airwiki-demo.mp4" type="video/mp4">
             Your browser cannot play this video. Read the transcript below instead.
           </video>
-          <figcaption id="tour-caption">Ten-second tour of the 0.3 desktop redesign using synthetic acceptance fixtures. Playback is always initiated by the visitor.</figcaption>
+          <figcaption id="tour-caption">Preview of the upcoming 0.3 interface using synthetic fixtures. The current download is beta 0.2.0. Playback is always initiated by the visitor.</figcaption>
         </figure>
         <details class="transcript">
           <summary>Read the product-tour transcript</summary>
@@ -283,8 +306,8 @@
         <h2 id="closing-title">Bring a use case. Build with us.</h2>
         <p>Explore the source or evaluate the technical beta with sample material. Tell us where your team, study group, or coding assistant loses useful context, and help improve that workflow.</p>
         <div class="hero-actions">
-          <a class="button button-primary" data-primary-cta href="https://github.com/airwiki/airwiki">View source</a>
-          <a class="button button-secondary" data-secondary-cta href="https://github.com/airwiki/airwiki/releases">Technical beta for evaluators</a>
+          <a class="button button-primary" href="#download">Download the technical beta</a>
+          <a class="button button-secondary" href="https://github.com/airwiki/airwiki">View source</a>
         </div>
         <p class="closing-feedback"><a href="https://github.com/airwiki/airwiki/blob/main/SUPPORT.md">Share feedback</a> · <a href="https://github.com/airwiki/airwiki/blob/main/CONTRIBUTING.md">Contribute to the project</a></p>
       </section>

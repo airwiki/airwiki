@@ -19,8 +19,10 @@ address, or unsupported product claim.
 
 ## Required preflight
 
-- [ ] Confirm every selected asset reflects the exact stable release; re-capture
-  it if interface, wording, platform behavior, or trust boundaries changed.
+- [ ] Identify the version each selected asset shows. A stable launch uses
+  captures of the exact stable release. An explicitly authorized beta
+  announcement may show an upcoming interface only when the preview version
+  and currently downloadable version are clearly distinguished.
 - [ ] Prepare a gallery sequence that tells one story: create a Wiki from a
   folder, review a proposal, search with visible origins, then explain the
   explicit sharing/AI boundary.

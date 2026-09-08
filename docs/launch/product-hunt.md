@@ -3,9 +3,10 @@
 This copy describes the current technical beta and can be saved in the existing
 Product Hunt draft. Saving a draft does not schedule or publish a launch, approve
 a release, or change the [launch gates](README.md#launch-gates). The repository's
-current general-launch policy requires a supported stable release. An owner
-choosing a beta announcement must make that separate launch decision explicitly;
-never silently remove the beta label to fit a launch date.
+stable-launch policy requires a supported stable release. The owner has explicitly
+authorized a technical-beta announcement for September 9, 2026, with refreshed
+branding, preview media, and direct downloads. Preserve the beta label and the
+distinction between the public 0.2.0 binary and upcoming 0.3 interface.
 
 Product Hunt's [official guidance on unreleased products](https://help.producthunt.com/en/articles/484932-can-i-submit-an-unreleased-product)
 prioritizes products people can try and leaves pre-launch inclusion to its
@@ -88,10 +89,14 @@ topics, if available in the form: Open Source, Productivity, and Developer Tools
 > Read the open specification: https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md
 >
 > **Current stage: open-source desktop technical beta, not a supported stable
-> release.** There are macOS and Windows evaluation candidates. Windows packages
-> are unsigned; check the exact release for macOS signing and notarization.
+> release.** Download v0.2.0-beta.2 for Apple silicon Macs or Windows x64.
+> Windows packages are unsigned; the macOS app is ad-hoc signed and not notarized.
+> Keep platform protections enabled. The gallery previews the upcoming 0.3
+> interface with synthetic data; it is not the current downloadable binary.
 > Public federation is experimental, with no supported always-on relay service.
 > Private sharing uses LAN devices; there is no SSO or cloud sync.
+>
+> Download the technical beta: https://github.com/airwiki/airwiki/releases/tag/v0.2.0-beta.2
 >
 > We'd love developers, students, and people who manage team knowledge to try
 > one workflow with sample material and help shape it. What context do you keep
@@ -107,6 +112,12 @@ field. Do not post it into a public discussion just to save it. Before a stable
 launch, replace the current-stage paragraph only with verified release facts.
 
 ## Gallery story
+
+The September 2026 beta announcement uses the current W essential app icon and
+four unmodified synthetic screenshots: reader, AI apps, search sources, and
+review flow. The maker comment identifies them as the upcoming 0.3 interface;
+the downloadable public package is still 0.2.0. Do not imply the new interface
+ships in that older binary.
 
 Use the [existing synthetic product images](asset-checklist.md#existing-repository-assets).
 Order the gallery around the value before explaining the controls. Captions must

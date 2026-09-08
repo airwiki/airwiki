@@ -50,6 +50,7 @@
           <p class="eyebrow">Team docs. Study notes. Project decisions.</p>
           <h1 id="hero-title">Turn your docs into <em>knowledge people and AI can use.</em></h1>
           <p class="lede">Help colleagues find answers across teams. Share your study notes with other students. Give your coding assistant lasting project context. AirWiki makes it searchable, with you in control of access.</p>
+          <p class="format-note">Built on <a href="#open-format">Open Knowledge Format (OKF)</a>, the open standard introduced by Google Cloud.</p>
           <p class="audience-links"><a href="#teams">For teams</a><a href="#students">For students</a><a href="#developers">For developers</a></p>
           <div class="hero-actions">
             <a class="button button-primary" data-primary-cta href="https://github.com/airwiki/airwiki">View source</a>
@@ -74,7 +75,7 @@
 
       <section class="proof-band" aria-label="Product facts">
         <p><strong>Apache-2.0</strong><span>Open source</span></p>
-        <p><strong>AI apps via MCP</strong><span>Context on demand</span></p>
+        <p><strong>OKF v0.2</strong><span>Open standard introduced by Google Cloud</span></p>
         <p><strong>Local by default</strong><span>No account required</span></p>
         <p><strong>Human review</strong><span>Before search or sharing</span></p>
       </section>
@@ -142,6 +143,18 @@
           <li><strong>Access you choose.</strong> AI-app permissions, private sharing, and public publication have separate controls.</li>
         </ul>
         <p class="context-note">AirWiki prepares and searches knowledge locally. A connected cloud AI provider may process evidence its app receives. This is retrievable context, not model training or a measured claim of token savings.</p>
+        <article class="format-panel" id="open-format" aria-labelledby="open-format-title">
+          <p class="eyebrow">An open foundation · OKF v0.2</p>
+          <h3 id="open-format-title">Your knowledge, in a format you can inspect and take with you.</h3>
+          <p>AirWiki uses <strong>Open Knowledge Format (OKF)</strong>, an open specification introduced by Google Cloud for knowledge that people and AI agents can read. It gives your team docs, study notes, and project decisions a common structure, independent of a particular AI model or cloud provider.</p>
+          <ul class="context-list">
+            <li><strong>Readable files.</strong> Markdown pages and structured YAML metadata let you inspect the knowledge in a text editor and review changes in Git.</li>
+            <li><strong>Portable knowledge.</strong> Export an OKF Wiki and reuse its files with compatible tools, keeping concepts and their relationships together.</li>
+            <li><strong>Traceable context.</strong> OKF v0.2 records provenance, verification, and freshness metadata so you can inspect where knowledge came from and how it was reviewed.</li>
+          </ul>
+          <p class="format-links"><a href="https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing/">Google Cloud's introduction <span aria-hidden="true">↗</span></a><a href="https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md">Read the open specification <span aria-hidden="true">↗</span></a></p>
+          <p class="context-note">AirWiki is an independent implementation. <a href="https://github.com/airwiki/airwiki/blob/main/docs/okf-v02-profile.md">See AirWiki's OKF v0.2 compatibility profile</a>.</p>
+        </article>
       </section>
 
       <section class="section workflow" id="how-it-works" aria-labelledby="workflow-title">

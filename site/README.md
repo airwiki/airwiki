@@ -28,6 +28,13 @@ evidence retrieved through MCP. Do not invent customer stories, token savings,
 answer-quality measurements, or always-on network availability. The final call
 to action invites sample-data evaluation, feedback, and contributions.
 
+Make the open foundation visible in the hero, product facts, and OKF explanation.
+Attribute Open Knowledge Format to its [Google Cloud introduction](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing/)
+and link the [open specification](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md).
+Explain readable files, portability, and provenance using the supported
+[AirWiki OKF v0.2 profile](../docs/okf-v02-profile.md). AirWiki is an independent
+implementation; adopting the format is not Google certification or endorsement.
+
 ## Local preview
 
 Run `pnpm dev` for the source page. Run `pnpm build && pnpm preview` to inspect
@@ -42,6 +49,8 @@ The documentation links deliberately use absolute GitHub `main` URLs. No
 browser request is made for analytics, cookies, web fonts, CDNs, forms, or
 third-party scripts. Links to GitHub source, documentation, Releases, and
 privacy information are intentional visitor-initiated destinations.
+The Google Cloud announcement is also an intentional outbound link, included
+in the Pages verifier's origin allowlist to substantiate the OKF attribution.
 
 ## Release state
 

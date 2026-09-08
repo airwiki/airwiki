@@ -23,6 +23,7 @@ const expectedAssets = [
 const allowedRemoteOrigins = new Set([
   "https://github.com",
   "https://docs.github.com",
+  "https://cloud.google.com",
 ]);
 const scriptFiles = ["launch-config.js", "app.js"];
 const activeFiles = [...scriptFiles, "styles.css"];

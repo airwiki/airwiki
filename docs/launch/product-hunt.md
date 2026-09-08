@@ -1,58 +1,152 @@
 # Product Hunt launch
 
-Use this page only for a supported stable release. Product Hunt is a discovery
-channel for a usable product, not a way to turn an unsupported technical
-pre-release into a public support promise. Re-check the current [Product Hunt
-launch guidance](https://www.producthunt.com/launch) and submission interface
-before creating anything; their requirements and asset formats can change.
+This copy describes the current technical beta and can be saved in the existing
+Product Hunt draft. Saving a draft does not schedule or publish a launch, approve
+a release, or change the [launch gates](README.md#launch-gates). The repository's
+stable-launch policy requires a supported stable release. The owner has explicitly
+authorized a technical-beta announcement for September 9, 2026, with refreshed
+branding, media, and direct downloads of the latest **0.3 beta**. The 0.3
+packages are not published yet; do not substitute 0.2 downloads or schedule the
+launch before the exact 0.3 assets and their installation status are verified.
+
+Product Hunt's [official guidance on unreleased products](https://help.producthunt.com/en/articles/484932-can-i-submit-an-unreleased-product)
+prioritizes products people can try and leaves pre-launch inclusion to its
+discretion. It does not impose AirWiki's internal stable-release policy. Re-check
+the [launch guidance](https://www.producthunt.com/launch/preparing-for-launch)
+and live submission interface before submitting; the live form takes precedence
+for fields and media requirements.
+
+## Message
+
+Lead with reusable knowledge for people and AI. Show three concrete situations:
+finding another team's expertise, sharing a study explanation, and carrying
+repository decisions into the next AI session. These are illustrative workflows,
+not testimonials, measured outcomes, or production deployments. Explain AI
+readiness as structured concepts and relevant evidence retrieved through MCP;
+do not claim model training, token savings, or improved answer accuracy.
+Name Open Knowledge Format (OKF) as the open standard introduced by Google Cloud.
+Explain AirWiki's independent OKF v0.2 implementation through readable files,
+portability, and traceable context; adoption is not certification or endorsement.
+Keep the attribution aligned with the [landing's sources](../../site/README.md#editorial-focus)
+and the [OKF compatibility profile](../okf-v02-profile.md).
 
 ## Ready copy
 
 ### Tagline
 
-> A private, reviewable wiki for local knowledge
+> Turn your docs into knowledge people and AI can use
 
 ### Description
 
-> AirWiki turns folders and OKF bundles into a private, reviewable wiki.
-> Knowledge stays on the device that owns it by default, and people decide
-> before sharing it or connecting it to AI apps.
+> Turn team docs, study notes, and repository decisions into knowledge people and AI can use. Built on Open Knowledge Format (OKF), the open standard introduced by Google Cloud. Share reviewed wikis with authorized colleagues on a private LAN, publish your own notes to an experimental public network, or give coding assistants project memory via MCP. Open source, private by default, with separate sharing and AI controls. Desktop technical beta for macOS and Windows; no supported stable release yet.
+
+### Links
+
+- Main destination: <https://airwiki.github.io/airwiki/>
+- Source: <https://github.com/airwiki/airwiki>
+- Evaluation builds, clearly labelled technical pre-releases:
+  <https://github.com/airwiki/airwiki/releases>
+
+Use **AirWiki** as the name. The current form allows 60 characters for the tagline
+and 500 for the description; paste each quoted field as one paragraph. Suggested
+topics, if available in the form: Open Source, Productivity, and Developer Tools.
 
 ### Maker comment
 
-> Hi Product Hunt — we are building AirWiki for people who want to turn the
-> knowledge they already have into a useful wiki without sending every document
-> to a central service.
+> Hi Product Hunt! We're building AirWiki because useful knowledge often gets
+> stuck in a folder or an old conversation. The next person, or their AI
+> assistant, has to start from scratch to find the same explanation.
 >
-> You can start from a folder or an OKF bundle, review proposed knowledge before
-> it becomes searchable, and keep sharing separate from AI-app access. Local,
-> nearby, and public results remain visibly distinct, and public search is off
-> for each connected app until a person enables it.
+> AirWiki turns that material into searchable wikis. Here are three workflows
+> we're building it for:
 >
-> We would especially value feedback on the first wiki you create, the review
-> flow, and where the privacy boundaries need to be clearer. Please avoid
-> posting private documents, logs, or credentials in public comments. For a
-> security issue, use our private reporting path instead: [SECURITY REPORTING
-> URL — verify from SECURITY.md at launch].
+> **Teams:** support needs to know how engineering recovers a failed import.
+> Engineering shares a reviewed troubleshooting Wiki with verified colleagues
+> on the local network. They can find the explanation themselves; connected
+> assistants can retrieve evidence when the source owner permits that AI access.
 >
-> Stable download: [STABLE RELEASE URL — insert only after final verification]
-> Version: [STABLE VERSION]
-> Supported desktop platforms: [VERIFIED PLATFORM LIST]
+> **Students:** your notes finally make database normalization click. Turn them
+> into a reviewed Wiki and choose to publish it to the experimental public
+> network, so classmates and other students studying the topic can discover it.
+> Share only material you have the right to publish. Publishers must be reachable,
+> and public readers can retain what you share.
+>
+> **Developers:** keep architecture decisions and project conventions in a
+> portable `.airwiki` Wiki beside your code. Authorized tools such as Codex,
+> Claude Code, and Gemini CLI can consult it in later tasks, so you spend less
+> effort rebuilding context in every conversation. You review the files and
+> decide what enters Git; AirWiki never commits or pushes.
+>
+> For AI tools, the value is context they can look up: structured concepts,
+> relationships, and relevant passages with source references through MCP.
+> Preparation and retrieval run locally. A connected cloud AI provider may
+> process evidence its app receives; sharing and AI access are separate choices.
+>
+> **Built on an open standard:** AirWiki uses Open Knowledge Format (OKF),
+> introduced by Google Cloud. Our independent OKF v0.2 implementation keeps
+> knowledge in readable Markdown files with structured metadata for provenance,
+> verification, and freshness. You can inspect the files, review changes in Git,
+> and export your Wiki for reuse with compatible tools.
+> Read the open specification: https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md
+>
+> **Current stage: open-source desktop technical beta, not a supported stable
+> release.** We're preparing the 0.3 beta for Apple silicon Macs and Windows x64.
+> The gallery shows its interface with synthetic data. The 0.3 installers are
+> not available yet; the older 0.2 pre-releases do not contain this interface.
+> Public federation is experimental, with no supported always-on relay service.
+> Private sharing uses LAN devices; there is no SSO or cloud sync.
+>
+> We'd love developers, students, and people who manage team knowledge to try
+> one workflow with sample material and help shape it. What context do you keep
+> having to explain again, and where would a shared Wiki help? Feedback,
+> documentation, and code contributions are welcome.
+>
+> Explore AirWiki: https://airwiki.github.io/airwiki/
+> Feedback: https://github.com/airwiki/airwiki/blob/main/SUPPORT.md
+> Report security concerns privately: https://github.com/airwiki/airwiki/security/advisories/new
 
-The final three lines are intentionally markers. Remove them rather than guessing
-if the stable release has not been verified.
+Keep this as prepared copy if the edit form does not expose a maker-comment
+field. Do not post it into a public discussion just to save it. Before scheduling
+the 0.3 beta launch, replace the preparation paragraph with the verified package
+version, direct downloads, and platform signing/notarization facts.
+
+## Gallery story
+
+The September 2026 beta announcement uses the current W essential app icon and
+four unmodified synthetic screenshots: reader, AI apps, search sources, and
+review flow. They show the 0.3 interface. Confirm that the launch packages
+contain that interface before scheduling; older 0.2 packages are not a substitute.
+
+Use the [existing synthetic product images](asset-checklist.md#existing-repository-assets).
+Order the gallery around the value before explaining the controls. Captions must
+describe the actual image; these headlines are editorial framing, not claims
+that a screenshot proves a live sharing session:
+
+| Frame | Headline | Image and supporting caption |
+| --- | --- | --- |
+| Cover | Knowledge for people and AI | Reader: reviewed concepts in a portable Wiki. |
+| Teams | Find the expertise another team already has | Search origins: local, authorized nearby, and public results remain distinguishable. |
+| Students | Let your explanation help the next class | Reader: an example study Wiki; public discovery is experimental and opt-in. Use a new synthetic study capture if the current image does not show study content. |
+| Developers | Carry project context into the next AI session | AI-app access: compatible assistants retrieve permitted knowledge through MCP. |
+| Control | Review it. Choose who can use it. | Review flow: compare source evidence with a proposal before approving it. |
+
+Do not label the existing ten-second interface montage as an end-to-end demo of
+these scenarios. The live form currently accepts YouTube or Loom video links;
+do not upload or publish a video on another service merely to fill that field.
 
 ## Submission checklist
 
-- [ ] The stable-release gates in [the launch index](README.md#launch-gates)
-  have passed.
+- [ ] The launch owner has settled the launch scope. A stable launch requires
+  the gates in [the launch index](README.md#launch-gates); preparing or saving
+  the current beta draft does not satisfy or waive them.
 - [ ] The maker profile is the individual human who will monitor replies, not a
   company profile, shared credential, or invented persona. No account, OAuth
   permission, or scheduled launch has been created as part of this document.
 - [ ] The title, tagline, description, gallery, demo, and maker comment reflect
-  the exact released version and supported platforms.
-- [ ] The primary call to action is the verified stable release URL, not a
-  technical pre-release, source checkout, or unverified mirror.
+  the exact candidate or release, including platform and experimental limits.
+- [ ] The destination gives readers an accurate next step. The beta draft points
+  to the informational landing and source; a stable-download CTA requires the
+  verified stable release URL.
 - [ ] The listing names material limits: desktop-only support, opt-in sharing,
   and the distinction between local, nearby, and public knowledge where
   relevant.

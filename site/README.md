@@ -1,9 +1,9 @@
 # AirWiki launch landing
 
 This directory contains the official static landing for AirWiki. The page is a
-public, informational technical-beta surface: it links to source and explicitly
-labelled evaluator builds, but it is not a supported web application, stable
-download channel, account service, or release approval.
+public, informational technical-beta surface: it introduces the upcoming 0.3
+beta and links to its source, but it is not a supported web
+application, stable download channel, account service, or release approval.
 
 The source intentionally produces two separate artifacts:
 
@@ -13,6 +13,27 @@ The source intentionally produces two separate artifacts:
   <https://airwiki.github.io/airwiki/> by GitHub Actions from `main`.
 
 Neither artifact changes the desktop product's release state.
+
+## Editorial focus
+
+The hero and first section explain reusable knowledge for people and AI through
+three illustrative workflows: private knowledge sharing across teams on a LAN,
+student explanations in experimental public discovery, and portable repository
+memory for coding assistants. Each pairs a concrete question with the benefit
+and current limits. Keep these aligned with the root README and
+[`docs/launch/product-hunt.md`](../docs/launch/product-hunt.md).
+
+Explain AI readiness through structured concepts, provenance, and relevant
+evidence retrieved through MCP. Do not invent customer stories, token savings,
+answer-quality measurements, or always-on network availability. The final call
+to action invites sample-data evaluation, feedback, and contributions.
+
+Make the open foundation visible in the hero, product facts, and OKF explanation.
+Attribute Open Knowledge Format to its [Google Cloud introduction](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing/)
+and link the [open specification](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md).
+Explain readable files, portability, and provenance using the supported
+[AirWiki OKF v0.2 profile](../docs/okf-v02-profile.md). AirWiki is an independent
+implementation; adopting the format is not Google certification or endorsement.
 
 ## Local preview
 
@@ -28,17 +49,29 @@ The documentation links deliberately use absolute GitHub `main` URLs. No
 browser request is made for analytics, cookies, web fonts, CDNs, forms, or
 third-party scripts. Links to GitHub source, documentation, Releases, and
 privacy information are intentional visitor-initiated destinations.
+The Google Cloud announcement is also an intentional outbound link, included
+in the Pages verifier's origin allowlist to substantiate the OKF attribution.
 
 ## Release state
 
-`launch-config.js` is the only release-state switch. It is set to
-`technical-beta` and intentionally makes **View source** the primary action.
-The secondary action leads to technical pre-releases for evaluators and repeats
-the Windows unsigned warning and the need to check each release’s macOS signing
-status. A platform RC may contain a notarized Mac installer while Windows remains
-a technical beta; it does not change this landing’s stable-release gate.
+`launch-config.js` keeps the `technical-beta` release state. The launch targets
+**0.3 beta**, including the current interface shown in the gallery and tour.
+Until its packages are published, the hero points to the platform information
+and source; it must not substitute an older 0.2 installer for this launch.
 
-Do not replace the primary action with a download link until all of the
+The owner has authorized direct beta downloads and a beta announcement; neither
+promotes the packages to stable. Once the exact 0.3 installers are published,
+replace the informational CTAs with direct macOS and Windows downloads. Add the
+Spanish Windows installer, requirements, release notes, checksums, installation
+help, and each package's verified signing/notarization status. Do not infer the
+status or filename from another release.
+
+Keep configuration, HTML fallbacks, README links, and the installation guide
+aligned with the exact public release assets. Verify those assets before
+changing their URLs; links must also work without JavaScript. Do not select a
+platform automatically or require an account, signup, or intermediary page.
+
+Do not label any download as a supported stable release until all of the
 following are true:
 
 1. The public-release checklist has passed, including signing, notarization,

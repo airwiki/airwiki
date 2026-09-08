@@ -1,17 +1,17 @@
 /*
- * Download links identify the exact published technical beta. Updating these
- * links does not promote a candidate to stable or enable the updater.
+ * The launch targets 0.3 beta. Replace the informational CTAs only after the
+ * exact 0.3 installers are published and anonymously downloadable.
  */
 window.AIRWIKI_LAUNCH = {
   releaseState: "technical-beta",
   primaryCta: {
-    label: "Download for macOS",
-    href: "https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_aarch64_UNSIGNED-NOT-NOTARIZED.dmg",
+    label: "Explore the 0.3 beta",
+    href: "#download",
   },
   secondaryCta: {
-    label: "Download for Windows",
-    href: "https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_x64_en-US_UNSIGNED.msi",
+    label: "View source",
+    href: "https://github.com/airwiki/airwiki",
     notice:
-      "Beta 0.2.0 · Apple silicon / Windows x64. Unsigned for public distribution; macOS is not notarized. Keep platform protections enabled.",
+      "Beta 0.3 · macOS and Windows installers are being prepared. No supported stable release or automatic updates yet.",
   },
 };

@@ -17,7 +17,8 @@ use only the signed installers on the
 
 ## Before installing
 
-For the current **v0.2.0-beta.2** technical pre-release, these links download the
+The **0.3 beta launch installers are not published yet**. The links below are
+for the older **v0.2.0-beta.2** technical pre-release, and download the
 installer directly without a GitHub account:
 
 - [macOS DMG](https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_aarch64_UNSIGNED-NOT-NOTARIZED.dmg): Apple silicon, macOS 13+; ad-hoc signed, not notarized.

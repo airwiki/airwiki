@@ -5,8 +5,9 @@ Product Hunt draft. Saving a draft does not schedule or publish a launch, approv
 a release, or change the [launch gates](README.md#launch-gates). The repository's
 stable-launch policy requires a supported stable release. The owner has explicitly
 authorized a technical-beta announcement for September 9, 2026, with refreshed
-branding, preview media, and direct downloads. Preserve the beta label and the
-distinction between the public 0.2.0 binary and upcoming 0.3 interface.
+branding, media, and direct downloads of the latest **0.3 beta**. The 0.3
+packages are not published yet; do not substitute 0.2 downloads or schedule the
+launch before the exact 0.3 assets and their installation status are verified.
 
 Product Hunt's [official guidance on unreleased products](https://help.producthunt.com/en/articles/484932-can-i-submit-an-unreleased-product)
 prioritizes products people can try and leaves pre-launch inclusion to its
@@ -89,14 +90,11 @@ topics, if available in the form: Open Source, Productivity, and Developer Tools
 > Read the open specification: https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md
 >
 > **Current stage: open-source desktop technical beta, not a supported stable
-> release.** Download v0.2.0-beta.2 for Apple silicon Macs or Windows x64.
-> Windows packages are unsigned; the macOS app is ad-hoc signed and not notarized.
-> Keep platform protections enabled. The gallery previews the upcoming 0.3
-> interface with synthetic data; it is not the current downloadable binary.
+> release.** We're preparing the 0.3 beta for Apple silicon Macs and Windows x64.
+> The gallery shows its interface with synthetic data. The 0.3 installers are
+> not available yet; the older 0.2 pre-releases do not contain this interface.
 > Public federation is experimental, with no supported always-on relay service.
 > Private sharing uses LAN devices; there is no SSO or cloud sync.
->
-> Download the technical beta: https://github.com/airwiki/airwiki/releases/tag/v0.2.0-beta.2
 >
 > We'd love developers, students, and people who manage team knowledge to try
 > one workflow with sample material and help shape it. What context do you keep
@@ -108,16 +106,16 @@ topics, if available in the form: Open Source, Productivity, and Developer Tools
 > Report security concerns privately: https://github.com/airwiki/airwiki/security/advisories/new
 
 Keep this as prepared copy if the edit form does not expose a maker-comment
-field. Do not post it into a public discussion just to save it. Before a stable
-launch, replace the current-stage paragraph only with verified release facts.
+field. Do not post it into a public discussion just to save it. Before scheduling
+the 0.3 beta launch, replace the preparation paragraph with the verified package
+version, direct downloads, and platform signing/notarization facts.
 
 ## Gallery story
 
 The September 2026 beta announcement uses the current W essential app icon and
 four unmodified synthetic screenshots: reader, AI apps, search sources, and
-review flow. The maker comment identifies them as the upcoming 0.3 interface;
-the downloadable public package is still 0.2.0. Do not imply the new interface
-ships in that older binary.
+review flow. They show the 0.3 interface. Confirm that the launch packages
+contain that interface before scheduling; older 0.2 packages are not a substitute.
 
 Use the [existing synthetic product images](asset-checklist.md#existing-repository-assets).
 Order the gallery around the value before explaining the controls. Captions must

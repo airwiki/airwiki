@@ -28,23 +28,23 @@
 AirWiki is an open-source desktop app for turning team documentation, study notes, and project decisions into searchable wikis. Help colleagues find another department's knowledge, let classmates learn from notes you choose to publish, or give a coding assistant the context behind your repository. Start from folders, [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundles, or authorized assistant memory. Your knowledge is private by default; you choose who can use it.
 
 > [!IMPORTANT]
-> AirWiki is a technical beta, with no supported stable release or automatic updates. The current 0.2.0 installers are unsigned for public distribution; macOS is not notarized. Keep platform protections enabled and read the [installation guide](docs/install.md) if your system blocks the candidate.
+> AirWiki 0.3 is a technical beta, with no supported stable release or automatic updates. Its launch installers are being prepared and are not yet available. The older 0.2 pre-releases do not contain the interface shown below.
 
 ## Download AirWiki
 
-**Current download: [v0.2.0-beta.2](https://github.com/airwiki/airwiki/releases/tag/v0.2.0-beta.2).**
-Download the installer directly; no GitHub account or source build is needed.
+**Launch version: 0.3 beta.** The macOS and Windows installers are being validated.
+Direct downloads will appear here when the exact 0.3 packages are published;
+no GitHub account or source build will be required to download them.
 
-| Platform | Direct download | Requirements |
+| Platform | 0.3 package | Requirements |
 | --- | --- | --- |
-| macOS | [Download DMG · 50 MB](https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_aarch64_UNSIGNED-NOT-NOTARIZED.dmg) | Apple silicon, macOS 13+ |
-| Windows · English | [Download MSI · 36 MB](https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_x64_en-US_UNSIGNED.msi) | Windows 10/11 x64, AVX2 |
-| Windows · Español | [Descargar MSI · 36 MB](https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/AirWiki_0.2.0_x64_es-ES_UNSIGNED.msi) | Windows 10/11 x64, AVX2 |
+| macOS | DMG · publication pending | Apple silicon, macOS 13+ |
+| Windows · English / Español | MSI · publication pending | Windows 10/11 x64, AVX2 |
 
-[Installation help](docs/install.md) · [Checksums](https://github.com/airwiki/airwiki/releases/download/v0.2.0-beta.2/SHA256SUMS.txt) · [Release notes and all files](https://github.com/airwiki/airwiki/releases/tag/v0.2.0-beta.2)
+[0.3 changes and upgrade guidance](docs/releases/0.3.0.md) · [Installation help](docs/install.md) · [Release history](https://github.com/airwiki/airwiki/releases) · [Run from source](#run-from-source)
 
-The screenshots and tour preview the upcoming **0.3 interface**. The current
-download is **0.2.0 beta**. Local AI assets download separately during setup.
+The screenshots and tour show the **0.3 interface** with synthetic data.
+Local AI assets download separately during setup.
 
 <p align="center">
   <a href="docs/assets/airwiki-demo.mp4">

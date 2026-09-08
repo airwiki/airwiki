@@ -1,8 +1,8 @@
 # AirWiki launch landing
 
 This directory contains the official static landing for AirWiki. The page is a
-public, informational technical-beta surface: it offers direct downloads of
-explicitly labelled evaluator builds and source, but it is not a supported web
+public, informational technical-beta surface: it introduces the upcoming 0.3
+beta and links to its source, but it is not a supported web
 application, stable download channel, account service, or release approval.
 
 The source intentionally produces two separate artifacts:
@@ -54,14 +54,17 @@ in the Pages verifier's origin allowlist to substantiate the OKF attribution.
 
 ## Release state
 
-`launch-config.js` keeps the `technical-beta` release state and identifies the
-exact published installers. The hero offers direct macOS and Windows downloads;
-the download section adds the Spanish Windows installer, requirements, release
-notes, checksums, and installation help. Source remains accessible in the header.
+`launch-config.js` keeps the `technical-beta` release state. The launch targets
+**0.3 beta**, including the current interface shown in the gallery and tour.
+Until its packages are published, the hero points to the platform information
+and source; it must not substitute an older 0.2 installer for this launch.
+
 The owner has authorized direct beta downloads and a beta announcement; neither
-promotes the packages to stable. The current links target `v0.2.0-beta.2` and
-state that Windows is unsigned and macOS is not notarized. The gallery and tour
-explicitly preview the upcoming 0.3 interface.
+promotes the packages to stable. Once the exact 0.3 installers are published,
+replace the informational CTAs with direct macOS and Windows downloads. Add the
+Spanish Windows installer, requirements, release notes, checksums, installation
+help, and each package's verified signing/notarization status. Do not infer the
+status or filename from another release.
 
 Keep configuration, HTML fallbacks, README links, and the installation guide
 aligned with the exact public release assets. Verify those assets before

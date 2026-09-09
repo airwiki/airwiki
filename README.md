@@ -32,15 +32,15 @@ AirWiki is an open-source desktop app for turning team documentation, study note
 
 ## Download AirWiki
 
-**Download the 0.3 beta (`v0.3.0-rc.1`).** These links download the installers
+**Download the 0.3 beta (`v0.3.0-rc.2`).** These links download the installers
 directly; no GitHub account, signup or source build is required.
 
 | Platform | 0.3 package | Requirements |
 | --- | --- | --- |
-| macOS | [Download DMG](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/AirWiki_0.3.0_aarch64_SIGNED-NOTARIZED-RC.dmg) · signed and notarized | Apple silicon, macOS 13+ |
-| Windows | [Download MSI in English](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/AirWiki_0.3.0_x64_en-US_UNSIGNED-BETA.msi) · [Descargar en español](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/AirWiki_0.3.0_x64_es-ES_UNSIGNED-BETA.msi) · unsigned | Windows 10/11 x64, AVX2 |
+| macOS | [Download DMG](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.2/AirWiki_0.3.0_aarch64_SIGNED-NOTARIZED-RC.dmg) · signed and notarized | Apple silicon, macOS 13+ |
+| Windows | [Download MSI in English](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.2/AirWiki_0.3.0_x64_en-US_UNSIGNED-BETA.msi) · [Descargar en español](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.2/AirWiki_0.3.0_x64_es-ES_UNSIGNED-BETA.msi) · unsigned | Windows 10/11 x64, AVX2 |
 
-[Release notes](https://github.com/airwiki/airwiki/releases/tag/v0.3.0-rc.1) · [Checksums](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/SHA256SUMS.txt) · [0.3 changes and upgrade guidance](docs/releases/0.3.0.md) · [Installation help](docs/install.md) · [Run from source](#run-from-source)
+[Release notes](https://github.com/airwiki/airwiki/releases/tag/v0.3.0-rc.2) · [Checksums](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.2/SHA256SUMS.txt) · [0.3 changes and upgrade guidance](docs/releases/0.3.0.md) · [Installation help](docs/install.md) · [Run from source](#run-from-source)
 
 The screenshots and tour show the **0.3 interface** with synthetic data.
 Local AI assets download separately during setup.
@@ -308,6 +308,6 @@ AirWiki does not currently provide OCR, DOCX ingestion, image/audio/video proces
 
 ## License
 
-AirWiki is open source under the [Apache License 2.0](LICENSE). The current public technical beta is unsigned or unnotarized. The selected SignPath Foundation route for future Windows stable signing is inactive until provider acceptance, protected configuration, a separate manual approval, and installed acceptance pass. The stable Tauri updater will use one confirmed channel hosted on GitHub Releases, whose assets remain independently signed and verified. See the [Code signing policy](docs/code-signing-policy.md).
+AirWiki is open source under the [Apache License 2.0](LICENSE). The public Windows technical beta remains unsigned. The selected SignPath Foundation route for future Windows stable signing is inactive until provider acceptance, protected configuration, a separate manual approval, and installed acceptance pass. The stable Tauri updater will use one confirmed channel hosted on GitHub Releases, whose assets remain independently signed and verified. See the [Code signing policy](docs/code-signing-policy.md).
 
 ChatGPT, Codex, Claude, and Gemini names and marks belong to OpenAI, Anthropic, and Google respectively. AirWiki uses their official artwork only to identify optional integrations; this does not imply sponsorship or endorsement. See [third-party notices](THIRD_PARTY_NOTICES.md).

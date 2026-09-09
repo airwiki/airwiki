@@ -9,6 +9,13 @@ reading-focused redesign. Candidate highlights and upgrade guidance live in
 [the 0.3 notes](docs/releases/0.3.0.md); this heading remains unreleased until
 publication completes.
 
+- Detect Windows AI applications installed through MSIX, native installers or
+  npm, including tools added to the saved Windows PATH after AirWiki started.
+  Configure Codex/ChatGPT MSIX through its shared user TOML file when no external
+  CLI is present, so Windows package execution restrictions do not block setup.
+  Resolve npm entry points through Node.js and keep missing-runtime or blocked
+  inventory errors distinct from an application that is not installed.
+
 - Handle empty Windows installer registration results during the release
   install/uninstall smoke, while preserving rejection of existing installations
   and manual cleanup when registrations remain after uninstall.

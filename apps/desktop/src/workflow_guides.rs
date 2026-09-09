@@ -948,7 +948,7 @@ fn nearest_existing_ancestor(path: &Path) -> Result<PathBuf> {
     }
 }
 
-fn ensure_path_has_no_links(path: &Path) -> Result<()> {
+pub(crate) fn ensure_path_has_no_links(path: &Path) -> Result<()> {
     ensure!(path.is_absolute(), "la ruta administrada no es absoluta");
     let mut current = PathBuf::new();
     for component in path.components() {

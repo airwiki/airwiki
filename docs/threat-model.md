@@ -49,6 +49,26 @@ Controls are not considered effective end to end until the
    become subject to that account or workspace policy.
 7. **Desktop → operating system.** Tray, per-user autostart, and single-instance
    activation remain inside the user session; OS state is authoritative.
+   Windows AI-client discovery reads current-user package metadata and saved
+   PATH through a fixed, bounded, no-profile PowerShell query. Filesystem probes
+   run on the blocking worker; relative and network targets are not selected.
+   npm clients run through local Node.js with separate arguments and a bounded
+   package manifest whose entry point must remain inside the package. AirWiki
+   never evaluates a batch shim, installs a client, elevates discovery, or grants
+   Wiki access merely because an application was detected. Installed executables
+   remain trusted code of the signed-in OS account, as with existing CLI probes.
+   A registered Codex/ChatGPT MSIX installation without an external CLI uses
+   the documented user TOML file after the existing connection confirmation;
+   AirWiki does not execute protected package binaries. Only the managed
+   `mcp_servers.airwiki` entry may change. Parsing is bounded, diagnostics omit
+   configuration content, linked/nonlocal paths and ambiguous entries fail
+   closed, and an observed concurrent edit aborts replacement. Native Windows
+   `CopyFileW`/`ReplaceFileW` preserve file security attributes; ACL/merge errors
+   are never ignored. The narrow unsafe wrappers own their NUL-terminated
+   buffers for each synchronous call on the blocking worker. A replacement
+   failure preserves its backup for human recovery. Same-user malicious races
+   remain outside the local isolation boundary; the final read must confirm
+   the intended entry before connection can report success.
 8. **Desktop → elevated Windows helper.** The helper accepts only `install` or
    `remove` and owns two narrow application rules, as defined by
    [ADR 0006](adr/0006-windows-firewall-privilege-boundary.md).

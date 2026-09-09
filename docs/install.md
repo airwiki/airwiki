@@ -17,12 +17,12 @@ use only the signed installers on the
 
 ## Before installing
 
-The **0.3 beta (`v0.3.0-rc.1`)** installers are available as direct downloads,
+The **0.3 beta (`v0.3.0-rc.2`)** installers are available as direct downloads,
 without a GitHub account:
 
-- [macOS DMG](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/AirWiki_0.3.0_aarch64_SIGNED-NOTARIZED-RC.dmg): Apple silicon, macOS 13+; Developer ID signed and notarized.
-- [Windows MSI in English](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/AirWiki_0.3.0_x64_en-US_UNSIGNED-BETA.msi) or [Español](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/AirWiki_0.3.0_x64_es-ES_UNSIGNED-BETA.msi): Windows 10/11 x64 with AVX2; unsigned technical beta.
-- [Release notes](https://github.com/airwiki/airwiki/releases/tag/v0.3.0-rc.1) and [SHA-256 checksums](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.1/SHA256SUMS.txt).
+- [macOS DMG](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.2/AirWiki_0.3.0_aarch64_SIGNED-NOTARIZED-RC.dmg): Apple silicon, macOS 13+; Developer ID signed and notarized.
+- [Windows MSI in English](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.2/AirWiki_0.3.0_x64_en-US_UNSIGNED-BETA.msi) or [Español](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.2/AirWiki_0.3.0_x64_es-ES_UNSIGNED-BETA.msi): Windows 10/11 x64 with AVX2; unsigned technical beta.
+- [Release notes](https://github.com/airwiki/airwiki/releases/tag/v0.3.0-rc.2) and [SHA-256 checksums](https://github.com/airwiki/airwiki/releases/download/v0.3.0-rc.2/SHA256SUMS.txt).
 
 These packages contain the 0.3 interface shown in the current media. Follow the
 [platform release candidate](#platform-release-candidate) verification below;

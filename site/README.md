@@ -57,7 +57,7 @@ in the Pages verifier's origin allowlist to substantiate the OKF attribution.
 `launch-config.js` keeps the `technical-beta` release state. The launch targets
 **0.3 beta**, including the current interface shown in the gallery and tour.
 The hero and platform section link directly to the verified public assets of
-`v0.3.0-rc.1`; they must not substitute an older 0.2 installer for this launch.
+`v0.3.0-rc.2`; they must not substitute an older 0.2 installer for this launch.
 
 The owner has authorized direct beta downloads and a beta announcement; neither
 promotes the packages to stable. The Apple-silicon DMG is signed and notarized;

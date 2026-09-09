@@ -117,7 +117,7 @@ the same complete citation requirements as local results.
 
 **Refresh** checks the current user's registered MSIX applications, the saved
 Windows `PATH`, and the standard native and npm installation locations. This
-includes the CLI bundled with the Codex/ChatGPT desktop package, Claude Desktop,
+includes the registered Codex/ChatGPT desktop package, Claude Desktop,
 the native Claude Code and Codex installers, and global npm installations of
 Codex, Claude Code and Gemini CLI. It does not require an administrator session
 or inspect other Windows accounts.
@@ -125,14 +125,15 @@ or inspect other Windows accounts.
 For npm installations, AirWiki runs the installed package's entry point through
 its local Node.js runtime. It does not execute the extensionless Unix shim or
 interpret the `.cmd` launcher. If Node.js is missing, repair the Node.js/npm
-installation and refresh. A registered ChatGPT package without a compatible
-local CLI is reported as an incomplete/unsupported integration, not as a missing
-desktop app. A blocked Windows package query is reported as a retryable
+installation and refresh. When only the Codex/ChatGPT MSIX package is present,
+AirWiki uses its documented user `config.toml` instead of executing protected
+package binaries. Windows may deny those binaries even when the app is installed
+and readable. A blocked Windows package query is reported as a retryable
 detection error; independently detected command-line clients remain available.
 
 Detection does not connect an application or grant Wiki access. Select
 **Connect** and complete the existing confirmation after the client is available.
-The app must still support the MCP commands required by its integration.
+Command-line integrations must still support their required MCP commands.
 
 The installation layouts follow [npm's Windows folder conventions](https://docs.npmjs.com/cli/v11/configuring-npm/folders/),
 [Claude Code's native installer](https://code.claude.com/docs/en/troubleshoot-install#verify-your-path),
@@ -200,6 +201,17 @@ for at most 24 hours and is pruned on startup or the next request.
 
 Select **Connect**, review the global locations, and confirm. AirWiki uses the
 compatible CLI found on `PATH` to register a local MCP server named `airwiki`.
+For a Windows MSIX installation without an external CLI, it instead edits only
+`[mcp_servers.airwiki]` in `$CODEX_HOME/config.toml` (default
+`~/.codex/config.toml`), following the
+[official shared Codex configuration](https://learn.chatgpt.com/docs/extend/mcp).
+Other servers, settings and comments remain in place. Invalid TOML, nonstandard
+inline `mcp_servers` containers, linked paths, read-only files and concurrent
+edits fail without replacing the observed user configuration. Windows file
+replacement preserves existing security attributes and keeps a native backup
+if replacement has an ambiguous failure. In that case, stop editing the file,
+review the `.airwiki-codex-*.bak` copy beside it and recover the intended version
+before retrying; AirWiki never chooses between conflicting versions.
 A different entry with the same name is a conflict and is never overwritten.
 Managed bridge paths are content-addressed. A bridge from an earlier candidate
 appears as **Update available** only after its path and bytes pass integrity

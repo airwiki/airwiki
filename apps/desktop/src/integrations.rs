@@ -20,6 +20,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
+mod codex_config;
 mod discovery;
 
 use discovery::{ClientCommand, WindowsClients};
@@ -955,6 +956,21 @@ impl ChatIntegrationManager {
     }
 
     async fn inspect_chatgpt(&self) -> Result<IntegrationView> {
+        if let Some(path) = self.packaged_codex_config() {
+            let configured = codex_config::read_configuration(path).await?;
+            let classification = self
+                .classify_configuration_securely(
+                    configured.as_ref(),
+                    ChatClientKind::ChatGptDesktop,
+                )
+                .await?;
+            return Ok(classified_view(
+                ChatClientKind::ChatGptDesktop,
+                classification,
+                None,
+                Some(self.managed_bridge_path()),
+            ));
+        }
         let Some(codex) = self.find_codex()? else {
             return Ok(view(
                 ChatClientKind::ChatGptDesktop,
@@ -991,6 +1007,17 @@ impl ChatIntegrationManager {
     }
 
     async fn connect_chatgpt(&self) -> Result<()> {
+        if let Some(path) = self.packaged_codex_config() {
+            let current = codex_config::read_configuration(path).await?;
+            self.ensure_replaceable(current.as_ref(), ChatClientKind::ChatGptDesktop)
+                .await?;
+            let bridge = self.materialize_bridge().await?;
+            self.verify_bridge(&bridge, ChatClientKind::ChatGptDesktop)
+                .await?;
+            let desired = ManagedConfiguration::new(bridge, ChatClientKind::ChatGptDesktop);
+            return codex_config::replace_configuration(path, current.as_ref(), Some(&desired))
+                .await;
+        }
         let codex = self
             .find_codex()?
             .context("no se encontró una versión compatible de ChatGPT/Codex")?;
@@ -1035,6 +1062,18 @@ impl ChatIntegrationManager {
     }
 
     async fn disconnect_chatgpt(&self) -> Result<()> {
+        if let Some(path) = self.packaged_codex_config() {
+            let current = codex_config::read_configuration(path).await?;
+            let Some(current) = current else {
+                return Ok(());
+            };
+            ensure!(
+                self.configuration_is_securely_managed(&current, ChatClientKind::ChatGptDesktop)
+                    .await?,
+                "la entrada airwiki no pertenece a esta aplicación"
+            );
+            return codex_config::replace_configuration(path, Some(&current), None).await;
+        }
         let codex = self.find_codex()?.context("no se encontró ChatGPT/Codex")?;
         let current = self.codex_configuration(&codex).await?;
         let Some(current) = current else {
@@ -1047,6 +1086,19 @@ impl ChatIntegrationManager {
             bail!("la entrada airwiki no pertenece a esta aplicación")
         }
         self.codex_remove(&codex).await
+    }
+
+    fn packaged_codex_config(&self) -> Option<&Path> {
+        if self.environment.platform != HostPlatform::Windows
+            || !self.environment.discover_host_clients
+        {
+            return None;
+        }
+        self.environment
+            .windows_clients
+            .as_ref()?
+            .codex_config
+            .as_deref()
     }
 
     fn find_codex(&self) -> Result<Option<ClientCommand>> {
@@ -2773,6 +2825,70 @@ mod tests {
             "startup_timeout_sec": null,
             "tool_timeout_sec": null
         })
+    }
+
+    fn msix_manager(temp: &TempDir, runner: Arc<RecordingRunner>) -> ChatIntegrationManager {
+        let executable = temp.path().join("airwiki-desktop");
+        std::fs::write(&executable, b"desktop").unwrap();
+        let bundled = temp
+            .path()
+            .join("integrations/bridge")
+            .join(bridge_filename());
+        std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+        std::fs::write(&bundled, b"trusted bridge").unwrap();
+        let mut manager = test_manager(temp, executable);
+        manager.environment.platform = HostPlatform::Windows;
+        manager.environment.discover_host_clients = true;
+        manager.environment.windows_clients = Some(WindowsClients {
+            codex: Ok(None),
+            codex_config: Some(manager.environment.home.join(".codex/config.toml")),
+            claude_code: Ok(None),
+            gemini: Ok(None),
+            claude_desktop: Ok(None),
+        });
+        manager.runner = runner;
+        manager
+    }
+
+    #[tokio::test]
+    async fn msix_connect_and_disconnect_only_run_the_verified_bridge() {
+        let temp = TempDir::new().unwrap();
+        let runner = Arc::new(RecordingRunner {
+            specs: Mutex::new(Vec::new()),
+            outputs: Mutex::new(vec![CommandOutput {
+                success: true,
+                stdout: tools_list_output(),
+                _stderr: Vec::new(),
+            }]),
+        });
+        let manager = msix_manager(&temp, runner.clone());
+        manager.connect_chatgpt().await.unwrap();
+        assert_eq!(
+            manager.inspect_chatgpt().await.unwrap().status,
+            IntegrationStatus::Configured
+        );
+        {
+            let specs = runner.specs.lock().unwrap();
+            assert_eq!(specs.len(), 1);
+            assert_eq!(
+                specs.first().unwrap().executable,
+                manager.managed_bridge_path()
+            );
+        }
+        manager.disconnect_chatgpt().await.unwrap();
+        assert_eq!(
+            manager.inspect_chatgpt().await.unwrap().status,
+            IntegrationStatus::Available
+        );
+        assert_eq!(runner.specs.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn failed_bridge_verification_does_not_write_msix_configuration() {
+        let temp = TempDir::new().unwrap();
+        let manager = msix_manager(&temp, Arc::new(RecordingRunner::default()));
+        assert!(manager.connect_chatgpt().await.is_err());
+        assert!(!manager.packaged_codex_config().unwrap().exists());
     }
 
     #[derive(Default)]

@@ -11,6 +11,8 @@ publication completes.
 
 - Detect Windows AI applications installed through MSIX, native installers or
   npm, including tools added to the saved Windows PATH after AirWiki started.
+  Configure Codex/ChatGPT MSIX through its shared user TOML file when no external
+  CLI is present, so Windows package execution restrictions do not block setup.
   Resolve npm entry points through Node.js and keep missing-runtime or blocked
   inventory errors distinct from an application that is not installed.
 

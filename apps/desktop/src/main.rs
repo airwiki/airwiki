@@ -3030,7 +3030,7 @@ async fn manage_integration(
 const fn integration_confirmation_detail(client: IntegrationClientDto) -> &'static str {
     match client {
         IntegrationClientDto::ChatGptDesktop => {
-            "ChatGPT/Codex\n• ~/.agents/skills/airwiki/\n• $CODEX_HOME/AirWiki.md\n• $CODEX_HOME/AGENTS.md"
+            "ChatGPT/Codex\n• $CODEX_HOME/config.toml (mcp_servers.airwiki)\n• ~/.agents/skills/airwiki/\n• $CODEX_HOME/AirWiki.md\n• $CODEX_HOME/AGENTS.md"
         }
         IntegrationClientDto::ClaudeCode => {
             "Claude Code\n• $CLAUDE_CONFIG_DIR/skills/airwiki/\n• $CLAUDE_CONFIG_DIR/AirWiki.md\n• $CLAUDE_CONFIG_DIR/CLAUDE.md"

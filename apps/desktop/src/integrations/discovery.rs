@@ -30,6 +30,7 @@ type Detection<T> = std::result::Result<Option<T>, &'static str>;
 #[derive(Debug, Clone)]
 pub(super) struct WindowsClients {
     pub(super) codex: Detection<ClientCommand>,
+    pub(super) codex_config: Option<PathBuf>,
     pub(super) claude_code: Detection<ClientCommand>,
     pub(super) gemini: Detection<ClientCommand>,
     pub(super) claude_desktop: Detection<PathBuf>,
@@ -38,6 +39,7 @@ pub(super) struct WindowsClients {
 #[derive(Debug)]
 struct WindowsPaths {
     home: PathBuf,
+    codex_home: Option<PathBuf>,
     search: Vec<PathBuf>,
     local_app_data: PathBuf,
     app_data: PathBuf,
@@ -63,6 +65,7 @@ pub(super) async fn refresh_windows(
 ) -> Result<WindowsClients> {
     let home = environment.home.clone();
     let paths = WindowsPaths {
+        codex_home: std::env::var_os("CODEX_HOME").map(PathBuf::from),
         local_app_data: std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(|| home.join("AppData/Local")),
@@ -104,7 +107,7 @@ pub(super) async fn refresh_windows(
         .map_err(|_| anyhow::anyhow!("no se pudo completar la detección de aplicaciones"))
 }
 
-fn local_absolute(path: &Path) -> bool {
+pub(super) fn local_absolute(path: &Path) -> bool {
     if !path.is_absolute() {
         return false;
     }
@@ -144,14 +147,18 @@ fn resolve_windows(mut paths: WindowsPaths, inventory: Option<WindowsInventory>)
     let codex = find_windows_cli("codex", "@openai/codex", &paths.search);
     let claude_code = find_windows_cli("claude", "@anthropic-ai/claude-code", &paths.search);
     let gemini = find_windows_cli("gemini", "@google/gemini-cli", &paths.search);
-    let codex = if matches!(codex, Ok(None)) {
-        find_packaged_codex(&inventory.packages, inventory_failed)
+    let (codex, codex_config) = if matches!(codex, Ok(None)) {
+        match find_packaged_codex_config(&paths, &inventory.packages, inventory_failed) {
+            Ok(config) => (codex, config),
+            Err(error) => (Err(error), None),
+        }
     } else {
-        codex
+        (codex, None)
     };
     let claude_desktop = find_windows_claude(&paths, &inventory.packages, inventory_failed);
     WindowsClients {
         codex,
+        codex_config,
         claude_code,
         gemini,
         claude_desktop,
@@ -224,19 +231,27 @@ fn npm_entry_point(root: &Path, name: &str, package: &str) -> Option<PathBuf> {
     (entry.starts_with(&root) && entry.is_file()).then_some(entry)
 }
 
-fn find_packaged_codex(packages: &[InstalledPackage], failed: bool) -> Detection<ClientCommand> {
-    for package in packages.iter().filter(|package| {
+fn find_packaged_codex_config(
+    paths: &WindowsPaths,
+    packages: &[InstalledPackage],
+    failed: bool,
+) -> Detection<PathBuf> {
+    // MSIX registration proves installation, not permission to execute files
+    // inside WindowsApps. Use Codex's documented user configuration instead.
+    if packages.iter().any(|package| {
         matches!(
             package.name.as_str(),
             "OpenAI.Codex" | "OpenAI.ChatGPT-Desktop"
         ) && local_absolute(&package.location)
     }) {
-        for relative in ["app/resources/codex.exe", "app/resources/bin/codex.exe"] {
-            let executable = package.location.join(relative);
-            if local_file(&executable) {
-                return Ok(Some(ClientCommand::native(executable)));
-            }
+        let root = paths
+            .codex_home
+            .clone()
+            .unwrap_or_else(|| paths.home.join(".codex"));
+        if !local_absolute(&root) {
+            return Err("La configuración de Codex debe usar una ruta local absoluta.");
         }
+        return Ok(Some(root.join("config.toml")));
     }
     if packages.iter().any(|package| {
         matches!(
@@ -245,7 +260,7 @@ fn find_packaged_codex(packages: &[InstalledPackage], failed: bool) -> Detection
         )
     }) {
         return Err(
-            "ChatGPT/Codex está instalado, pero este paquete no contiene una CLI local compatible.",
+            "Windows devolvió una ubicación no compatible para Codex; actualiza el estado.",
         );
     }
     if failed {
@@ -340,6 +355,7 @@ mod tests {
     fn fixture_paths(temp: &TempDir) -> WindowsPaths {
         let root = std::fs::canonicalize(temp.path()).unwrap();
         WindowsPaths {
+            codex_home: None,
             home: root.join("User with spaces & accents é"),
             local_app_data: root.join("redirected-local"),
             app_data: root.join("redirected-roaming"),
@@ -455,6 +471,7 @@ mod tests {
         let claude_root = temp.path().join("WindowsApps/Claude_1.0_x64");
         let codex = codex_root.join("app/resources/codex.exe");
         let claude = claude_root.join("app/Claude.exe");
+        let config = paths.home.join(".codex/config.toml");
         file(&codex);
         file(&claude);
         let found = resolve_windows(
@@ -475,7 +492,8 @@ mod tests {
                 ],
             }),
         );
-        assert_eq!(found.codex.unwrap(), Some(ClientCommand::native(codex)));
+        assert_eq!(found.codex.unwrap(), None);
+        assert_eq!(found.codex_config, Some(config));
         assert_eq!(found.claude_desktop.unwrap(), Some(claude));
     }
 
@@ -596,7 +614,41 @@ mod tests {
                 }],
             }),
         );
-        assert!(found.codex.unwrap_err().contains("está instalado"));
+        assert_eq!(found.codex.unwrap(), None);
+        assert_eq!(
+            found.codex_config,
+            Some(fixture_paths(&temp).home.join(".codex/config.toml"))
+        );
+    }
+
+    #[test]
+    fn msix_configuration_respects_codex_home_and_rejects_a_relative_override() {
+        let temp = TempDir::new().unwrap();
+        for root in [
+            temp.path().join("custom Codex ñ"),
+            PathBuf::from("relative"),
+        ] {
+            let mut paths = fixture_paths(&temp);
+            paths.codex_home = Some(root.clone());
+            let found = resolve_windows(
+                paths,
+                Some(WindowsInventory {
+                    path_entries: Vec::new(),
+                    packages: vec![InstalledPackage {
+                        name: "OpenAI.Codex".into(),
+                        location: temp.path().to_path_buf(),
+                        executables: Vec::new(),
+                    }],
+                }),
+            );
+            if root.is_absolute() {
+                assert_eq!(found.codex_config, Some(root.join("config.toml")));
+                assert_eq!(found.codex.unwrap(), None);
+            } else {
+                assert!(found.codex.is_err());
+                assert!(found.codex_config.is_none());
+            }
+        }
     }
 
     #[test]
@@ -662,7 +714,8 @@ mod tests {
         manager.environment.platform = HostPlatform::Windows;
         manager.environment.discover_host_clients = true;
         manager.environment.windows_clients = Some(clients);
-        manager.runner = Arc::new(CliRunner::default());
+        let runner = Arc::new(CliRunner::default());
+        manager.runner = runner.clone();
         assert_eq!(
             manager.inspect_chatgpt().await.unwrap().status,
             IntegrationStatus::Available
@@ -670,6 +723,10 @@ mod tests {
         assert_eq!(
             manager.inspect_claude().await.unwrap().status,
             IntegrationStatus::Available
+        );
+        assert!(
+            runner.0.lock().unwrap().is_empty(),
+            "MSIX discovery must not spawn protected binaries"
         );
         assert!(
             !manager

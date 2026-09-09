@@ -6,7 +6,7 @@ Scope: the union of the transitive dependency closures of `airwiki-desktop`, `ai
 
 If a crate declares an SPDX expression but does not include a separate legal file, the inventory assigns the standard MIT/Apache text bundled by the project or an identical text found in another crate with the same expression. Each text lists its origin explicitly.
 
-Third-party packages: **702**. Unique legal texts: **389**.
+Third-party packages: **703**. Unique legal texts: **389**.
 
 ## Packages
 
@@ -572,6 +572,7 @@ Third-party packages: **702**. Unique legal texts: **389**.
 | toml | 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) | [6efb0476a1cc](#sha256-6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | toml_datetime | 0.7.5+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) | [6efb0476a1cc](#sha256-6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | toml_datetime | 1.1.1+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) | [6efb0476a1cc](#sha256-6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
+| toml_edit | 0.25.12+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) | [6efb0476a1cc](#sha256-6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | toml_parser | 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) | [6efb0476a1cc](#sha256-6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | toml_writer | 1.1.1+spec-1.1.0 | MIT OR Apache-2.0 | [upstream](https://github.com/toml-rs/toml) | [6efb0476a1cc](#sha256-6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6), [b40930bbcf80](#sha256-b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1) |
 | tower | 0.5.3 | MIT | [upstream](https://github.com/tower-rs/tower) | [4249c8e6c5eb](#sha256-4249c8e6c5ebb85f97c77e6457c6fafc1066406eb8f1ef61e796fbdc5ff18482) |
@@ -12781,6 +12782,7 @@ Used by:
 - `toml 1.1.2+spec-1.1.0 / LICENSE-MIT`
 - `toml_datetime 0.7.5+spec-1.1.0 / LICENSE-MIT`
 - `toml_datetime 1.1.1+spec-1.1.0 / LICENSE-MIT`
+- `toml_edit 0.25.12+spec-1.1.0 / LICENSE-MIT`
 - `toml_parser 1.1.2+spec-1.1.0 / LICENSE-MIT`
 - `toml_writer 1.1.1+spec-1.1.0 / LICENSE-MIT`
 
@@ -20493,6 +20495,7 @@ Used by:
 - `toml 1.1.2+spec-1.1.0 / LICENSE-APACHE`
 - `toml_datetime 0.7.5+spec-1.1.0 / LICENSE-APACHE`
 - `toml_datetime 1.1.1+spec-1.1.0 / LICENSE-APACHE`
+- `toml_edit 0.25.12+spec-1.1.0 / LICENSE-APACHE`
 - `toml_parser 1.1.2+spec-1.1.0 / LICENSE-APACHE`
 - `toml_writer 1.1.1+spec-1.1.0 / LICENSE-APACHE`
 - `unicode_categories 0.1.1 / LICENSE-APACHE`

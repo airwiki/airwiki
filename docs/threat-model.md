@@ -49,6 +49,14 @@ Controls are not considered effective end to end until the
    become subject to that account or workspace policy.
 7. **Desktop → operating system.** Tray, per-user autostart, and single-instance
    activation remain inside the user session; OS state is authoritative.
+   Windows AI-client discovery reads current-user package metadata and saved
+   PATH through a fixed, bounded, no-profile PowerShell query. Filesystem probes
+   run on the blocking worker; relative and network targets are not selected.
+   npm clients run through local Node.js with separate arguments and a bounded
+   package manifest whose entry point must remain inside the package. AirWiki
+   never evaluates a batch shim, installs a client, elevates discovery, or grants
+   Wiki access merely because an application was detected. Installed executables
+   remain trusted code of the signed-in OS account, as with existing CLI probes.
 8. **Desktop → elevated Windows helper.** The helper accepts only `install` or
    `remove` and owns two narrow application rules, as defined by
    [ADR 0006](adr/0006-windows-firewall-privilege-boundary.md).

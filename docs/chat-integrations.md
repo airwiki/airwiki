@@ -113,6 +113,34 @@ LAN identity comes from the authenticated transport and public provenance from
 verified signed manifests. Every remote result remains untrusted evidence with
 the same complete citation requirements as local results.
 
+## Windows application detection
+
+**Refresh** checks the current user's registered MSIX applications, the saved
+Windows `PATH`, and the standard native and npm installation locations. This
+includes the CLI bundled with the Codex/ChatGPT desktop package, Claude Desktop,
+the native Claude Code and Codex installers, and global npm installations of
+Codex, Claude Code and Gemini CLI. It does not require an administrator session
+or inspect other Windows accounts.
+
+For npm installations, AirWiki runs the installed package's entry point through
+its local Node.js runtime. It does not execute the extensionless Unix shim or
+interpret the `.cmd` launcher. If Node.js is missing, repair the Node.js/npm
+installation and refresh. A registered ChatGPT package without a compatible
+local CLI is reported as an incomplete/unsupported integration, not as a missing
+desktop app. A blocked Windows package query is reported as a retryable
+detection error; independently detected command-line clients remain available.
+
+Detection does not connect an application or grant Wiki access. Select
+**Connect** and complete the existing confirmation after the client is available.
+The app must still support the MCP commands required by its integration.
+
+The installation layouts follow [npm's Windows folder conventions](https://docs.npmjs.com/cli/v11/configuring-npm/folders/),
+[Claude Code's native installer](https://code.claude.com/docs/en/troubleshoot-install#verify-your-path),
+[Claude Desktop's MSIX deployment](https://support.claude.com/en/articles/12622703-deploy-claude-desktop-for-windows),
+and Windows' current-user [Get-AppxPackage](https://learn.microsoft.com/en-us/powershell/module/appx/get-appxpackage)
+inventory. Custom wrappers and WSL-only installations are not Windows-native
+clients; AirWiki does not invoke WSL or modify a distribution's configuration.
+
 ## Assisted-memory guide
 
 For Codex/ChatGPT, Claude Code and Gemini CLI, **Connect** uses one native

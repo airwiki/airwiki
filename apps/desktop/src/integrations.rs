@@ -20,6 +20,10 @@ use tokio::{
 };
 use uuid::Uuid;
 
+mod discovery;
+
+use discovery::{ClientCommand, WindowsClients};
+
 use crate::{
     paths::AppPaths,
     workflow_guides::{WorkflowChange, WorkflowClient, WorkflowGuideManager, WorkflowGuideView},
@@ -255,6 +259,8 @@ struct SystemCommandRunner;
 impl CommandRunner for SystemCommandRunner {
     async fn run(&self, spec: CommandSpec) -> Result<CommandOutput> {
         let mut command = Command::new(&spec.executable);
+        #[cfg(windows)]
+        command.creation_flags(windows::Win32::System::Threading::CREATE_NO_WINDOW.0);
         command
             .args(&spec.args)
             .envs(spec.environment)
@@ -393,6 +399,7 @@ struct IntegrationEnvironment {
     path_entries: Vec<PathBuf>,
     discover_host_clients: bool,
     current_exe: PathBuf,
+    windows_clients: Option<WindowsClients>,
 }
 
 impl IntegrationEnvironment {
@@ -419,6 +426,7 @@ impl IntegrationEnvironment {
             (home, path_entries, true)
         };
         Ok(Self {
+            windows_clients: None,
             platform,
             home,
             path_entries,
@@ -467,6 +475,17 @@ impl ChatIntegrationManager {
     }
 
     pub(crate) async fn execute(&self, action: IntegrationAction) -> Result<Vec<IntegrationView>> {
+        let mut refreshed = self.clone();
+        if self.environment.platform == HostPlatform::Windows
+            && self.environment.discover_host_clients
+        {
+            refreshed.environment.windows_clients =
+                Some(discovery::refresh_windows(&self.environment, self.runner.as_ref()).await?);
+        }
+        refreshed.execute_refreshed(action).await
+    }
+
+    async fn execute_refreshed(&self, action: IntegrationAction) -> Result<Vec<IntegrationView>> {
         match action {
             IntegrationAction::Refresh => {}
             IntegrationAction::Connect(client) => self.connect(client).await?,
@@ -936,7 +955,7 @@ impl ChatIntegrationManager {
     }
 
     async fn inspect_chatgpt(&self) -> Result<IntegrationView> {
-        let Some(codex) = self.find_codex() else {
+        let Some(codex) = self.find_codex()? else {
             return Ok(view(
                 ChatClientKind::ChatGptDesktop,
                 IntegrationStatus::NotInstalled,
@@ -973,7 +992,7 @@ impl ChatIntegrationManager {
 
     async fn connect_chatgpt(&self) -> Result<()> {
         let codex = self
-            .find_codex()
+            .find_codex()?
             .context("no se encontró una versión compatible de ChatGPT/Codex")?;
         if !self.codex_supported(&codex).await? {
             bail!("actualiza ChatGPT Desktop antes de conectar AirWiki")
@@ -1016,7 +1035,7 @@ impl ChatIntegrationManager {
     }
 
     async fn disconnect_chatgpt(&self) -> Result<()> {
-        let codex = self.find_codex().context("no se encontró ChatGPT/Codex")?;
+        let codex = self.find_codex()?.context("no se encontró ChatGPT/Codex")?;
         let current = self.codex_configuration(&codex).await?;
         let Some(current) = current else {
             return Ok(());
@@ -1030,9 +1049,16 @@ impl ChatIntegrationManager {
         self.codex_remove(&codex).await
     }
 
-    fn find_codex(&self) -> Option<PathBuf> {
+    fn find_codex(&self) -> Result<Option<ClientCommand>> {
         if !self.environment.discover_host_clients {
-            return None;
+            return Ok(None);
+        }
+        if self.environment.platform == HostPlatform::Windows {
+            return self
+                .windows_clients()?
+                .codex
+                .clone()
+                .map_err(anyhow::Error::msg);
         }
         let mut candidates = program_candidates("codex", &self.environment.path_entries);
         if self.environment.platform == HostPlatform::MacOs {
@@ -1043,26 +1069,38 @@ impl ChatIntegrationManager {
                     .join("Applications/ChatGPT.app/Contents/Resources/codex"),
             ]);
         }
-        candidates.into_iter().find(|path| path.is_file())
+        Ok(candidates
+            .into_iter()
+            .find(|path| path.is_file())
+            .map(ClientCommand::native))
     }
 
-    async fn codex_supported(&self, codex: &Path) -> Result<bool> {
+    fn windows_clients(&self) -> Result<&WindowsClients> {
+        self.environment
+            .windows_clients
+            .as_ref()
+            .context("la detección de aplicaciones de Windows todavía no se ha actualizado")
+    }
+
+    async fn codex_supported(&self, codex: &ClientCommand) -> Result<bool> {
         let output = self
             .runner
-            .run(CommandSpec::new(codex.to_path_buf()).args(["mcp", "get", "--help"]))
+            .run(codex.command().args(["mcp", "get", "--help"]))
             .await?;
         Ok(output.success && output.stdout_text()?.contains("--json"))
     }
 
-    async fn codex_configuration(&self, codex: &Path) -> Result<Option<ManagedConfiguration>> {
+    async fn codex_configuration(
+        &self,
+        codex: &ClientCommand,
+    ) -> Result<Option<ManagedConfiguration>> {
         let output = self
             .runner
-            .run(CommandSpec::new(codex.to_path_buf()).args([
-                "mcp",
-                "get",
-                INTEGRATION_NAME,
-                "--json",
-            ]))
+            .run(
+                codex
+                    .command()
+                    .args(["mcp", "get", INTEGRATION_NAME, "--json"]),
+            )
             .await?;
         if !output.success {
             if codex_reports_missing(output.stderr_text()?) {
@@ -1075,7 +1113,7 @@ impl ChatIntegrationManager {
         Ok(Some(parse_codex_configuration(&value)))
     }
 
-    async fn codex_add(&self, codex: &Path, bridge: &Path) -> Result<()> {
+    async fn codex_add(&self, codex: &ClientCommand, bridge: &Path) -> Result<()> {
         self.codex_add_configuration(
             codex,
             &ManagedConfiguration::new(bridge.to_path_buf(), ChatClientKind::ChatGptDesktop),
@@ -1085,7 +1123,7 @@ impl ChatIntegrationManager {
 
     async fn codex_add_configuration(
         &self,
-        codex: &Path,
+        codex: &ClientCommand,
         configuration: &ManagedConfiguration,
     ) -> Result<()> {
         let mut args = vec![
@@ -1096,20 +1134,17 @@ impl ChatIntegrationManager {
             configuration.command.as_os_str().to_owned(),
         ];
         args.extend(configuration.args.iter().cloned().map(OsString::from));
-        let output = self
-            .runner
-            .run(CommandSpec::new(codex.to_path_buf()).args(args))
-            .await?;
+        let output = self.runner.run(codex.command().args(args)).await?;
         if !output.success {
             bail!("ChatGPT no pudo guardar la integración")
         }
         Ok(())
     }
 
-    async fn codex_remove(&self, codex: &Path) -> Result<()> {
+    async fn codex_remove(&self, codex: &ClientCommand) -> Result<()> {
         let output = self
             .runner
-            .run(CommandSpec::new(codex.to_path_buf()).args(["mcp", "remove", INTEGRATION_NAME]))
+            .run(codex.command().args(["mcp", "remove", INTEGRATION_NAME]))
             .await?;
         if !output.success {
             bail!("ChatGPT no pudo quitar la integración")
@@ -1119,7 +1154,7 @@ impl ChatIntegrationManager {
 
     async fn rollback_codex(
         &self,
-        codex: &Path,
+        codex: &ClientCommand,
         attempted_bridge: &Path,
         previous: Option<&ManagedConfiguration>,
     ) -> Result<()> {
@@ -1139,7 +1174,7 @@ impl ChatIntegrationManager {
     }
 
     async fn inspect_claude_code(&self) -> Result<IntegrationView> {
-        let Some(claude) = self.find_claude_code() else {
+        let Some(claude) = self.find_claude_code()? else {
             return Ok(view(
                 ChatClientKind::ClaudeCode,
                 IntegrationStatus::NotInstalled,
@@ -1175,7 +1210,7 @@ impl ChatIntegrationManager {
 
     async fn connect_claude_code(&self) -> Result<()> {
         let claude = self
-            .find_claude_code()
+            .find_claude_code()?
             .context("no se encontró Claude Code")?;
         if !self.claude_code_supported(&claude).await? {
             bail!("actualiza Claude Code antes de conectar AirWiki")
@@ -1223,7 +1258,7 @@ impl ChatIntegrationManager {
 
     async fn disconnect_claude_code(&self) -> Result<()> {
         let claude = self
-            .find_claude_code()
+            .find_claude_code()?
             .context("no se encontró Claude Code")?;
         let Some(current) = self.claude_code_configuration(&claude).await? else {
             return Ok(());
@@ -1237,17 +1272,38 @@ impl ChatIntegrationManager {
         self.claude_code_remove(&claude).await
     }
 
-    fn find_claude_code(&self) -> Option<PathBuf> {
+    fn find_claude_code(&self) -> Result<Option<ClientCommand>> {
         if !self.environment.discover_host_clients {
-            return None;
+            return Ok(None);
         }
-        find_program("claude", &self.environment.path_entries)
+        if self.environment.platform == HostPlatform::Windows {
+            return self
+                .windows_clients()?
+                .claude_code
+                .clone()
+                .map_err(anyhow::Error::msg);
+        }
+        Ok(find_program("claude", &self.environment.path_entries).map(ClientCommand::native))
     }
 
-    async fn claude_code_supported(&self, claude: &Path) -> Result<bool> {
+    fn find_gemini(&self) -> Result<Option<ClientCommand>> {
+        if !self.environment.discover_host_clients {
+            return Ok(None);
+        }
+        if self.environment.platform == HostPlatform::Windows {
+            return self
+                .windows_clients()?
+                .gemini
+                .clone()
+                .map_err(anyhow::Error::msg);
+        }
+        Ok(find_program("gemini", &self.environment.path_entries).map(ClientCommand::native))
+    }
+
+    async fn claude_code_supported(&self, claude: &ClientCommand) -> Result<bool> {
         let output = self
             .runner
-            .run(CommandSpec::new(claude.to_path_buf()).args(["mcp", "add", "--help"]))
+            .run(claude.command().args(["mcp", "add", "--help"]))
             .await?;
         let help = output.stdout_text()?;
         Ok(output.success && help.contains("--scope") && help.contains("--transport"))
@@ -1255,12 +1311,12 @@ impl ChatIntegrationManager {
 
     async fn claude_code_configuration(
         &self,
-        claude: &Path,
+        claude: &ClientCommand,
     ) -> Result<Option<ManagedConfiguration>> {
         let output = self
             .runner
             .run(home_environment(
-                CommandSpec::new(claude.to_path_buf()).args(["mcp", "get", INTEGRATION_NAME]),
+                claude.command().args(["mcp", "get", INTEGRATION_NAME]),
                 &self.environment.home,
             ))
             .await?;
@@ -1273,7 +1329,7 @@ impl ChatIntegrationManager {
         Ok(Some(parse_claude_code_configuration(output.stdout_text()?)))
     }
 
-    async fn claude_code_add(&self, claude: &Path, bridge: &Path) -> Result<()> {
+    async fn claude_code_add(&self, claude: &ClientCommand, bridge: &Path) -> Result<()> {
         self.claude_code_add_configuration(
             claude,
             &ManagedConfiguration::new(bridge.to_path_buf(), ChatClientKind::ClaudeCode),
@@ -1283,7 +1339,7 @@ impl ChatIntegrationManager {
 
     async fn claude_code_add_configuration(
         &self,
-        claude: &Path,
+        claude: &ClientCommand,
         configuration: &ManagedConfiguration,
     ) -> Result<()> {
         let mut args = vec![
@@ -1301,7 +1357,7 @@ impl ChatIntegrationManager {
         let output = self
             .runner
             .run(home_environment(
-                CommandSpec::new(claude.to_path_buf()).args(args),
+                claude.command().args(args),
                 &self.environment.home,
             ))
             .await?;
@@ -1311,17 +1367,13 @@ impl ChatIntegrationManager {
         Ok(())
     }
 
-    async fn claude_code_remove(&self, claude: &Path) -> Result<()> {
+    async fn claude_code_remove(&self, claude: &ClientCommand) -> Result<()> {
         let output = self
             .runner
             .run(home_environment(
-                CommandSpec::new(claude.to_path_buf()).args([
-                    "mcp",
-                    "remove",
-                    "--scope",
-                    "user",
-                    INTEGRATION_NAME,
-                ]),
+                claude
+                    .command()
+                    .args(["mcp", "remove", "--scope", "user", INTEGRATION_NAME]),
                 &self.environment.home,
             ))
             .await?;
@@ -1333,7 +1385,7 @@ impl ChatIntegrationManager {
 
     async fn rollback_claude_code(
         &self,
-        claude: &Path,
+        claude: &ClientCommand,
         attempted_bridge: &Path,
         previous: Option<&ManagedConfiguration>,
     ) -> Result<()> {
@@ -1353,7 +1405,7 @@ impl ChatIntegrationManager {
     }
 
     async fn inspect_gemini(&self) -> Result<IntegrationView> {
-        let Some(gemini) = find_program("gemini", &self.environment.path_entries) else {
+        let Some(gemini) = self.find_gemini()? else {
             return Ok(view(
                 ChatClientKind::GeminiCli,
                 IntegrationStatus::NotInstalled,
@@ -1461,8 +1513,7 @@ impl ChatIntegrationManager {
     }
 
     async fn connect_gemini(&self) -> Result<()> {
-        let gemini = find_program("gemini", &self.environment.path_entries)
-            .context("no se encontró Gemini CLI")?;
+        let gemini = self.find_gemini()?.context("no se encontró Gemini CLI")?;
         if !self.gemini_supported(&gemini).await? {
             bail!("actualiza Gemini CLI antes de conectar AirWiki")
         }
@@ -1513,8 +1564,7 @@ impl ChatIntegrationManager {
     }
 
     async fn disconnect_gemini(&self) -> Result<()> {
-        let gemini = find_program("gemini", &self.environment.path_entries)
-            .context("no se encontró Gemini CLI")?;
+        let gemini = self.find_gemini()?.context("no se encontró Gemini CLI")?;
         let current = self.gemini_configuration(&self.environment.home).await?;
         let Some(current) = current else {
             return Ok(());
@@ -1528,10 +1578,10 @@ impl ChatIntegrationManager {
         self.gemini_remove(&gemini, &self.environment.home).await
     }
 
-    async fn gemini_supported(&self, gemini: &Path) -> Result<bool> {
+    async fn gemini_supported(&self, gemini: &ClientCommand) -> Result<bool> {
         let output = self
             .runner
-            .run(CommandSpec::new(gemini.to_path_buf()).args(["mcp", "add", "--help"]))
+            .run(gemini.command().args(["mcp", "add", "--help"]))
             .await?;
         let help = output.stdout_text()?;
         Ok(output.success
@@ -1540,7 +1590,7 @@ impl ChatIntegrationManager {
             && help.contains("--include-tools"))
     }
 
-    async fn probe_gemini(&self, gemini: &Path) -> Result<GeminiAddSyntax> {
+    async fn probe_gemini(&self, gemini: &ClientCommand) -> Result<GeminiAddSyntax> {
         let probe_home =
             std::env::temp_dir().join(format!("airwiki-gemini-probe-{}", Uuid::new_v4()));
         fs::create_dir_all(&probe_home)
@@ -1594,7 +1644,7 @@ impl ChatIntegrationManager {
 
     async fn gemini_add(
         &self,
-        gemini: &Path,
+        gemini: &ClientCommand,
         bridge: &Path,
         home: &Path,
         syntax: GeminiAddSyntax,
@@ -1610,7 +1660,7 @@ impl ChatIntegrationManager {
 
     async fn gemini_add_configuration(
         &self,
-        gemini: &Path,
+        gemini: &ClientCommand,
         configuration: &ManagedConfiguration,
         home: &Path,
         syntax: GeminiAddSyntax,
@@ -1618,10 +1668,7 @@ impl ChatIntegrationManager {
         let args = gemini_add_args(configuration, syntax);
         let output = self
             .runner
-            .run(home_environment(
-                CommandSpec::new(gemini.to_path_buf()).args(args),
-                home,
-            ))
+            .run(home_environment(gemini.command().args(args), home))
             .await?;
         if !output.success {
             bail!("Gemini CLI no pudo guardar la integración")
@@ -1629,17 +1676,13 @@ impl ChatIntegrationManager {
         Ok(())
     }
 
-    async fn gemini_remove(&self, gemini: &Path, home: &Path) -> Result<()> {
+    async fn gemini_remove(&self, gemini: &ClientCommand, home: &Path) -> Result<()> {
         let output = self
             .runner
             .run(home_environment(
-                CommandSpec::new(gemini.to_path_buf()).args([
-                    "mcp",
-                    "remove",
-                    "--scope",
-                    "user",
-                    INTEGRATION_NAME,
-                ]),
+                gemini
+                    .command()
+                    .args(["mcp", "remove", "--scope", "user", INTEGRATION_NAME]),
                 home,
             ))
             .await?;
@@ -1651,7 +1694,7 @@ impl ChatIntegrationManager {
 
     async fn rollback_gemini(
         &self,
-        gemini: &Path,
+        gemini: &ClientCommand,
         attempted_bridge: &Path,
         previous: Option<&ManagedConfiguration>,
         syntax: GeminiAddSyntax,
@@ -1673,7 +1716,7 @@ impl ChatIntegrationManager {
     }
 
     async fn inspect_claude(&self) -> Result<IntegrationView> {
-        let Some(application) = self.find_claude() else {
+        let Some(application) = self.find_claude()? else {
             return Ok(view(
                 ChatClientKind::ClaudeDesktop,
                 IntegrationStatus::NotInstalled,
@@ -1706,7 +1749,7 @@ impl ChatIntegrationManager {
     }
 
     async fn open_claude_bundle(&self) -> Result<()> {
-        self.find_claude()
+        self.find_claude()?
             .context("no se encontró Claude Desktop")?;
         let bundle = self
             .bundled_claude_mcpb()
@@ -1716,14 +1759,14 @@ impl ChatIntegrationManager {
 
     async fn open_claude_settings(&self) -> Result<()> {
         let application = self
-            .find_claude()
+            .find_claude()?
             .context("no se encontró Claude Desktop")?;
         self.opener.open(&application).await
     }
 
-    fn find_claude(&self) -> Option<PathBuf> {
+    fn find_claude(&self) -> Result<Option<PathBuf>> {
         if !self.environment.discover_host_clients {
-            return None;
+            return Ok(None);
         }
         let candidates = match self.environment.platform {
             HostPlatform::MacOs => vec![
@@ -1731,23 +1774,21 @@ impl ChatIntegrationManager {
                 self.environment.home.join("Applications/Claude.app"),
             ],
             HostPlatform::Windows => {
-                let mut paths = Vec::new();
-                if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-                    let base = PathBuf::from(local_app_data);
-                    paths.push(base.join("Programs/Claude/Claude.exe"));
-                    paths.push(base.join("AnthropicClaude/Claude.exe"));
-                }
-                paths
+                return self
+                    .windows_clients()?
+                    .claude_desktop
+                    .clone()
+                    .map_err(anyhow::Error::msg);
             }
             HostPlatform::Unsupported => Vec::new(),
         };
-        candidates.into_iter().find(|path| path.exists())
+        Ok(candidates.into_iter().find(|path| path.exists()))
     }
 
-    async fn program_version(&self, executable: &Path) -> Option<String> {
+    async fn program_version(&self, executable: &ClientCommand) -> Option<String> {
         let output = self
             .runner
-            .run(CommandSpec::new(executable.to_path_buf()).args(["--version"]))
+            .run(executable.command().args(["--version"]))
             .await
             .ok()?;
         if !output.success {
@@ -2773,7 +2814,7 @@ mod tests {
         }
     }
 
-    fn test_manager(temp: &TempDir, current_exe: PathBuf) -> ChatIntegrationManager {
+    pub(super) fn test_manager(temp: &TempDir, current_exe: PathBuf) -> ChatIntegrationManager {
         let root = std::fs::canonicalize(temp.path()).unwrap();
         let paths = AppPaths {
             data: root.join("data"),
@@ -2789,6 +2830,7 @@ mod tests {
                 path_entries: Vec::new(),
                 discover_host_clients: false,
                 current_exe: current_exe.clone(),
+                windows_clients: None,
             },
             bundled_bridge_digest: None,
             runner: Arc::new(RecordingRunner::default()),
@@ -3127,7 +3169,7 @@ mod tests {
 
         manager
             .claude_code_add_configuration(
-                &claude,
+                &ClientCommand::native(claude.clone()),
                 &ManagedConfiguration::new(bridge.clone(), ChatClientKind::ClaudeCode),
             )
             .await
@@ -3318,6 +3360,7 @@ mod tests {
                 path_entries: Vec::new(),
                 discover_host_clients: false,
                 current_exe: executable.clone(),
+                windows_clients: None,
             },
             bundled_bridge_digest: None,
             runner,
